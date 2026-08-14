@@ -1,0 +1,46 @@
+# R-14 / 设计稿 22.3.3：换行符统一为 LF
+#
+# 原因：CRLF 混入 shell 脚本会导致 Linux 上 `bad interpreter`；混入视觉回归
+# 快照会导致像素比对之外的误报。开发在 Windows、运行在 Linux，必须由 git
+# 强制而不是靠每个人的编辑器设置。
+
+* text=auto eol=lf
+
+# 明确要求 LF 的文本类型
+*.ts      text eol=lf
+*.tsx     text eol=lf
+*.mts     text eol=lf
+*.js      text eol=lf
+*.mjs     text eol=lf
+*.cjs     text eol=lf
+*.json    text eol=lf
+*.jsonc   text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.md      text eol=lf
+*.sql     text eol=lf
+*.css     text eol=lf
+*.html    text eol=lf
+*.svg     text eol=lf
+*.sh      text eol=lf
+Dockerfile        text eol=lf
+Dockerfile.*      text eol=lf
+.gitattributes    text eol=lf
+.gitignore        text eol=lf
+.npmrc            text eol=lf
+.editorconfig     text eol=lf
+
+# 二进制资源不做换行转换，也不做 diff
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.webp    binary
+*.pdf     binary
+*.ico     binary
+*.woff    binary
+*.woff2   binary
+*.ttf     binary
+*.otf     binary
+
+# 锁文件与视觉基线不参与 code review diff，但仍是文本
+pnpm-lock.yaml    text eol=lf -diff linguist-generated

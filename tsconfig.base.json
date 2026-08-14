@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+
+    // R-14 / 设计稿 22.3.3：Windows 文件系统不区分大小写，
+    // `import './TravelCard'` 引用 `travelCard.tsx` 在本地能跑，在 Linux 上构建直接失败。
+    // TS 5 起该项默认为 true，这里显式声明以防未来默认值变动，并作为该护栏的文档锚点。
+    "forceConsistentCasingInFileNames": true,
+
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+
+    // 不使用 composite/project references：Turborepo 的 `dependsOn: ["^build"]`
+    // 已经保证依赖包先构建出 .d.ts，pnpm 的 workspace 符号链接负责解析。
+    // 引入 composite 会让 `tsc --noEmit`（typecheck）无法使用，需要每个包多一份
+    // tsconfig，收益不足。
+    "incremental": true,
+
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+
+    "types": ["node"]
+  },
+  "exclude": ["node_modules", "dist", ".turbo", "coverage"]
+}

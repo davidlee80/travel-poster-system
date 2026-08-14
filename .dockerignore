@@ -1,0 +1,31 @@
+# 关键：绝不把宿主的 node_modules 拷进镜像（设计稿 22.3.2）。
+# Windows 上安装的 sharp / Chromium 等原生依赖是 win32 二进制，
+# 拷进 Linux 镜像后会以「找不到模块」或「非法指令」的形式失败。
+node_modules
+**/node_modules
+
+# 构建产物在镜像内重新生成
+dist
+**/dist
+.next
+**/.next
+.turbo
+**/.turbo
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# 无关文件
+.git
+.github
+docs
+coverage
+**/coverage
+**/__visual__
+.env
+.env.*
+*.log
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+infrastructure/docker-compose.yml

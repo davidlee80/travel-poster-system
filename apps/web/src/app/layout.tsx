@@ -1,0 +1,22 @@
+import type { Metadata, Viewport } from 'next';
+import type { ReactNode } from 'react';
+import './globals.css';
+
+export const metadata: Metadata = {
+  title: '旅行计划信息图',
+  description: '自动生成可浏览的旅行计划、每日信息图、PNG 长图与 PDF',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+};
+
+export default function RootLayout({ children }: { readonly children: ReactNode }) {
+  // lang 固定 zh-CN（设计稿 1.1 输出语言）
+  return (
+    <html lang="zh-CN">
+      <body>{children}</body>
+    </html>
+  );
+}

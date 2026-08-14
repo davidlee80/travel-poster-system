@@ -1,0 +1,34 @@
+/*
+ * 全局样式基线。
+ *
+ * 字体栈在 P1（TP-1-04）接入自托管的 Noto Sans SC / Noto Serif SC —— 见设计稿 17.5。
+ * 在那之前先用系统字体，不引用任何第三方字体 CDN（离线渲染会失败，
+ * 且违反二十章「不直接引用第三方地址」的同类理由）。
+ */
+
+:root {
+  --tps-font-sans:
+    system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB',
+    sans-serif;
+  --tps-text: #1a1a1a;
+  --tps-bg: #ffffff;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--tps-font-sans);
+  color: var(--tps-text);
+  background: var(--tps-bg);
+  -webkit-font-smoothing: antialiased;
+}

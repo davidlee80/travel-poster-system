@@ -1,0 +1,229 @@
+# PR 门禁（TP-0-04，设计稿 22.3.4）
+#
+# 原则：Linux 是唯一的正确性基准。开发可以在 Windows / macOS，但"本地跑通"
+# 不算通过 —— 只有这里全绿才算（实施计划 3.1 原则四）。
+#
+# 本文件覆盖 P0 需要的 Linux 验证项：
+#   L-01  ubuntu-latest 上 install + build
+#   L-02  tsc --noEmit（含 forceConsistentCasingInFileNames）
+#   L-03  镜像在 linux/amd64 构建成功
+#   L-09  全量迁移在 pgvector/pgvector:pg17 上执行成功（含三扩展）
+#
+# L-04～L-08、L-10 依赖 P1 才引入的 Playwright、字体与 sharp，
+# 在对应任务（TP-1-17～21、TP-5-12/13）落地时加入本文件。
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  NODE_VERSION: '24'
+  # 容器与 CI 统一 UTC，避免因运行环境时区不同产生行为差异
+  TZ: UTC
+
+jobs:
+  # ── L-01 / L-02：安装、类型检查、lint、测试、构建 ──────────
+  verify:
+    name: verify (lint / typecheck / test / build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # --frozen-lockfile：锁文件与清单不一致直接失败（L-01）
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      # L-02：包含 forceConsistentCasingInFileNames，
+      # 大小写不一致的 import 在此失败（Windows 本地不会报错）
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # `output: 'standalone'` 在 Windows 本地被平台开关跳过（符号链接需要
+      # 管理员权限），因此必须在 Linux 上显式确认产物布局与 web.Dockerfile
+      # 的 COPY 路径一致 —— 否则这个开关会掩盖生产构建失败。
+      - name: 验证 Next standalone 产物布局
+        run: |
+          test -f apps/web/.next/standalone/apps/web/server.js \
+            || { echo 'standalone 产物缺失或布局不符（web.Dockerfile 依赖此路径）'; exit 1; }
+          test -d apps/web/.next/static \
+            || { echo '.next/static 缺失（standalone 不含它，Dockerfile 需单独 COPY）'; exit 1; }
+          echo 'standalone 产物布局正确'
+
+  # ── TP-0-06 反向测试：护栏本身必须有效 ─────────────────────
+  guardrails:
+    name: guardrails (跨平台护栏反向测试)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # 一个只会被工具拦住、不会被人眼拦住的护栏，等于没有护栏。
+      # 这一步故意制造违规，确认工具真的会失败。
+      - name: 验证护栏有效性
+        run: pnpm verify:linux-guardrails
+
+  # ── L-09：迁移在真实 pgvector 镜像上执行 ───────────────────
+  migrations:
+    name: migrations (L-09 pgvector/pgvector:pg17)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        # 必须是 pgvector 镜像；官方 postgres 不含 vector 扩展，0001 会失败
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: tps
+          POSTGRES_PASSWORD: tps_ci
+          POSTGRES_DB: travel_poster_ci
+          TZ: UTC
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tps -d travel_poster_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://tps:tps_ci@localhost:5432/travel_poster_ci
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build @tps/db
+        run: pnpm --filter "@tps/db..." run build
+
+      - name: 空库迁移到最新版本
+        run: pnpm db:migrate
+
+      # 幂等性：重复执行不得再应用任何迁移
+      - name: 重复执行应为幂等
+        run: |
+          output=$(pnpm db:migrate)
+          echo "$output"
+          echo "$output" | grep -q '已是最新版本' \
+            || { echo '迁移不幂等：第二次执行仍尝试应用迁移'; exit 1; }
+
+      - name: db:status 应无漂移
+        run: pnpm db:status
+
+      - name: 确认三个扩展已装载
+        run: |
+          count=$(psql "$DATABASE_URL" -tAc \
+            "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','pgcrypto','citext')")
+          echo "extensions=$count"
+          test "$count" = "3" || { echo 'L-09 失败：三个必需扩展未全部装载'; exit 1; }
+
+  # ── L-03：四个镜像在 linux/amd64 构建 ──────────────────────
+  images:
+    name: images (L-03 linux/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: verify
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            dockerfile: deploy/images/node-service.Dockerfile
+            args: APP=api,PROBE_PORT=3001
+          - name: generation-worker
+            dockerfile: deploy/images/node-service.Dockerfile
+            args: APP=generation-worker,PROBE_PORT=3011
+          - name: retention-worker
+            dockerfile: deploy/images/node-service.Dockerfile
+            args: APP=retention-worker,PROBE_PORT=3013
+          - name: web
+            dockerfile: deploy/images/web.Dockerfile
+            args: ''
+          - name: render-worker
+            dockerfile: deploy/images/render-worker.Dockerfile
+            args: ''
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          build-args: ${{ matrix.args }}
+          push: false
+          load: true
+          tags: tps/${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+
+      # 镜像必须以非 root 运行（设计稿 22.3.1）
+      - name: 验证非 root 运行（UID 10001）
+        run: |
+          uid=$(docker run --rm --entrypoint id tps/${{ matrix.name }}:ci -u)
+          echo "uid=$uid"
+          test "$uid" = "10001" || { echo '镜像未以 UID 10001 运行'; exit 1; }
+
+      - name: 验证 TZ 与 LANG
+        run: |
+          docker run --rm --entrypoint sh tps/${{ matrix.name }}:ci -c \
+            'test "$TZ" = "UTC" || { echo "TZ 非 UTC: $TZ"; exit 1; }
+             case "$LANG" in C.UTF-8) ;; *) echo "LANG 非 C.UTF-8: $LANG"; exit 1;; esac
+             test -e /usr/share/zoneinfo/Asia/Shanghai || { echo "tzdata 缺失"; exit 1; }
+             echo ok'

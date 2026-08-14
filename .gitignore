@@ -1,0 +1,46 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 构建产物
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Turborepo
+.turbo/
+
+# 测试与覆盖率
+coverage/
+.vitest/
+test-results/
+playwright-report/
+
+# 视觉回归：基线入库（见 22.3.4 L-08），实际输出与差异图不入库
+**/__visual__/actual/
+**/__visual__/diff/
+
+# 本地环境
+.env
+.env.*
+!.env.example
+
+# 本地渲染输出
+/tmp/
+/.tmp/
+/out-fixtures/
+
+# 编辑器与操作系统
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+npm-debug.log*
+pnpm-debug.log*
