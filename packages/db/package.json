@@ -16,8 +16,9 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests",
-    "clean": "rimraf dist .turbo *.tsbuildinfo"
+    "test": "vitest run --exclude \"**/*.integration.test.ts\" --passWithNoTests",
+    "clean": "rimraf dist .turbo *.tsbuildinfo",
+    "test:integration": "vitest run src/**/*.integration.test.ts"
   },
   "dependencies": {
     "@tps/shared": "workspace:*",

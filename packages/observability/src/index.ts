@@ -16,6 +16,10 @@ export {
   metricsText,
   registerDefaultMetrics,
   registry,
+  type CounterMetric,
+  type GaugeMetric,
+  type HistogramMetric,
+  type Labels,
 } from './metrics.js';
 
 export { SpanStatusCode, currentTraceId, tracer, withSpan, type Span } from './tracing.js';

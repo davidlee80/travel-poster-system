@@ -25,6 +25,12 @@
     "dev": {
       "cache": false,
       "persistent": true
+    },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "cache": false,
+      "env": ["DATABASE_URL"]
     }
   }
 }

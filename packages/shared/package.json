@@ -20,6 +20,7 @@
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
     "pino": "^9.13.1"
   },
   "devDependencies": {

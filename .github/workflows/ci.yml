@@ -168,6 +168,12 @@ jobs:
           echo "extensions=$count"
           test "$count" = "3" || { echo 'L-09 失败：三个必需扩展未全部装载'; exit 1; }
 
+      # 数据库约束的反向测试（TP-1-30）。
+      # users 表的三个 shape 约束是身份数据正确性的最后防线，必须验证它们
+      # 真的会拒绝脏数据 —— 只靠应用层纪律保证鉴权行为是不可接受的。
+      - name: 集成测试（数据库约束）
+        run: pnpm test:integration
+
   # ── L-03：四个镜像在 linux/amd64 构建 ──────────────────────
   images:
     name: images (L-03 linux/amd64)

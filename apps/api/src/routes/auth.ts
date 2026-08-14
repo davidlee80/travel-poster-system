@@ -1,0 +1,298 @@
+import { z } from 'zod';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { COOKIE_NAMES, type QuotaGuard, cookieAttributes } from '@tps/shared';
+import { buildErrorBody, errorDefinition, type ErrorCode } from '../errors/codes.js';
+import { recordIdentityEvent, recordIdentityType } from '../identity/metrics.js';
+import type { CookieMutation, Identity, IdentityService } from '../identity/service.js';
+
+/**
+ * 身份与账号端点（设计稿 13.9）。
+ *
+ * 只做三件事：解析 HTTP、调用 IdentityService、写响应。
+ * 全部业务判断在 service 层，因此这一层的测试只需覆盖 HTTP 映射
+ * （状态码、Cookie 头、错误体形态），业务分支由 service.test.ts 穷尽覆盖。
+ */
+
+const RegisterBodySchema = z.object({
+  email: z.string().trim().toLowerCase().pipe(z.email('邮箱格式不正确')),
+  password: z.string().min(1),
+  display_name: z.string().trim().max(100).nullable().optional(),
+});
+
+const LoginBodySchema = z.object({
+  email: z.string().trim().toLowerCase().pipe(z.email('邮箱格式不正确')),
+  password: z.string().min(1),
+});
+
+export interface AuthRoutesDeps {
+  readonly identity: IdentityService;
+  readonly quota: QuotaGuard;
+  readonly secureCookies: boolean;
+}
+
+/** 解析 Cookie 头。不引入 @fastify/cookie：只需读两个固定名字。 */
+export function parseCookies(header: string | undefined): Record<string, string> {
+  if (header === undefined || header.length === 0) return {};
+
+  const out: Record<string, string> = {};
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) continue;
+    const name = part.slice(0, eq).trim();
+    const value = part.slice(eq + 1).trim();
+    if (name.length > 0) out[name] = decodeURIComponent(value);
+  }
+  return out;
+}
+
+function applyCookies(
+  reply: FastifyReply,
+  mutations: readonly CookieMutation[],
+  secure: boolean,
+): void {
+  for (const mutation of mutations) {
+    const attrs = cookieAttributes(mutation.maxAgeSeconds, secure);
+    const segments = [
+      `${mutation.name}=${mutation.value === null ? '' : encodeURIComponent(mutation.value)}`,
+      `Path=${attrs.path}`,
+      `Max-Age=${mutation.value === null ? 0 : attrs.maxAge}`,
+      'HttpOnly',
+      'SameSite=Lax',
+    ];
+    if (attrs.secure) segments.push('Secure');
+    if (mutation.value === null) segments.push('Expires=Thu, 01 Jan 1970 00:00:00 GMT');
+
+    // 一次响应可能设置多个 Cookie，必须追加而非覆盖
+    const existing = reply.getHeader('set-cookie');
+    const next = segments.join('; ');
+    if (existing === undefined) {
+      reply.header('set-cookie', next);
+    } else if (Array.isArray(existing)) {
+      reply.header('set-cookie', [...existing, next]);
+    } else {
+      reply.header('set-cookie', [String(existing), next]);
+    }
+  }
+}
+
+function fail(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  code: ErrorCode,
+  extra?: { readonly retryAfterSeconds?: number | null; readonly field?: string },
+): FastifyReply {
+  const def = errorDefinition(code);
+  if (extra?.retryAfterSeconds != null) {
+    reply.header('retry-after', String(extra.retryAfterSeconds));
+  }
+  return reply.code(def.httpStatus).send(
+    buildErrorBody(code, {
+      requestId: request.id,
+      traceId: 'unavailable',
+      ...(extra?.field === undefined ? {} : { field: extra.field }),
+    }),
+  );
+}
+
+/** 客户端 IP。trustProxy 已开启，因此 request.ip 已考虑 X-Forwarded-For。 */
+function clientIp(request: FastifyRequest): string | null {
+  const ip = request.ip;
+  return typeof ip === 'string' && ip.length > 0 ? ip : null;
+}
+
+interface SessionResponse {
+  readonly user_type: Identity['userType'];
+  readonly user_id: string;
+  readonly email: string | null;
+  readonly display_name: string | null;
+  readonly quota: {
+    readonly daily_remaining: number;
+    readonly monthly_remaining: number;
+    readonly reset_at: string;
+  };
+}
+
+export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): void {
+  const { identity, quota, secureCookies } = deps;
+
+  async function sessionResponse(id: Identity): Promise<SessionResponse> {
+    const remaining = await quota.peekRemaining({
+      userId: id.userId,
+      userType: id.userType,
+      dailyQuotaOverride: id.dailyQuota,
+      monthlyQuotaOverride: id.monthlyQuota,
+    });
+
+    return {
+      user_type: id.userType,
+      // 仅供问题反馈，不作为任何鉴权凭据（13.9.1）
+      user_id: id.userId,
+      email: id.email,
+      display_name: id.displayName,
+      quota: {
+        daily_remaining: remaining.dailyRemaining,
+        monthly_remaining: remaining.monthlyRemaining,
+        reset_at: remaining.resetAt,
+      },
+    };
+  }
+
+  /**
+   * 13.9.1 获取当前身份。
+   *
+   * 无任何身份 Cookie 时**自动创建匿名用户** —— 前端在应用启动时调一次，
+   * 之后所有请求都带上了身份。
+   */
+  app.get('/api/v1/auth/session', async (request, reply) => {
+    const cookies = parseCookies(request.headers.cookie);
+
+    const result = await identity.resolve({
+      anonCookie: cookies[COOKIE_NAMES.anonymous],
+      sessionCookie: cookies[COOKIE_NAMES.session],
+      ip: clientIp(request),
+      allowAnonymousCreation: true,
+    });
+
+    if (result.outcome === 'anon_creation_rate_limited') {
+      recordIdentityEvent('anon_created', 'rate_limited');
+      return fail(request, reply, 'AUTH_ANON_CREATION_RATE_LIMITED', {
+        retryAfterSeconds: result.retryAfterSeconds,
+      });
+    }
+    if (result.outcome === 'identity_required') {
+      // allowAnonymousCreation 为 true 时不应走到这里；保留分支以便类型穷尽
+      return fail(request, reply, 'AUTH_IDENTITY_REQUIRED');
+    }
+
+    applyCookies(reply, result.cookies, secureCookies);
+
+    if (result.pendingMerge !== null) {
+      try {
+        await identity.completePendingMerge(
+          result.pendingMerge.anonymousUserId,
+          result.identity.userId,
+        );
+        recordIdentityEvent('merge', 'succeeded');
+      } catch {
+        recordIdentityEvent('merge', 'failed');
+        return fail(request, reply, 'AUTH_MERGE_FAILED');
+      }
+    }
+
+    recordIdentityType(result.identity.userType);
+    return reply.code(200).send(await sessionResponse(result.identity));
+  });
+
+  /** 13.9.2 注册（含匿名原地升级） */
+  app.post('/api/v1/auth/register', async (request, reply) => {
+    const parsed = RegisterBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return fail(request, reply, 'REQ_SCHEMA_INVALID', {
+        field: parsed.error.issues[0]?.path.join('.') ?? 'body',
+      });
+    }
+
+    const cookies = parseCookies(request.headers.cookie);
+    const result = await identity.register({
+      email: parsed.data.email,
+      password: parsed.data.password,
+      displayName: parsed.data.display_name ?? null,
+      anonCookie: cookies[COOKIE_NAMES.anonymous],
+    });
+
+    switch (result.outcome) {
+      case 'email_taken':
+        recordIdentityEvent('register', 'rejected');
+        return fail(request, reply, 'AUTH_EMAIL_ALREADY_REGISTERED', { field: 'email' });
+      case 'password_too_weak':
+        recordIdentityEvent('register', 'rejected');
+        return fail(request, reply, 'AUTH_PASSWORD_TOO_WEAK', { field: 'password' });
+      case 'anonymous_already_upgraded':
+        recordIdentityEvent('upgrade', 'rejected');
+        return fail(request, reply, 'AUTH_ANONYMOUS_ALREADY_UPGRADED');
+      case 'registered':
+        applyCookies(reply, result.cookies, secureCookies);
+        recordIdentityEvent(result.upgraded ? 'upgrade' : 'register', 'succeeded');
+        return reply.code(201).send(await sessionResponse(result.identity));
+    }
+  });
+
+  /** 13.9.3 登录（副作用含 13.9.4 匿名归并） */
+  app.post('/api/v1/auth/login', async (request, reply) => {
+    const parsed = LoginBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      // 登录的校验错误也用通用码，不暴露「邮箱格式」之外的信息
+      return fail(request, reply, 'REQ_SCHEMA_INVALID', {
+        field: parsed.error.issues[0]?.path.join('.') ?? 'body',
+      });
+    }
+
+    const cookies = parseCookies(request.headers.cookie);
+    const result = await identity.login({
+      email: parsed.data.email,
+      password: parsed.data.password,
+      anonCookie: cookies[COOKIE_NAMES.anonymous],
+      ip: clientIp(request),
+    });
+
+    switch (result.outcome) {
+      case 'invalid_credentials':
+        recordIdentityEvent('login', 'rejected');
+        return fail(request, reply, 'AUTH_CREDENTIALS_INVALID');
+      case 'rate_limited':
+        recordIdentityEvent('login', 'rate_limited');
+        return fail(request, reply, 'AUTH_RATE_LIMITED', {
+          retryAfterSeconds: result.retryAfterSeconds,
+        });
+      case 'logged_in':
+        applyCookies(reply, result.cookies, secureCookies);
+        recordIdentityEvent('login', 'succeeded');
+        if (result.merged !== null) recordIdentityEvent('merge', 'succeeded');
+        return reply.code(200).send(await sessionResponse(result.identity));
+    }
+  });
+
+  /** 13.9.3 登出 */
+  app.post('/api/v1/auth/logout', async (request, reply) => {
+    const cookies = parseCookies(request.headers.cookie);
+    const mutations = await identity.logout(cookies[COOKIE_NAMES.session]);
+
+    applyCookies(reply, mutations, secureCookies);
+    recordIdentityEvent('logout', 'succeeded');
+    return reply.code(204).send();
+  });
+
+  /**
+   * 13.0 账号级端点对匿名身份的拦截（TP-1-37）。
+   *
+   * P1 只需证明拦截生效；改邮箱/改口令/删账号的实际逻辑在 P5（用户空间）。
+   * 现在就放这个端点是为了让「匿名不可访问账号级操作」这条契约有测试守护 ——
+   * 等到 P5 再加，中间任何一次改动都可能悄悄破坏它。
+   */
+  app.post('/api/v1/auth/password', async (request, reply) => {
+    const cookies = parseCookies(request.headers.cookie);
+
+    const result = await identity.resolve({
+      anonCookie: cookies[COOKIE_NAMES.anonymous],
+      sessionCookie: cookies[COOKIE_NAMES.session],
+      ip: clientIp(request),
+      // 账号级端点不现场建号
+      allowAnonymousCreation: false,
+    });
+
+    if (result.outcome !== 'resolved') {
+      return fail(request, reply, 'AUTH_IDENTITY_REQUIRED');
+    }
+    if (result.identity.userType === 'ANONYMOUS') {
+      return fail(request, reply, 'AUTH_ANONYMOUS_FORBIDDEN');
+    }
+
+    // P5 实现改口令；此处返回 501 而不是假装成功
+    return reply.code(501).send(
+      buildErrorBody('SYS_INTERNAL_ERROR', {
+        requestId: request.id,
+        traceId: 'unavailable',
+      }),
+    );
+  });
+}

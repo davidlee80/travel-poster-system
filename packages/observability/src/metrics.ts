@@ -11,6 +11,41 @@ import {
 import { assertAllowedLabels, type ValidLabel } from './labels.js';
 
 /**
+ * 对外暴露的最小指标接口。
+ *
+ * 不直接返回 prom-client 的 `Counter` 等类型，原因有两个：
+ *   1. prom-client 是本包的依赖而非消费方的依赖，返回它的类型会让消费方
+ *      的 `.d.ts` 引用 `../../packages/observability/node_modules/prom-client`
+ *      这种不可移植的路径（TS2742）；
+ *   2. 收窄接口能阻止消费方绕过本包直接操作 registry —— 那会绕开标签白名单。
+ */
+export interface Labels {
+  readonly [label: string]: string | number;
+}
+
+/**
+ * `labels` 一律必填（即使某个指标没有标签也要传 `{}`）。
+ *
+ * prom-client 允许省略它，但省略会产出一条标签全空的时间序列，
+ * 与「按标签细分的序列」混在同一个指标名下，读图时极易误判。
+ * 强制必填让「这个指标有哪些维度」在调用点就是显式的。
+ */
+export interface CounterMetric {
+  inc(labels: Labels, value?: number): void;
+}
+
+export interface GaugeMetric {
+  set(labels: Labels, value: number): void;
+  inc(labels: Labels, value?: number): void;
+  dec(labels: Labels, value?: number): void;
+}
+
+export interface HistogramMetric {
+  observe(labels: Labels, value: number): void;
+  startTimer(labels: Labels): (labels?: Labels) => number;
+}
+
+/**
  * Prometheus 指标注册与工厂（TP-0-05，设计稿 21.3）。
  *
  * P0 只建立注册表与受约束的工厂；21.3 的 18 个业务指标随各自功能在
@@ -34,14 +69,14 @@ export function registerDefaultMetrics(serviceName: string): void {
  * 标签名数组的类型约束。
  * 传入 'user_id' 会得到一条明确的编译错误而不是难读的联合类型不匹配。
  */
-type Labels<T extends readonly string[]> = {
+type LabelNames<T extends readonly string[]> = {
   [K in keyof T]: T[K] extends string ? ValidLabel<T[K]> : never;
 };
 
 interface MetricSpec<T extends readonly string[]> {
   readonly name: string;
   readonly help: string;
-  readonly labelNames?: Labels<T>;
+  readonly labelNames?: LabelNames<T>;
 }
 
 function validate(name: string, labelNames: readonly string[] | undefined): string[] {
@@ -52,7 +87,7 @@ function validate(name: string, labelNames: readonly string[] | undefined): stri
 
 export function createCounter<const T extends readonly string[]>(
   spec: MetricSpec<T>,
-): Counter<string> {
+): CounterMetric {
   const labelNames = validate(spec.name, spec.labelNames);
   const config: CounterConfiguration<string> = {
     name: spec.name,
@@ -63,7 +98,7 @@ export function createCounter<const T extends readonly string[]>(
   return new Counter(config);
 }
 
-export function createGauge<const T extends readonly string[]>(spec: MetricSpec<T>): Gauge<string> {
+export function createGauge<const T extends readonly string[]>(spec: MetricSpec<T>): GaugeMetric {
   const labelNames = validate(spec.name, spec.labelNames);
   const config: GaugeConfiguration<string> = {
     name: spec.name,
@@ -76,7 +111,7 @@ export function createGauge<const T extends readonly string[]>(spec: MetricSpec<
 
 export function createHistogram<const T extends readonly string[]>(
   spec: MetricSpec<T> & { readonly buckets?: readonly number[] },
-): Histogram<string> {
+): HistogramMetric {
   const labelNames = validate(spec.name, spec.labelNames);
   const config: HistogramConfiguration<string> = {
     name: spec.name,

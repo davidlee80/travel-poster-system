@@ -16,7 +16,9 @@
     "@tps/db": "workspace:*",
     "@tps/observability": "workspace:*",
     "@tps/shared": "workspace:*",
-    "fastify": "^5.6.1"
+    "fastify": "^5.6.1",
+    "@tps/schemas": "workspace:*",
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

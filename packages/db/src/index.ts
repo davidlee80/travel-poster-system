@@ -1,5 +1,17 @@
 export { checkDatabase, createPool, loadDbConfig, type DbConfig } from './pool.js';
 export {
+  UniqueViolationError,
+  createUsersRepository,
+  type CreateAnonymousInput,
+  type CreateRegisteredInput,
+  type MergeCounts,
+  type UpgradeAnonymousInput,
+  type UserRow,
+  type UserStatus,
+  type UserType,
+  type UsersRepository,
+} from './users.js';
+export {
   MigrationError,
   loadMigrations,
   migrate,

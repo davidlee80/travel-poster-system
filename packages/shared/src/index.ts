@@ -7,6 +7,7 @@ export {
 } from './logger.js';
 export { GracefulShutdown, type ShutdownHook, type ShutdownOptions } from './shutdown.js';
 export { runWorker, type WorkerDefinition, type WorkerHandle } from './worker-runtime.js';
+export * from './identity/index.js';
 export {
   ConfigError,
   loadServiceConfig,
