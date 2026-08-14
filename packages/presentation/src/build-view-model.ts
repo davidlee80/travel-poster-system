@@ -1,0 +1,216 @@
+import {
+  SCHEMA_VERSIONS,
+  type HeroAsset,
+  type TemplateId,
+  type TravelPlan,
+  type TravelPlanDay,
+  type TravelPosterViewModel,
+  type ViewImage,
+} from '@tps/schemas';
+import { COMPACT_LIMITS, toCompact } from './compact.js';
+import {
+  BOOKING_CATEGORY_LABEL,
+  MEAL_LABEL,
+  PERIOD_LABEL,
+  PREFERRED_TIME_LABEL,
+  ROUTE_TYPE_LABEL,
+  advanceText,
+  amountText,
+  dayLabel,
+  durationText,
+  periodIconName,
+  priceText,
+  totalText,
+  transportIconName,
+} from './derive.js';
+import { moduleIcons } from './icons.js';
+import { foodSlotId, heroSlotId, photoSpotSlotId, routeMapSlotId } from './slots.js';
+
+/**
+ * TravelPlan → TravelPosterViewModel（设计稿 12.1）。
+ *
+ * 素材以「按槽位查询」的形式注入，而不是让本模块自己去解析：
+ * 展示编排器只回答「页面需要展示什么」，素材从哪来是素材服务的职责
+ * （设计稿 3.3「它不负责查找图片」）。这个边界让 P1 能用桩素材跑通模板，
+ * P3 换成真实解析结果时无需改动本模块。
+ */
+
+/** 单个槽位的解析结果。P3 由 `plan_asset_bindings` + `ResolvedAsset` 提供。 */
+export interface SlotResolution {
+  /** 图片类槽位的结果；未解析或降级到占位时为 null */
+  readonly image: ViewImage | null;
+  /** Hero 槽位专用（多了 source_type） */
+  readonly hero?: HeroAsset | null;
+  /** ROUTE_MAP 槽位专用；降级为文字路线时为 null（设计稿 8.2） */
+  readonly svgUrl?: string | null;
+}
+
+/** 按槽位 ID 查询素材。返回 undefined 与返回 null 等价，均视为未解析。 */
+export type AssetLookup = (slotId: string) => SlotResolution | undefined;
+
+/** 全部槽位均未解析的查询器，供 P1 的纯文本/占位渲染使用 */
+export const EMPTY_ASSET_LOOKUP: AssetLookup = () => undefined;
+
+export interface BuildDailyPosterInput {
+  readonly plan: TravelPlan;
+  readonly dayNumber: number;
+  readonly templateId?: TemplateId;
+  readonly assets?: AssetLookup;
+}
+
+export class PresentationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PresentationError';
+  }
+}
+
+function findDay(plan: TravelPlan, dayNumber: number): TravelPlanDay {
+  const day = plan.days.find((d) => d.day_number === dayNumber);
+  if (!day) {
+    throw new PresentationError(
+      `计划 ${plan.plan_version_id} 中不存在第 ${dayNumber} 天。` +
+        `已有天号: ${plan.days.map((d) => d.day_number).join(', ') || '(无)'}`,
+    );
+  }
+  return day;
+}
+
+/**
+ * 预算模块。
+ *
+ * 12.1 要求断言 `sum(items) === daily_budget.total` —— 预算数字对不上是
+ * 用户可见的严重错误。这里**不抛错**而是以 `breakdown` 之和为准重算 total，
+ * 因为 V-20 把这类不一致定为 REPAIRABLE；抛错等于把它升级成阻断。
+ * 不一致的事实由返回值中的 `budgetMismatch` 上报，交由调用方记违规。
+ */
+function buildBudget(day: TravelPlanDay): {
+  budget: TravelPosterViewModel['budget'];
+  budgetMismatch: boolean;
+} {
+  const { breakdown, total, currency } = day.daily_budget;
+
+  const items = breakdown.map((item) => ({
+    label: item.label,
+    amount_text: amountText({ amount: item.amount, currency }),
+  }));
+
+  const sum = breakdown.reduce((acc, item) => acc + item.amount, 0);
+  const budgetMismatch = Math.abs(sum - total) > 0.005;
+
+  return {
+    budget: {
+      items,
+      // 以 breakdown 之和为准：items 是它逐条映射来的，两者必须自洽，
+      // 否则页面上「各项相加 ≠ 总计」是用户一眼能看出的错误
+      total_text: totalText(sum, currency),
+    },
+    budgetMismatch,
+  };
+}
+
+export interface BuildResult {
+  readonly viewModel: TravelPosterViewModel;
+  /** `daily_budget.total` 与 `breakdown` 之和不一致（V-20），调用方应记违规 */
+  readonly budgetMismatch: boolean;
+}
+
+/** 构造单日信息图 ViewModel（page_type = DAILY_POSTER） */
+export function buildDailyPoster(input: BuildDailyPosterInput): BuildResult {
+  const {
+    plan,
+    dayNumber,
+    templateId = 'travel_infographic_v1',
+    assets = EMPTY_ASSET_LOOKUP,
+  } = input;
+
+  const day = findDay(plan, dayNumber);
+  const { budget, budgetMismatch } = buildBudget(day);
+
+  const heroSlot = assets(heroSlotId(dayNumber));
+  const routeSlot = assets(routeMapSlotId(dayNumber));
+
+  const viewModel: TravelPosterViewModel = {
+    schema_version: SCHEMA_VERSIONS.travelPosterViewModel,
+    template_id: templateId,
+    page_type: 'DAILY_POSTER',
+    plan_id: plan.plan_id,
+    plan_version_id: plan.plan_version_id,
+    day_number: dayNumber,
+
+    header: {
+      destination: plan.destination.name,
+      total_days: plan.total_days,
+      day_label: dayLabel(dayNumber),
+      title: day.theme,
+      title_compact: toCompact(day.theme, COMPACT_LIMITS.title),
+      subtitle: day.subtitle,
+      subtitle_compact: toCompact(day.subtitle, COMPACT_LIMITS.subtitle),
+      hero_asset: heroSlot?.hero ?? null,
+    },
+
+    schedule: day.schedule.map((item) => ({
+      period: PERIOD_LABEL[item.period],
+      period_icon: periodIconName(item.period),
+      title: item.title,
+      description: item.description,
+      description_compact: toCompact(item.description, COMPACT_LIMITS.scheduleDescription),
+      duration_text: durationText(item.duration_minutes),
+    })),
+
+    food_cards: day.food_recommendations.map((food) => ({
+      meal: MEAL_LABEL[food.meal],
+      name: food.name,
+      description: food.description,
+      description_compact: toCompact(food.description, COMPACT_LIMITS.foodDescription),
+      image: assets(foodSlotId(dayNumber, food.meal))?.image ?? null,
+    })),
+
+    route_map: {
+      // svg_url 为 null 时模板渲染 nodes 文字列表（设计稿 8.2 text_fallback）
+      svg_url: routeSlot?.svgUrl ?? null,
+      // nodes 始终提供 —— 它既是地图的节点来源，也是降级时的文字路线
+      nodes: day.schedule.map((s) => s.location.name),
+    },
+
+    route_recommendations: day.route_recommendations.map((route) => ({
+      type: route.type,
+      label: ROUTE_TYPE_LABEL[route.type],
+      nodes: [...route.nodes],
+    })),
+
+    must_do: [...day.must_do],
+
+    transport_tips: day.transport_tips.map((tip) => ({
+      text: tip.text,
+      icon: transportIconName(tip.mode),
+    })),
+
+    photo_spots: day.photo_spots.map((spot, index) => ({
+      name: spot.name,
+      time_text: PREFERRED_TIME_LABEL[spot.preferred_time],
+      image: assets(photoSpotSlotId(dayNumber, index))?.image ?? null,
+    })),
+
+    ticket_reminders: day.ticket_reminders.map((reminder) => ({
+      entity_name: reminder.entity_name,
+      text: reminder.text,
+      price_text: priceText(reminder.price),
+      advance_text: advanceText(reminder.advance_days),
+    })),
+
+    budget,
+
+    booking_tips: day.booking_tips.map((tip) => ({
+      text: tip.text,
+      category_text: BOOKING_CATEGORY_LABEL[tip.category],
+    })),
+
+    daily_summary: day.daily_summary,
+    daily_summary_compact: toCompact(day.daily_summary, COMPACT_LIMITS.dailySummary),
+
+    icons: moduleIcons(),
+  };
+
+  return { viewModel, budgetMismatch };
+}
