@@ -51,3 +51,10 @@ export {
   type BuildResult,
   type SlotResolution,
 } from './build-view-model.js';
+
+export {
+  buildFullPlan,
+  type BuildFullPlanInput,
+  type BuildFullPlanResult,
+  type FullPlanViewModel,
+} from './build-full-plan.js';

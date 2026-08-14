@@ -135,9 +135,18 @@ importers:
 
   apps/web:
     dependencies:
+      '@tps/icon-library':
+        specifier: workspace:*
+        version: link:../../packages/icon-library
+      '@tps/presentation':
+        specifier: workspace:*
+        version: link:../../packages/presentation
       '@tps/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
+      '@tps/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       next:
         specifier: ^15.5.4
         version: 15.5.23(@opentelemetry/api@1.9.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -179,6 +188,25 @@ importers:
       '@types/pg':
         specifier: ^8.15.6
         version: 8.21.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)
+
+  packages/icon-library:
+    dependencies:
+      '@tps/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+    devDependencies:
+      '@tps/presentation':
+        specifier: workspace:*
+        version: link:../presentation
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.13.3
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

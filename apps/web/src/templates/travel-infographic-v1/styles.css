@@ -1,0 +1,457 @@
+/*
+ * travel_infographic_v1 样式（TP-1-05，设计稿十二章、17.3、17.4）。
+ *
+ * 关键约束：
+ *   - 定宽 1200px（17.4 viewport.width）。横向溢出是阻断级缺陷，
+ *     因为定宽长图不该有横向滚动（17.3 canvasOverflowX）。
+ *   - 不使用 overflow: auto/scroll —— 导出场景下滚动容器里的内容会被裁掉，
+ *     而 17.3 的检测会正确地把它们排除，于是缺陷静默通过。
+ *   - 不引用任何第三方字体 CDN（离线渲染失败 + 二十章的同类理由）。
+ *   - 全部尺寸用 px 而非 rem：导出时不受根字号影响，基线可复现。
+ */
+
+.poster {
+  --tps-canvas-width: 1200px;
+  --tps-ink: #1b1b1b;
+  --tps-ink-soft: #5b5b5b;
+  --tps-line: #e4e0d8;
+  --tps-paper: #fdfcf9;
+  --tps-accent: #2f6b4f;
+  --tps-accent-soft: #eaf2ed;
+  --tps-warm: #b8763a;
+
+  /* 版式变量：relaxed 变体只覆盖这几个值（17.3 第 4 轮） */
+  --tps-gap: 24px;
+  --tps-card-pad: 16px;
+  --tps-line-height: 1.55;
+  --tps-title-size: 40px;
+  --tps-subtitle-size: 18px;
+  --tps-body-size: 15px;
+  --tps-section-gap: 28px;
+
+  width: var(--tps-canvas-width);
+  box-sizing: border-box;
+  background: var(--tps-paper);
+  color: var(--tps-ink);
+  font-size: var(--tps-body-size);
+  line-height: var(--tps-line-height);
+  /* 数字用等宽字形，避免金额在不同条目间左右跳动 */
+  font-variant-numeric: tabular-nums;
+}
+
+/* 宽松版式：加大行高与间距、缩小字号，用空间换不溢出（17.3 第 4 轮） */
+.poster[data-variant='relaxed'] {
+  --tps-gap: 30px;
+  --tps-card-pad: 20px;
+  --tps-line-height: 1.75;
+  --tps-title-size: 34px;
+  --tps-subtitle-size: 16px;
+  --tps-body-size: 14px;
+  --tps-section-gap: 34px;
+}
+
+/* ── Hero ────────────────────────────────────────────────── */
+
+.hero {
+  position: relative;
+  padding: 48px 56px 40px;
+  /* Hero 素材缺失时的渐变背景 —— 十八章「Hero 图 → 已缓存的城市图 → 渐变背景」。
+     这是降级链的最后一环，必须始终可用，因此写死在 CSS 里而非依赖任何资源。 */
+  background: linear-gradient(135deg, #2f6b4f 0%, #4e8a68 45%, #8fb39c 100%);
+  color: #fff;
+}
+
+.hero__image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 有底图时加一层压暗，保证白字可读（11.1 的 reserved_text_area 是 LEFT_TOP） */
+.hero__scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    rgba(0, 0, 0, 0.62) 0%,
+    rgba(0, 0, 0, 0.24) 58%,
+    rgba(0, 0, 0, 0.05) 100%
+  );
+}
+
+.hero__content {
+  position: relative;
+  max-width: 760px;
+}
+
+.hero__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.92;
+}
+
+.hero__day {
+  font-weight: 700;
+  padding: 4px 10px;
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+  border-radius: 3px;
+}
+
+.hero__title {
+  margin: 14px 0 8px;
+  font-size: var(--tps-title-size);
+  line-height: 1.2;
+  font-weight: 700;
+  /* 不用 text-overflow: ellipsis —— 那会让溢出被 CSS 掩盖，
+     17.3 就检测不到，而我们要的是检测到并切换压缩文案 */
+}
+
+.hero__subtitle {
+  margin: 0;
+  font-size: var(--tps-subtitle-size);
+  opacity: 0.93;
+}
+
+/* ── 布局骨架 ────────────────────────────────────────────── */
+
+.body {
+  padding: var(--tps-section-gap) 56px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--tps-section-gap);
+}
+
+.section__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1.5px solid var(--tps-line);
+}
+
+.section__title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.section__icon {
+  color: var(--tps-accent);
+  flex: none;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--tps-gap);
+}
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--tps-gap);
+}
+
+/* ── 日程 ────────────────────────────────────────────────── */
+
+.schedule {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.schedule__item {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 16px;
+  align-items: start;
+  padding: var(--tps-card-pad);
+  background: #fff;
+  border: 1.5px solid var(--tps-line);
+  border-radius: 6px;
+  /* 卡片不跨页断裂（17.4 PDF 分页控制） */
+  break-inside: avoid;
+}
+
+.schedule__period {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--tps-accent);
+  white-space: nowrap;
+}
+
+.schedule__title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.schedule__desc {
+  margin: 0;
+  color: var(--tps-ink-soft);
+}
+
+.schedule__duration {
+  color: var(--tps-ink-soft);
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+/* ── 卡片（美食 / 机位）─────────────────────────────────── */
+
+.card {
+  background: #fff;
+  border: 1.5px solid var(--tps-line);
+  border-radius: 6px;
+  overflow: hidden;
+  break-inside: avoid;
+}
+
+.card__figure {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: var(--tps-accent-soft);
+}
+
+.card__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 图片缺失时的占位（十八章「景点图片 → AI 风格化插画 → 默认景点占位图」） */
+.card__placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--tps-accent);
+  opacity: 0.45;
+}
+
+/* AI 生成的景点代表图标注「示意图」（二十章） */
+.card__note {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 2px 7px;
+  font-size: 11px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 3px;
+}
+
+.card__body {
+  padding: var(--tps-card-pad);
+}
+
+.card__label {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tps-accent);
+  background: var(--tps-accent-soft);
+  border-radius: 3px;
+}
+
+.card__name {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.card__desc {
+  margin: 0;
+  color: var(--tps-ink-soft);
+  font-size: 14px;
+}
+
+/* ── 路线 ────────────────────────────────────────────────── */
+
+.route-map__svg {
+  width: 100%;
+  border: 1.5px solid var(--tps-line);
+  border-radius: 6px;
+  background: #fff;
+  display: block;
+}
+
+/* 8.2 的 text_fallback：SVG 缺失时的文字路线 */
+.route-nodes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: var(--tps-card-pad);
+  background: #fff;
+  border: 1.5px solid var(--tps-line);
+  border-radius: 6px;
+}
+
+.route-nodes__item {
+  padding: 5px 12px;
+  background: var(--tps-accent-soft);
+  border-radius: 14px;
+  font-weight: 500;
+}
+
+.route-nodes__arrow {
+  color: var(--tps-accent);
+  opacity: 0.6;
+}
+
+.route-alt {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.route-alt__item {
+  padding: 12px var(--tps-card-pad);
+  background: #fff;
+  border-left: 3px solid var(--tps-warm);
+  border-radius: 0 5px 5px 0;
+  break-inside: avoid;
+}
+
+.route-alt__label {
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.route-alt__nodes {
+  color: var(--tps-ink-soft);
+}
+
+/* ── 列表类（必做 / 交通 / 门票 / 预订）───────────────────── */
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.list__item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px var(--tps-card-pad);
+  background: #fff;
+  border: 1.5px solid var(--tps-line);
+  border-radius: 5px;
+  break-inside: avoid;
+}
+
+.list__icon {
+  color: var(--tps-accent);
+  flex: none;
+  margin-top: 2px;
+}
+
+.list__text {
+  margin: 0;
+}
+
+.list__entity {
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.list__badge {
+  margin-left: 8px;
+  padding: 1px 7px;
+  font-size: 12px;
+  color: var(--tps-warm);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+/* ── 预算 ────────────────────────────────────────────────── */
+
+.budget {
+  padding: var(--tps-card-pad);
+  background: #fff;
+  border: 1.5px solid var(--tps-line);
+  border-radius: 6px;
+}
+
+.budget__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.budget__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.budget__row--total {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1.5px solid var(--tps-line);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--tps-accent);
+}
+
+.budget__label {
+  color: var(--tps-ink-soft);
+}
+
+.budget__row--total .budget__label {
+  color: inherit;
+}
+
+/* ── 页脚 ────────────────────────────────────────────────── */
+
+.summary {
+  padding: 18px var(--tps-card-pad);
+  background: var(--tps-accent-soft);
+  border-radius: 6px;
+  font-size: 15px;
+}
+
+.footer {
+  padding: 18px 56px 32px;
+  border-top: 1.5px solid var(--tps-line);
+  color: var(--tps-ink-soft);
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* ── 打印与导出 ─────────────────────────────────────────── */
+
+@page {
+  size: A4 portrait;
+  margin: 12mm 10mm;
+}
+
+@media print {
+  .poster {
+    /* 打印时不缩放，宽度由 @page 与 PDF scale 控制（17.4） */
+    width: auto;
+  }
+}

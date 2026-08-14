@@ -1,0 +1,209 @@
+/*
+ * travel_full_plan_v1 样式（TP-1-06，设计稿 1.1「响应式完整计划页」）。
+ *
+ * 与信息图模板的分工：本文件只管**容器与响应式**，各日内容的样式仍来自
+ * travel-infographic-v1。因此各日的视觉基线只需维护一份。
+ *
+ * 信息图是定宽 1200px 的导出产物，在窄屏里放不下，因此用 transform: scale
+ * 等比缩放而不是让它自己变窄 —— 变窄会改变换行位置，导致完整页与导出的
+ * PNG 看起来是两个不同的设计。
+ */
+
+.full-plan {
+  --fp-max: 1240px;
+  --fp-ink: #1b1b1b;
+  --fp-ink-soft: #5b5b5b;
+  --fp-line: #e4e0d8;
+  --fp-paper: #fdfcf9;
+  --fp-accent: #2f6b4f;
+  --fp-accent-soft: #eaf2ed;
+
+  background: var(--fp-paper);
+  color: var(--fp-ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+
+/* ── 头部 ────────────────────────────────────────────────── */
+
+.full-plan__head {
+  max-width: var(--fp-max);
+  margin: 0 auto;
+  padding: 56px 24px 32px;
+}
+
+.full-plan__eyebrow {
+  margin: 0 0 8px;
+  color: var(--fp-accent);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 13px;
+}
+
+.full-plan__title {
+  margin: 0 0 12px;
+  font-size: clamp(26px, 4vw, 42px);
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.full-plan__summary {
+  margin: 0 0 28px;
+  max-width: 62ch;
+  color: var(--fp-ink-soft);
+  font-size: clamp(15px, 1.4vw, 17px);
+}
+
+.full-plan__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.full-plan__fact {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1.5px solid var(--fp-line);
+  border-radius: 6px;
+}
+
+.full-plan__fact-icon {
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--fp-accent);
+}
+
+.full-plan__fact-label {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fp-ink-soft);
+}
+
+.full-plan__fact-value {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* ── 按天导航 ────────────────────────────────────────────── */
+
+.full-plan__nav {
+  max-width: var(--fp-max);
+  margin: 0 auto;
+  padding: 0 24px 32px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.full-plan__nav-link {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  background: var(--fp-accent-soft);
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  border: 1.5px solid transparent;
+}
+
+.full-plan__nav-link:hover,
+.full-plan__nav-link:focus-visible {
+  border-color: var(--fp-accent);
+}
+
+.full-plan__nav-day {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--fp-accent);
+}
+
+.full-plan__nav-theme {
+  font-size: 14px;
+  /* 导航条目允许省略号：它是索引而非内容，截断不丢信息 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 各日内容 ────────────────────────────────────────────── */
+
+.full-plan__days {
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+  padding-bottom: 48px;
+}
+
+.full-plan__day {
+  scroll-margin-top: 24px;
+}
+
+/*
+ * 信息图定宽 1200px。窄屏用等比缩放而不是让内容变窄：
+ * 变窄会改变换行位置，使浏览页与导出的 PNG 呈现两种不同的排版。
+ *
+ * 缩放用 zoom 而非 transform: scale —— transform 不影响布局高度，
+ * 会在下方留下大片空白；zoom 会正确参与布局计算。
+ */
+.full-plan__day-frame {
+  max-width: var(--fp-max);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+@media (max-width: 1280px) {
+  .full-plan__day-frame {
+    padding: 0 12px;
+    zoom: 0.82;
+  }
+}
+
+@media (max-width: 900px) {
+  .full-plan__day-frame {
+    zoom: 0.6;
+  }
+}
+
+@media (max-width: 640px) {
+  .full-plan__day-frame {
+    padding: 0;
+    zoom: 0.42;
+  }
+}
+
+/* ── 页脚 ────────────────────────────────────────────────── */
+
+.full-plan__footer {
+  max-width: var(--fp-max);
+  margin: 0 auto;
+  padding: 24px;
+  border-top: 1.5px solid var(--fp-line);
+  color: var(--fp-ink-soft);
+  font-size: 13px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+/* ── 打印 ────────────────────────────────────────────────── */
+
+@media print {
+  .full-plan__nav {
+    display: none;
+  }
+
+  .full-plan__day-frame {
+    /* 打印时不缩放，由 @page 与 PDF scale 控制（17.4） */
+    zoom: 1;
+    padding: 0;
+  }
+}

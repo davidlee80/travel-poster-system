@@ -15,7 +15,10 @@
     "@tps/schemas": "workspace:*",
     "next": "^15.5.4",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "@tps/presentation": "workspace:*",
+    "@tps/icon-library": "workspace:*",
+    "@tps/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
