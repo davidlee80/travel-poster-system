@@ -1,9 +1,8 @@
 import { notFound } from 'next/navigation';
 import { TRAVEL_PLAN_FIXTURES, makeTravelPlanFixture } from '@tps/schemas';
-import { buildDailyPoster } from '@tps/presentation';
+import { buildDailyPoster, parseRenderVariant } from '@tps/presentation';
 import { TravelInfographic } from '@/templates/travel-infographic-v1';
 import { RenderReadyProbe } from '@/components/RenderReadyProbe';
-import { parseRenderVariant } from '@/lib/render-variant';
 
 /**
  * 内部渲染路由（TP-1-07，设计稿 17.1）。

@@ -7,13 +7,18 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "start": "node --enable-source-maps dist/main.js",
-    "clean": "rimraf dist .turbo *.tsbuildinfo"
+    "clean": "rimraf dist .turbo *.tsbuildinfo",
+    "render:fixture": "node --enable-source-maps dist/cli.js"
   },
   "dependencies": {
     "@tps/observability": "workspace:*",
-    "@tps/shared": "workspace:*"
+    "@tps/presentation": "workspace:*",
+    "@tps/shared": "workspace:*",
+    "pdf-lib": "^1.17.1",
+    "playwright-core": "1.62.1",
+    "sharp": "^0.34.4"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

@@ -14,6 +14,22 @@
 #     --build-arg APP=api --build-arg PROBE_PORT=3001 -t tps/api .
 
 # ── 依赖安装层 ────────────────────────────────────────────
+# ── 清单提取层 ────────────────────────────────────────────
+#
+# pnpm 的 --frozen-lockfile 要求**全部** workspace 包的 package.json 都在场。
+# 手写一份清单列表必然过时：新增一个包时没人会想到来改三个 Dockerfile，
+# 而报出的错误是 ERR_PNPM_OUTDATED_LOCKFILE —— 与「少拷了一个文件」毫无关联。
+#
+# 因此机械提取。本层每次都会重建（COPY . . 对任何改动失效），但它的产物
+# 只在 package.json 变化时才变，所以下游的 install 层照旧命中缓存。
+FROM node:24-bookworm-slim AS manifests
+WORKDIR /repo
+COPY . .
+RUN mkdir -p /manifests \
+ && find . -name package.json \
+      -not -path '*/node_modules/*' -not -path '*/.next/*' \
+      -exec cp --parents {} /manifests/ ';'
+
 FROM node:24-bookworm-slim AS deps
 ARG APP
 
@@ -25,16 +41,9 @@ RUN corepack enable
 WORKDIR /repo
 
 # 只拷贝清单文件，让依赖层能在源码变动时命中缓存
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
-COPY packages/schemas/package.json      packages/schemas/
-COPY packages/shared/package.json       packages/shared/
-COPY packages/observability/package.json packages/observability/
-COPY packages/db/package.json           packages/db/
-COPY apps/api/package.json              apps/api/
-COPY apps/generation-worker/package.json apps/generation-worker/
-COPY apps/render-worker/package.json    apps/render-worker/
-COPY apps/retention-worker/package.json apps/retention-worker/
-COPY apps/web/package.json              apps/web/
+COPY pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+# 全部 workspace 包的 package.json（含根 package.json），目录结构与仓库一致
+COPY --from=manifests /manifests/ ./
 
 # --frozen-lockfile：锁文件与清单不一致时失败，而不是悄悄改锁文件
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
@@ -53,7 +62,10 @@ RUN pnpm --filter "@tps/${APP}..." run build
 
 # 剪出仅含运行时依赖的 node_modules
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm --filter "@tps/${APP}..." deploy --legacy --prod /out
+    # deploy 只接受**单个**项目。用 "@tps/x..."（含依赖）会展开成多个包，
+    # 报 ERR_PNPM_CANNOT_DEPLOY_MANY。workspace 依赖由 deploy 自行解析并注入 /out，
+    # 所以不需要（也不能）在这里列出它们。
+    pnpm --filter "@tps/${APP}" deploy --legacy --prod /out
 
 # ── 运行层 ────────────────────────────────────────────────
 FROM node:24-bookworm-slim AS runtime
@@ -69,8 +81,10 @@ ENV NODE_ENV=production \
 
 # tzdata：Asia/Shanghai 等时区转换需要它，slim 镜像默认不含
 # tini：Node 不回收僵尸子进程，PID 1 必须是 init
-RUN apt-get update \
- && apt-get install -y --no-install-recommends tzdata tini ca-certificates \
+# DEBIAN_FRONTEND=noninteractive 不能省：tzdata 的 postinst 会交互式询问时区，
+# 而构建没有 tty —— 表现是**构建永久挂住**而不是报错。
+RUN DEBIAN_FRONTEND=noninteractive apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata tini ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # 数值型 UID/GID

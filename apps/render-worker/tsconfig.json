@@ -1,8 +1,17 @@
 {
+  // 与其它包不同：这里额外引入 DOM 类型库。
+  //
+  // page.evaluate() 的回调体在**浏览器**里执行，需要 document / HTMLElement /
+  // getComputedStyle 的类型。TypeScript 不支持按文件指定 lib，所以只能整包引入。
+  //
+  // 代价是 Node 侧代码也能引用 DOM 全局而通过编译。这个代价可以接受：
+  // 误用会在运行时立刻抛 "document is not defined"，是响亮的失败而非静默错误。
+  // 浏览器侧代码集中在 page-checks.ts，评审时只需盯住那一个文件。
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
   },
   "include": ["src/**/*"]
 }

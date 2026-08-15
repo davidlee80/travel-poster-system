@@ -6,6 +6,22 @@
 # 构建（从仓库根）：
 #   docker build --platform=linux/amd64 -f deploy/images/web.Dockerfile -t tps/web .
 
+# ── 清单提取层 ────────────────────────────────────────────
+#
+# pnpm 的 --frozen-lockfile 要求**全部** workspace 包的 package.json 都在场。
+# 手写一份清单列表必然过时：新增一个包时没人会想到来改三个 Dockerfile，
+# 而报出的错误是 ERR_PNPM_OUTDATED_LOCKFILE —— 与「少拷了一个文件」毫无关联。
+#
+# 因此机械提取。本层每次都会重建（COPY . . 对任何改动失效），但它的产物
+# 只在 package.json 变化时才变，所以下游的 install 层照旧命中缓存。
+FROM node:24-bookworm-slim AS manifests
+WORKDIR /repo
+COPY . .
+RUN mkdir -p /manifests \
+ && find . -name package.json \
+      -not -path '*/node_modules/*' -not -path '*/.next/*' \
+      -exec cp --parents {} /manifests/ ';'
+
 FROM node:24-bookworm-slim AS build
 
 ENV PNPM_HOME=/pnpm
@@ -16,16 +32,9 @@ RUN corepack enable
 
 WORKDIR /repo
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
-COPY packages/schemas/package.json      packages/schemas/
-COPY packages/shared/package.json       packages/shared/
-COPY packages/observability/package.json packages/observability/
-COPY packages/db/package.json           packages/db/
-COPY apps/api/package.json              apps/api/
-COPY apps/generation-worker/package.json apps/generation-worker/
-COPY apps/render-worker/package.json    apps/render-worker/
-COPY apps/retention-worker/package.json apps/retention-worker/
-COPY apps/web/package.json              apps/web/
+COPY pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+# 全部 workspace 包的 package.json（含根 package.json），目录结构与仓库一致
+COPY --from=manifests /manifests/ ./
 
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
@@ -48,8 +57,10 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     NEXT_TELEMETRY_DISABLED=1
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends tzdata tini ca-certificates \
+# DEBIAN_FRONTEND=noninteractive 不能省：tzdata 的 postinst 会交互式询问时区，
+# 而构建没有 tty —— 表现是**构建永久挂住**而不是报错。
+RUN DEBIAN_FRONTEND=noninteractive apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata tini ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid 10001 tps \

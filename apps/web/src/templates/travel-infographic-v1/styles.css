@@ -108,7 +108,13 @@
   /* 17.5：标题用衬线（Noto Serif SC），正文用无衬线 */
   font-family: var(--tps-font-serif);
   font-size: var(--tps-title-size);
-  line-height: 1.2;
+  /*
+   * 1.35 而不是 1.2：Noto Sans/Serif SC 的内容区（ascent + descent）实测约
+   * 1.29em，比 1.2 更高 —— 行高小于它时字形会画到行盒之外，17.3 的溢出检测
+   * 每次都会报几像素的纵向溢出（实测每天固定 3px）。这不是检测太严，
+   * 是行高确实不够装下中文字形。
+   */
+  line-height: 1.35;
   font-weight: 700;
   /* 不用 text-overflow: ellipsis —— 那会让溢出被 CSS 掩盖，
      17.3 就检测不到，而我们要的是检测到并切换压缩文案 */

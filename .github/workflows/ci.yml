@@ -9,8 +9,13 @@
 #   L-03  镜像在 linux/amd64 构建成功
 #   L-09  全量迁移在 pgvector/pgvector:pg17 上执行成功（含三扩展）
 #
-# L-04～L-08、L-10 依赖 P1 才引入的 Playwright、字体与 sharp，
-# 在对应任务（TP-1-17～21、TP-5-12/13）落地时加入本文件。
+#   L-04  渲染镜像内 fc-list 可查到 Noto
+#   L-05  渲染镜像内 sharp 可加载
+#   L-06  Playwright 在容器内以非 root 完成渲染
+#   L-07  /dev/shm 设 64MB 时降级路径不崩
+#   L-08  中文视觉基线比对在容器内通过（含门禁 #33 的反向测试）
+#
+# L-10（SIGTERM 优雅退出）依赖队列消费，在 TP-5-12/13 落地时加入本文件。
 
 name: CI
 
@@ -233,3 +238,99 @@ jobs:
              case "$LANG" in C.UTF-8) ;; *) echo "LANG 非 C.UTF-8: $LANG"; exit 1;; esac
              test -e /usr/share/zoneinfo/Asia/Shanghai || { echo "tzdata 缺失"; exit 1; }
              echo ok'
+
+  # ── L-04～L-08：渲染链路在 Linux 容器内的验证 ────────────────
+  #
+  # 这些项**只能在容器里验证**。开发机上：
+  #   - 字体渲染与 Linux 不同（L-08 的基线因此必须容器内生成，门禁 #33）；
+  #   - Windows / macOS 不使用 /dev/shm（L-07 的降级路径根本不会触发）；
+  #   - 沙箱与 seccomp 的行为完全不同（L-06）。
+  #
+  # 「本地跑通不算通过」在这一段是字面意义上的（实施计划 3.1 原则四）。
+  render:
+    name: render (L-04～L-08 容器内渲染)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: verify
+
+    env:
+      # 仅用于 CI 的 fixture 渲染；web 与 render 两侧必须一致，
+      # 不一致时中间件对全部请求返回 404（fail closed，17.1）
+      RENDER_SIGNING_KEY: ci-fixture-signing-key-32-chars-min
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: docker/setup-buildx-action@v3
+
+      # L-04（镜像内 fc-list 有 Noto）与 L-05（sharp 可加载）在渲染镜像的
+      # 构建期就断言过了，构建成功即通过。这里重跑一遍是为了拿到镜像。
+      - name: 构建 web 与 render-worker 镜像
+        run: docker compose -f deploy/render-fixture.compose.yml build
+
+      - name: L-04 镜像内 fc-list 可查到 Noto
+        run: |
+          count=$(docker compose -f deploy/render-fixture.compose.yml run --rm --no-deps \
+            --entrypoint sh render -c 'fc-list | grep -ci noto')
+          echo "noto=$count"
+          test "$count" -ge 1 || { echo 'L-04 失败'; exit 1; }
+
+      - name: L-05 镜像内 sharp 可加载且为 linux-x64
+        run: |
+          docker compose -f deploy/render-fixture.compose.yml run --rm --no-deps \
+            --entrypoint node render -e \
+            "const s=require('sharp');console.log(s.versions);if(!s.versions.vips)process.exit(1)"
+
+      # L-06：非 root + 沙箱开启下完成一次真实渲染。
+      # 这一步同时覆盖 TP-1-11（中文字形断言）与 TP-1-12（溢出检测）——
+      # 两者都在渲染路径上，任一失败都会让本步骤非零退出。
+      - name: L-06 容器内非 root 完成渲染（14 天全格式）
+        run: pnpm fixture:render
+
+      - name: L-08 视觉基线比对
+        run: pnpm visual:check
+
+      # 门禁 #33 的反向测试：开发机产出的基线必须被拒绝。
+      # 不验证这一条的话，「基线只能容器内生成」只是一句注释 ——
+      # 而一旦有人在 Windows 上跑过 update，视觉回归就永久失效了。
+      - name: 门禁 #33 开发机来源的基线被拒绝
+        run: |
+          node -e "
+            const fs=require('fs');
+            const p='out-fixtures/render-meta.json';
+            const j=JSON.parse(fs.readFileSync(p,'utf8'));
+            j.provenance.platform='win32';
+            fs.writeFileSync(p, JSON.stringify(j,null,2));
+          "
+          if pnpm visual:update; then
+            echo '门禁 #33 失效：win32 来源的产物竟然被接受为基线'
+            exit 1
+          fi
+          echo '门禁 #33 生效：非 Linux 来源已被拒绝'
+
+      # L-07：/dev/shm 只有 64MB 时降级路径必须有效。
+      # 不能靠「代码里写了 --disable-dev-shm-usage」来证明 —— 参数写了但探测
+      # 没生效同样会崩，而崩溃信息是 "Target closed"，与共享内存毫无关联。
+      - name: L-07 /dev/shm 64MB 时降级不崩
+        run: |
+          output=$(pnpm fixture:render:low-shm 2>&1)
+          echo "$output"
+          echo "$output" | grep -q '低于 256MB' \
+            || { echo 'L-07 失败：未识别出 /dev/shm 不足，降级路径没有触发'; exit 1; }
+
+      - name: 上传差异图（仅失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diff
+          path: apps/render-worker/__visual__/actual/
+          if-no-files-found: ignore

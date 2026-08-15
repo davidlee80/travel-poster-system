@@ -1,0 +1,15 @@
+{
+  "planVersionId": "fixture-1",
+  "provenance": {
+    "platform": "linux",
+    "arch": "x64",
+    "nodeVersion": "v24.18.1",
+    "chromiumVersion": "151.0.7922.34",
+    "devShmReason": "/dev/shm 可用 64MB，低于 256MB",
+    "viewport": {
+      "width": 1200,
+      "height": 1600
+    },
+    "deviceScaleFactor": 2
+  }
+}

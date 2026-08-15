@@ -46,7 +46,8 @@
   /* 与信息图的 .hero__title 保持一致的衬线标题（17.5） */
   font-family: var(--tps-font-serif);
   font-size: clamp(26px, 4vw, 42px);
-  line-height: 1.2;
+  /* 与信息图同理：中文字体内容区约 1.29em，1.2 装不下 */
+  line-height: 1.35;
   font-weight: 700;
 }
 

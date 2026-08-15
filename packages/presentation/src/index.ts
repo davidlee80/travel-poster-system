@@ -58,3 +58,10 @@ export {
   type BuildFullPlanResult,
   type FullPlanViewModel,
 } from './build-full-plan.js';
+export {
+  RENDER_ROUNDS,
+  parseRenderVariant,
+  variantToQuery,
+  type RenderLayout,
+  type RenderVariant,
+} from './render-variant.js';

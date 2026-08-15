@@ -74,6 +74,35 @@ export default tseslint.config(
     },
   },
 
+  /*
+   * Next 会打包的代码不得引用 @tps/shared 的 barrel。
+   *
+   * 该 barrel 连带引入 `@node-rs/argon2` 的原生 `.node` 二进制，webpack 无法
+   * 打包它 —— `next build` 直接失败，而错误信息是一长串 "Import trace"，
+   * 指向的是 argon2 而不是「你引错了包」。这个坑已经在容器构建里踩到过一次。
+   *
+   * 只限制会被打包的目录：lib 下的测试与中间件由 vitest / Edge 运行时处理，
+   * 不经过 webpack 的 Node 打包路径。
+   */
+  {
+    files: ['apps/web/src/app/**/*.{ts,tsx}', 'apps/web/src/components/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@tps/shared',
+              message:
+                '会被 webpack 打包的代码不能引用 @tps/shared（barrel 含 @node-rs/argon2 原生二进制）。' +
+                '纯逻辑请放到 @tps/presentation，或从 @tps/shared 单独导出无原生依赖的子路径。',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // 测试文件放宽：允许 any 断言与非空断言，便于构造边界用例
   {
     files: ['**/*.test.ts', '**/*.spec.ts', '**/__tests__/**/*.ts'],

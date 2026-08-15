@@ -23,7 +23,14 @@
     "infra:down": "docker compose -f infrastructure/docker-compose.yml down",
     "infra:logs": "docker compose -f infrastructure/docker-compose.yml logs -f",
     "verify:linux-guardrails": "node tools/verify-linux-guardrails.mjs",
-    "test:integration": "turbo run test:integration"
+    "test:integration": "turbo run test:integration",
+    "fixture:render": "docker compose -f deploy/render-fixture.compose.yml run --rm --build render",
+    "fixture:render:low-shm": "docker compose -f deploy/render-fixture.compose.yml --profile low-shm run --rm --build render-low-shm",
+    "fixture:down": "docker compose -f deploy/render-fixture.compose.yml down -v",
+    "fonts:build": "pnpm --filter @tps/fonts fonts:build",
+    "fonts:scan": "pnpm --filter @tps/fonts fonts:scan -- --strict",
+    "visual:check": "node tools/visual-baseline.mjs check",
+    "visual:update": "node tools/visual-baseline.mjs update"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
@@ -31,6 +38,8 @@
     "eslint": "^9.39.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.11.0",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
     "prettier": "^3.6.2",
     "rimraf": "^6.0.1",
     "turbo": "^2.6.1",

@@ -9,6 +9,13 @@
  *
  * 用查询参数的好处是同一份 ViewModel 只取一次，四轮之间无需重新构造数据 ——
  * 渲染总预算只有 20 秒（17.3），省下的每一次数据构造都有意义。
+ *
+ * ## 为什么放在 @tps/presentation 而不是 @tps/shared
+ *
+ * 它同时被 Next 的渲染页面（会被 webpack 打包）与渲染 Worker 引用。
+ * `@tps/shared` 的 barrel 会连带引入 `@node-rs/argon2` 的原生 `.node` 二进制，
+ * webpack 无法打包它 —— 从渲染页面引用 shared 会直接让 `next build` 失败。
+ * presentation 是纯 TS（只依赖 zod），两侧都能安全引用。
  */
 
 export type RenderLayout = 'default' | 'relaxed';

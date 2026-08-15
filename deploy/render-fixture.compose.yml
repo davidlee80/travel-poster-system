@@ -1,0 +1,105 @@
+# Linux 容器内的 fixture 渲染（P1 门禁，设计稿二十三章第一阶段）
+#
+# 这不是开发环境编排（那是 infrastructure/docker-compose.yml），而是**验收装置**：
+# 在 Linux 容器里跑通「模板 → HTML → PNG/PDF」，并产出视觉基线（TP-1-16）。
+#
+# 为什么必须在容器里跑：字体渲染在 Windows 与 Linux 上必然不同，开发机产出的
+# 基线会让 CI 永久失败或永久误通过（RISK-17、门禁 #33）。
+#
+# 用法（从仓库根）：
+#   pnpm fixture:render              14 天全格式，产物落到 ./out-fixtures
+#   pnpm fixture:render:low-shm      L-07：/dev/shm 只有 64MB 时的降级路径
+#
+# 产物目录在宿主侧，便于人工检查中文是否正常（P1 的真正验收点）。
+
+name: tps-render-fixture
+
+x-signing-key: &signing-key
+  # 仅用于本地与 CI 的 fixture 渲染。真实密钥由部署侧注入（21.4、二十章）。
+  # 必须 web 与 render 两侧一致 —— 不一致时中间件对全部请求返回 404（17.1），
+  # 而 404 与「路由不存在」无法区分。
+  RENDER_SIGNING_KEY: ${RENDER_SIGNING_KEY:-fixture-only-signing-key-not-for-production}
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/images/web.Dockerfile
+      platforms: [linux/amd64]
+    environment:
+      <<: *signing-key
+      TZ: UTC
+      NODE_ENV: production
+    # 不映射端口：只有同网络的 render 服务需要访问它，
+    # 而这条路由返回用户私有内容（17.1），不该暴露到宿主
+    expose: ['3000']
+    healthcheck:
+      # 镜像里没有 curl/wget（slim 基底），用 node 自带的 fetch。
+      # 探 / 而不是 /render/** —— 后者无令牌必然 404，healthcheck 会永远失败
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  render:
+    build:
+      context: ..
+      dockerfile: deploy/images/render-worker.Dockerfile
+      platforms: [linux/amd64]
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      <<: *signing-key
+      TZ: UTC
+      RENDER_BASE_URL: http://web:3000
+    # tini 已是 ENTRYPOINT，但 compose 的 init 会再套一层 docker-init。
+    # 两者并存无害，且显式声明能防止有人删掉 ENTRYPOINT 后僵尸进程悄悄回来（22.3.1）
+    init: true
+    # 22.3.2：Chromium 在默认的 64MB /dev/shm 上会崩溃（RISK-18）
+    shm_size: 1gb
+    volumes:
+      - ../out-fixtures:/out
+    # 天数可覆盖：视觉基线要 1/7/14 三档（TP-1-16）
+    command:
+      [
+        'node',
+        'dist/cli.js',
+        '--days',
+        '${FIXTURE_DAYS:-14}',
+        '--format',
+        '${FIXTURE_FORMAT:-all}',
+        '--out',
+        '/out',
+      ]
+
+  # L-07：验证 /dev/shm 只有 64MB 时的降级路径确实有效。
+  #
+  # 这条不能靠「代码里写了 --disable-dev-shm-usage」来证明 —— 参数写了但
+  # 探测逻辑没生效同样会崩，而崩溃信息是 "Target closed"，与共享内存毫无关联。
+  render-low-shm:
+    profiles: ['low-shm']
+    build:
+      context: ..
+      dockerfile: deploy/images/render-worker.Dockerfile
+      platforms: [linux/amd64]
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      <<: *signing-key
+      TZ: UTC
+      RENDER_BASE_URL: http://web:3000
+    init: true
+    shm_size: 64mb
+    volumes:
+      - ../out-fixtures-low-shm:/out
+    # 只跑 1 天：这条验证的是「降级路径不崩」，不是产出完整基线
+    command: ['node', 'dist/cli.js', '--days', '1', '--format', 'png', '--out', '/out']
