@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import prettier from 'eslint-config-prettier';
+import globals from 'globals';
 import tpsLocal from './tools/eslint-rules/index.mjs';
 
 export default tseslint.config(
@@ -88,5 +89,15 @@ export default tseslint.config(
   {
     files: ['**/*.mjs', '**/*.cjs', '**/*.config.{js,mjs,ts}'],
     ...tseslint.configs.disableTypeChecked,
+  },
+
+  /*
+   * 构建脚本仍然要 lint（它们在 CI 与镜像构建里真实执行），所以必须声明 Node 全局。
+   * 不声明的话 process / fetch / Buffer 全被 no-undef 报错，
+   * 最后的结果一定是把 scripts 从 lint 范围里删掉 —— 那些脚本就再也没人检查了。
+   */
+  {
+    files: ['**/*.mjs', '**/*.cjs'],
+    languageOptions: { globals: globals.nodeBuiltin },
   },
 );

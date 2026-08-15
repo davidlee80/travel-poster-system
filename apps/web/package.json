@@ -3,13 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "next build",
+    "build": "node scripts/copy-fonts.mjs && next build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
-    "dev": "next dev -p 3000",
+    "dev": "node scripts/copy-fonts.mjs && next dev -p 3000",
     "start": "next start -p 3000",
-    "clean": "rimraf .next dist .turbo *.tsbuildinfo"
+    "clean": "rimraf .next dist .turbo *.tsbuildinfo",
+    "fonts:copy": "node scripts/copy-fonts.mjs"
   },
   "dependencies": {
     "@tps/schemas": "workspace:*",
@@ -18,7 +19,8 @@
     "react-dom": "^19.2.0",
     "@tps/presentation": "workspace:*",
     "@tps/icon-library": "workspace:*",
-    "@tps/shared": "workspace:*"
+    "@tps/shared": "workspace:*",
+    "@tps/fonts": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

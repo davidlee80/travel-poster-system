@@ -1,0 +1,60 @@
+{
+  "charsetFingerprint": "7592-b1c79d93",
+  "fontsRepoRef": "352f6b7d9d6cc4fa9e242b931291d31b21a6dc84",
+  "assets": {
+    "noto-sans-sc-400.woff2": {
+      "family": "Noto Sans SC",
+      "weight": 400,
+      "bytes": 1070896,
+      "sha256": "24cee1fd94e2640295ba5840dd01232086713cba61744e79395ebe9ebc71de3c"
+    },
+    "noto-sans-sc-500.woff2": {
+      "family": "Noto Sans SC",
+      "weight": 500,
+      "bytes": 1086528,
+      "sha256": "f4275a33727e038412be80baa012b7744cc456aa25adaaa16e7433c48f76b158"
+    },
+    "noto-sans-sc-700.woff2": {
+      "family": "Noto Sans SC",
+      "weight": 700,
+      "bytes": 1097928,
+      "sha256": "2b5b01f8ed0db2d9b048d752b0dc0c6e4a73427cd9c39a696b3038a6136553c4"
+    },
+    "noto-serif-sc-400.woff2": {
+      "family": "Noto Serif SC",
+      "weight": 400,
+      "bytes": 1413680,
+      "sha256": "3bd3d2d24fd7c5f3a6b27e90a12f1c1c7ff63205f9286ad01c26e7fd4c00f0a5"
+    },
+    "noto-serif-sc-500.woff2": {
+      "family": "Noto Serif SC",
+      "weight": 500,
+      "bytes": 1429444,
+      "sha256": "2a95feffcc53088fd36965b23248a6b929b243269140df4d0729eedd1d06fff2"
+    },
+    "noto-serif-sc-700.woff2": {
+      "family": "Noto Serif SC",
+      "weight": 700,
+      "bytes": 1457296,
+      "sha256": "3a0520b7e864a825f7a5800475c7c98ece3ff875eb3c33f6fe59460cc57c0afc"
+    },
+    "inter-400.woff2": {
+      "family": "Inter",
+      "weight": 400,
+      "bytes": 32004,
+      "sha256": "f81277ddcbf894feedb70f79576023bbe622d759758bbdb7991d63df3fce1182"
+    },
+    "inter-500.woff2": {
+      "family": "Inter",
+      "weight": 500,
+      "bytes": 32840,
+      "sha256": "77bee2bdd068c368a042c51a691fa63b0b93b970a35d04f90e993225706816ab"
+    },
+    "inter-700.woff2": {
+      "family": "Inter",
+      "weight": 700,
+      "bytes": 32828,
+      "sha256": "e4d314d0b74b0a58ae659b4d2bc6bca69282874f8c3b628cd04651335e0c131c"
+    }
+  }
+}

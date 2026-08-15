@@ -1,15 +1,15 @@
 /*
  * 全局样式基线。
  *
- * 字体栈在 P1（TP-1-04）接入自托管的 Noto Sans SC / Noto Serif SC —— 见设计稿 17.5。
- * 在那之前先用系统字体，不引用任何第三方字体 CDN（离线渲染会失败，
- * 且违反二十章「不直接引用第三方地址」的同类理由）。
+ * `--tps-font-*` 三个变量与 `@font-face` 规则都由 `components/FontFaces.tsx`
+ * 从 `@tps/fonts` 的清单派生后注入，**不在本文件里定义** —— 两处定义的生效顺序
+ * 取决于 Next 把样式表放在 `<head>` 的哪个位置，那是不该依赖的实现细节。
+ *
+ * 字体全部自托管，不引用任何第三方 CDN：离线渲染会失败，
+ * 且违反二十章「不直接引用第三方地址」的同类理由。
  */
 
 :root {
-  --tps-font-sans:
-    system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB',
-    sans-serif;
   --tps-text: #1a1a1a;
   --tps-bg: #ffffff;
 }
@@ -54,7 +54,7 @@ body {
   color: #fff;
   border-radius: 3px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -90,7 +90,7 @@ body {
 }
 
 .auth-panel__name {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .auth-panel__quota {
@@ -136,7 +136,7 @@ body {
 .auth-panel__tab.is-active {
   background: #fff;
   color: #1b1b1b;
-  font-weight: 600;
+  font-weight: 700;
   box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
 }
 
@@ -194,7 +194,7 @@ body {
   border: none;
   border-radius: 5px;
   font: inherit;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
 }
 

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { FontFaces } from '@/components/FontFaces';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -16,6 +17,9 @@ export default function RootLayout({ children }: { readonly children: ReactNode 
   // lang 固定 zh-CN（设计稿 1.1 输出语言）
   return (
     <html lang="zh-CN">
+      <head>
+        <FontFaces />
+      </head>
       <body>{children}</body>
     </html>
   );

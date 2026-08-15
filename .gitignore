@@ -44,3 +44,6 @@ Thumbs.db
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# TP-1-04：public/fonts 是 packages/fonts/assets 的构建期副本，不入库
+apps/web/public/fonts/

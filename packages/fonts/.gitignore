@@ -1,0 +1,2 @@
+# 源字体缓存：~42MB，可由 scripts/build-fonts.mjs 重新下载
+.cache/

@@ -1,0 +1,35 @@
+{
+  "name": "@tps/fonts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./assets/*": "./assets/*"
+  },
+  "files": [
+    "dist",
+    "assets",
+    "OFL.txt"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src scripts",
+    "test": "vitest run",
+    "fonts:build": "tsc -p tsconfig.build.json && node scripts/build-fonts.mjs",
+    "clean": "rimraf dist .turbo *.tsbuildinfo",
+    "fonts:scan": "node scripts/scan-coverage.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "subset-font": "^2.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

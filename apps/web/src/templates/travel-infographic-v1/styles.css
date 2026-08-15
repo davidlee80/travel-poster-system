@@ -105,6 +105,8 @@
 
 .hero__title {
   margin: 14px 0 8px;
+  /* 17.5：标题用衬线（Noto Serif SC），正文用无衬线 */
+  font-family: var(--tps-font-serif);
   font-size: var(--tps-title-size);
   line-height: 1.2;
   font-weight: 700;
@@ -185,7 +187,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--tps-accent);
   white-space: nowrap;
 }
@@ -193,7 +195,7 @@
 .schedule__title {
   margin: 0 0 4px;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .schedule__desc {
@@ -262,7 +264,7 @@
   margin-bottom: 6px;
   padding: 2px 8px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--tps-accent);
   background: var(--tps-accent-soft);
   border-radius: 3px;
@@ -271,7 +273,7 @@
 .card__name {
   margin: 0 0 4px;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .card__desc {
@@ -330,7 +332,7 @@
 }
 
 .route-alt__label {
-  font-weight: 600;
+  font-weight: 700;
   margin-right: 8px;
 }
 
@@ -371,7 +373,7 @@
 }
 
 .list__entity {
-  font-weight: 600;
+  font-weight: 700;
   margin-right: 6px;
 }
 
@@ -398,6 +400,15 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /*
+   * 17.5：金额用 Inter + tabular-nums。
+   *
+   * 等宽数字不是排版偏好 —— 比例数字下「¥180」与「¥240」的宽度不同，
+   * 右对齐的金额列会参差不齐，一眼看不出哪个数更大。
+   * 字体栈里 Inter 在前、Noto 在后，「元」「起」这类汉字逐字回退到 Noto。
+   */
+  font-family: var(--tps-font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .budget__row {
