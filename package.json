@@ -24,6 +24,7 @@
     "infra:logs": "docker compose -f infrastructure/docker-compose.yml logs -f",
     "verify:linux-guardrails": "node tools/verify-linux-guardrails.mjs",
     "test:integration": "turbo run test:integration",
+    "test:validation": "pnpm --filter @tps/planning exec vitest run plan-rules repair-plan resolve-plan",
     "fixture:render": "docker compose -f deploy/render-fixture.compose.yml run --rm --build render",
     "fixture:render:low-shm": "docker compose -f deploy/render-fixture.compose.yml --profile low-shm run --rm --build render-low-shm",
     "fixture:down": "docker compose -f deploy/render-fixture.compose.yml down -v",

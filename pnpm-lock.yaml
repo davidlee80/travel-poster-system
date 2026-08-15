@@ -87,6 +87,12 @@ importers:
       '@tps/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@tps/planning':
+        specifier: workspace:*
+        version: link:../../packages/planning
+      '@tps/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
       '@tps/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -277,6 +283,9 @@ importers:
 
   packages/planning:
     dependencies:
+      '@tps/presentation':
+        specifier: workspace:*
+        version: link:../presentation
       '@tps/schemas':
         specifier: workspace:*
         version: link:../schemas

@@ -20,6 +20,7 @@
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@tps/presentation": "workspace:*",
     "@tps/schemas": "workspace:*"
   },
   "devDependencies": {

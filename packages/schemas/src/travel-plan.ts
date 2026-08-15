@@ -58,6 +58,20 @@ export const ScheduleItemSchema = z.object({
   location: GeoLocationSchema,
   estimated_walking_km: z.number().finite(),
   estimated_cost: MoneySchema,
+  /**
+   * 是否适合携带儿童（R-20 新增）。
+   *
+   * 业务规则 V-33 是「`has_child === true` 时每日至少一条 `schedule` **标注**
+   * 适合儿童」。V1.2 的 `ScheduleItem` 没有任何这样的标注位，该规则因此
+   * 无法按字面实现 —— 只能改为在 `title` / `description` 里嗅探
+   * 「亲子」「适合小朋友」之类关键词。那样做的问题不是麻烦，而是**不可靠**：
+   * 命中与否取决于模型恰好用了哪个词，而 V-33 是 `ADVISORY`，它的产物
+   * （`assumptions`）会直接展示给用户。对一条其实很适合孩子的行程报
+   * 「未包含适合儿童的安排」，比不报更糟。
+   *
+   * 因此增加显式布尔位，由模型在结构化输出里标注。见设计稿修订 R-20。
+   */
+  child_friendly: z.boolean(),
 });
 export type ScheduleItem = z.infer<typeof ScheduleItemSchema>;
 

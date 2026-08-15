@@ -14,6 +14,8 @@
   "dependencies": {
     "@tps/db": "workspace:*",
     "@tps/observability": "workspace:*",
+    "@tps/planning": "workspace:*",
+    "@tps/schemas": "workspace:*",
     "@tps/shared": "workspace:*"
   },
   "devDependencies": {

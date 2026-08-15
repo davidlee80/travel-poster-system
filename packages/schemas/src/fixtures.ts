@@ -42,6 +42,8 @@ const SCHEDULE_TEMPLATES = [
     duration_minutes: 150,
     walking: 1.2,
     cost: 0,
+    // V-33 要求 has_child 时每日至少一条适合儿童的安排（R-20）
+    childFriendly: true,
   },
   {
     title: '大兜路历史街区漫步',
@@ -50,6 +52,7 @@ const SCHEDULE_TEMPLATES = [
     duration_minutes: 90,
     walking: 1.8,
     cost: 0,
+    childFriendly: false,
   },
   {
     title: '运河水上巴士游览',
@@ -63,6 +66,7 @@ const SCHEDULE_TEMPLATES = [
     duration_minutes: 60,
     walking: 0.6,
     cost: 10,
+    childFriendly: true,
   },
 ] as const;
 
@@ -95,6 +99,7 @@ function buildDay(dayNumber: number, startDate: string): TravelPlanDay {
       location: { ...tpl.location },
       estimated_walking_km: tpl.walking,
       estimated_cost: { amount: tpl.cost, currency: 'CNY' as const },
+      child_friendly: tpl.childFriendly,
     };
   });
 
@@ -242,11 +247,22 @@ export function makeTravelPlanFixture(options: FixtureOptions): TravelPlan {
     days,
 
     constraint_report: {
+      /*
+       * 这里的 code 必须与 @tps/planning 的请求 fixture 一一对应：
+       * V-30 要求「每个 must_conditions 都出现在 satisfied 中」，
+       * 缺一个就是 BLOCKING。两份 fixture 各自「看起来都合法」而配对后
+       * 触发 BLOCKING，会让 28 条规则的每个通过用例都因为同一个无关原因失败。
+       */
       satisfied: [
         {
           code: 'interest.history_culture',
           mode: 'SHOULD',
           evidence: '每一天都安排了博物馆或历史街区。',
+        },
+        {
+          code: 'accommodation.elevator',
+          mode: 'MUST',
+          evidence: '推荐的住宿区域均为有电梯的连锁酒店。',
         },
       ],
       violated: [],

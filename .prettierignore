@@ -5,5 +5,9 @@ dist/
 coverage/
 pnpm-lock.yaml
 **/__visual__/
+
+# 生成产物：由 packages/icon-library/scripts/generate.mjs 在每次 build/test 前重写，
+# 格式化它没有意义（下一次生成又会覆盖），却会让 format:check 在文件存在时失败。
+**/src/generated/
 *.min.js
 *.min.css
