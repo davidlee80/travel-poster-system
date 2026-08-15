@@ -22,3 +22,11 @@ export {
   type MigrationStatus,
 } from './migrate.js';
 export { migrationsDirectory } from './migrations-dir.js';
+export {
+  RetrievalTimeoutError,
+  createRetrievalRepository,
+  type RetrievalCandidate,
+  type RetrievalQuery,
+  type RetrievalRepository,
+  type RetrievalSource,
+} from './retrieval.js';

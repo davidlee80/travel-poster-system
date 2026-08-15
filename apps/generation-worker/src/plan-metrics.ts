@@ -50,6 +50,20 @@ export const planRepairIterations = createHistogram({
   ],
 });
 
+/**
+ * 21.3：3.2.4 全局检索命中率（TP-2-25）。
+ *
+ * `source` 区分 `versions`（在线计划的投影）与 `knowledge`
+ * （匿名数据清理后沉淀的脱敏知识，15.1）。分开统计是因为后者是否真的
+ * 被检索到，是「清理个人数据但保留行程知识」那套设计成立与否的唯一证据 ——
+ * 合成一个指标的话，知识库完全没被用到也看不出来。
+ */
+export const retrievalReferenceTotal = createCounter({
+  name: 'travel_retrieval_reference_total',
+  help: '全局历史检索的命中情况（按结局与来源）',
+  labelNames: ['outcome', 'source'],
+});
+
 /** 21.3：LLM 定向重生成次数，直接对应成本 */
 export const planRegenerationsTotal = createCounter({
   name: 'travel_plan_regenerations_total',

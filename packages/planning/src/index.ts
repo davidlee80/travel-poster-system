@@ -104,6 +104,13 @@ export {
 } from './resolve-plan.js';
 
 export {
+  buildRetrievalProjection,
+  normalizedRequestToEmbeddingText,
+  parseRetrievalProjection,
+  projectionToEmbeddingText,
+} from './retrieval-projection.js';
+
+export {
   FIXTURE_PLAN_DAYS,
   FIXTURE_PLAN_START_DATE,
   makeValidContext,

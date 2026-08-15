@@ -23,6 +23,7 @@ export * from './conditions.js';
 export * from './travel-request.js';
 export * from './error-codes.js';
 export * from './travel-plan.js';
+export * from './retrieval-projection.js';
 export * from './view-model.js';
 export { travelPlanJsonSchema, travelPlanLlmOutputJsonSchema } from './json-schema.js';
 export { TRAVEL_PLAN_FIXTURES, makeTravelPlanFixture, type FixtureOptions } from './fixtures.js';

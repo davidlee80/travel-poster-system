@@ -18,6 +18,13 @@ export const SCHEMA_VERSIONS = {
    */
   normalizedTravelRequest: 'normalized_travel_request_v1',
   travelPlan: 'travel_plan_v1',
+  /*
+   * 脱敏投影（3.2.4）也有版本号，理由比其他契约更硬：它被**跨用户**读取。
+   * 投影结构变更后，库里仍有大量按旧规则裁剪的行，而「旧规则漏掉了某个
+   * 该剔的字段」这种修订必须能按版本号筛出受影响的行重算 ——
+   * 没有版本号就只能全表重算或干脆不管，后者是隐私事故。
+   */
+  retrievalProjection: 'retrieval_projection_v1',
   assetRequirement: 'asset_requirement_v1',
   resolvedAsset: 'resolved_asset_v1',
   travelPosterViewModel: 'travel_poster_view_model_v1',
