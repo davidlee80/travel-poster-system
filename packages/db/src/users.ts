@@ -229,23 +229,21 @@ export function createUsersRepository(pool: Pool): UsersRepository {
       try {
         await client.query('BEGIN');
 
-        // 固定顺序，全部为 `WHERE user_id = :anon` 的条件更新 → 幂等，
-        // 中途失败整体回滚，客户端下次登录重试即可（13.9.4）
+        /*
+         * 13.9.4 的固定顺序，全部为 `WHERE user_id = :anon` 的条件更新
+         * → 幂等；中途失败整体回滚，客户端下次登录重试即可。
+         *
+         * P1 曾在这里先查 information_schema 跳过尚不存在的表（四张业务表
+         * 到 P2 才建）。TP-2-01 建完后那个兜底必须去掉：它会把「表名写错」
+         * 静默变成「改挂 0 行」，而归并少改一张表的表现是用户注册后
+         * 发现部分历史计划不见了 —— 没有任何报错。
+         *
+         * **`idempotency_key` 保持原值不重算**（TP-2-27）。它描述的是
+         * 「当时那次提交」，不是「现在的归属」。重算会同时带来唯一约束冲突
+         * 与语义错误：匿名期与注册期提交过相同需求时，两行会算出同一个键。
+         */
         const counts: Record<string, number> = {};
         for (const table of ['travel_requests', 'travel_plans', 'generation_jobs', 'exports']) {
-          // 表在 P2 才创建；P1 阶段跳过尚不存在的表，使归并逻辑可以先行上线
-          const exists = await client.query<{ exists: boolean }>(
-            `SELECT EXISTS (
-               SELECT 1 FROM information_schema.tables
-               WHERE table_schema = 'public' AND table_name = $1
-             ) AS exists`,
-            [table],
-          );
-          if (exists.rows[0]?.exists !== true) {
-            counts[table] = 0;
-            continue;
-          }
-
           // 表名来自上面的常量白名单，非用户输入，因此可以内插
           const updated = await client.query(
             `UPDATE ${table} SET user_id = $2 WHERE user_id = $1`,
@@ -254,6 +252,10 @@ export function createUsersRepository(pool: Pool): UsersRepository {
           counts[table] = updated.rowCount ?? 0;
         }
 
+        /*
+         * `status <> 'MERGED'` 让重复执行不再改写 merged_into ——
+         * 否则同一匿名身份被两个账号先后归并时，审计链会指向后者。
+         */
         await client.query(
           `UPDATE users SET status = 'MERGED', merged_into = $2
            WHERE id = $1 AND status <> 'MERGED'`,

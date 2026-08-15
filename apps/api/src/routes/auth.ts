@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { COOKIE_NAMES, type QuotaGuard, cookieAttributes } from '@tps/shared';
+import { COOKIE_NAMES, type QuotaGuard } from '@tps/shared';
 import { buildErrorBody, errorDefinition, type ErrorCode } from '../errors/codes.js';
 import { recordIdentityEvent, recordIdentityType } from '../identity/metrics.js';
-import type { CookieMutation, Identity, IdentityService } from '../identity/service.js';
+import type { Identity, IdentityService } from '../identity/service.js';
+import { applyCookies, parseCookies } from './identity-context.js';
 
 /**
  * 身份与账号端点（设计稿 13.9）。
@@ -28,51 +29,6 @@ export interface AuthRoutesDeps {
   readonly identity: IdentityService;
   readonly quota: QuotaGuard;
   readonly secureCookies: boolean;
-}
-
-/** 解析 Cookie 头。不引入 @fastify/cookie：只需读两个固定名字。 */
-export function parseCookies(header: string | undefined): Record<string, string> {
-  if (header === undefined || header.length === 0) return {};
-
-  const out: Record<string, string> = {};
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=');
-    if (eq <= 0) continue;
-    const name = part.slice(0, eq).trim();
-    const value = part.slice(eq + 1).trim();
-    if (name.length > 0) out[name] = decodeURIComponent(value);
-  }
-  return out;
-}
-
-function applyCookies(
-  reply: FastifyReply,
-  mutations: readonly CookieMutation[],
-  secure: boolean,
-): void {
-  for (const mutation of mutations) {
-    const attrs = cookieAttributes(mutation.maxAgeSeconds, secure);
-    const segments = [
-      `${mutation.name}=${mutation.value === null ? '' : encodeURIComponent(mutation.value)}`,
-      `Path=${attrs.path}`,
-      `Max-Age=${mutation.value === null ? 0 : attrs.maxAge}`,
-      'HttpOnly',
-      'SameSite=Lax',
-    ];
-    if (attrs.secure) segments.push('Secure');
-    if (mutation.value === null) segments.push('Expires=Thu, 01 Jan 1970 00:00:00 GMT');
-
-    // 一次响应可能设置多个 Cookie，必须追加而非覆盖
-    const existing = reply.getHeader('set-cookie');
-    const next = segments.join('; ');
-    if (existing === undefined) {
-      reply.header('set-cookie', next);
-    } else if (Array.isArray(existing)) {
-      reply.header('set-cookie', [...existing, next]);
-    } else {
-      reply.header('set-cookie', [String(existing), next]);
-    }
-  }
 }
 
 function fail(

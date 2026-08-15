@@ -12,7 +12,7 @@ import { FakeUsersRepository } from '../identity/fake-users-repository.js';
 import { InMemorySessionStore } from '../identity/session-store.js';
 import { IdentityService } from '../identity/service.js';
 import { buildServer } from '../server.js';
-import { parseCookies } from './auth.js';
+import { parseCookies } from './identity-context.js';
 
 /**
  * 端点层测试：只覆盖 HTTP 映射（状态码、Set-Cookie、错误体形态）。

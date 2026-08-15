@@ -1,4 +1,5 @@
 export {
+  LOG_REDACT_PATHS,
   createAuditLogger,
   createLogger,
   createSilentLogger,
@@ -8,6 +9,15 @@ export {
 export { GracefulShutdown, type ShutdownHook, type ShutdownOptions } from './shutdown.js';
 export { runWorker, type WorkerDefinition, type WorkerHandle } from './worker-runtime.js';
 export * from './identity/index.js';
+export {
+  IDEMPOTENCY_LOCK_TTL_SECONDS,
+  IDEMPOTENCY_RESULT_TTL_DAYS,
+  InMemoryIdempotencyLock,
+  canonicalJson,
+  computeIdempotencyKey,
+  type IdempotencyKeyInput,
+  type IdempotencyLock,
+} from './idempotency.js';
 export {
   ConfigError,
   loadServiceConfig,

@@ -2,6 +2,7 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { metricsContentType, metricsText } from '@tps/observability';
 import type { GracefulShutdown, Logger, ServiceConfig } from '@tps/shared';
 import { registerAuthRoutes, type AuthRoutesDeps } from './routes/auth.js';
+import { registerTravelPlanRoutes, type TravelPlanRoutesDeps } from './routes/travel-plans.js';
 
 /**
  * API 服务（P0 骨架）。
@@ -20,10 +21,12 @@ export interface ServerDeps {
   readonly checkDependencies?: () => Promise<{ ok: boolean; detail: Record<string, boolean> }>;
   /** 身份与账号端点（13.9）。未提供时不注册这些路由（便于探针的独立测试）。 */
   readonly auth?: AuthRoutesDeps;
+  /** 计划端点（13.1～13.3、13.9.5）。同上，未提供时不注册。 */
+  readonly travelPlans?: TravelPlanRoutesDeps;
 }
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
-  const { config, logger, shutdown, checkDependencies, auth } = deps;
+  const { config, logger, shutdown, checkDependencies, auth, travelPlans } = deps;
 
   /*
    * 显式标注为 FastifyBaseLogger，而不是直接把 pino 的 Logger 传进 Fastify。
@@ -88,6 +91,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   if (auth !== undefined) {
     registerAuthRoutes(app, auth);
+  }
+  if (travelPlans !== undefined) {
+    registerTravelPlanRoutes(app, travelPlans);
   }
 
   return app;

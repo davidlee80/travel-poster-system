@@ -1,25 +1,30 @@
 {
-  "name": "@tps/api",
+  "name": "@tps/queue",
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests",
-    "dev": "node --watch --enable-source-maps dist/main.js",
-    "start": "node --enable-source-maps dist/main.js",
+    "test": "vitest run --exclude \"**/*.integration.test.ts\" --passWithNoTests",
+    "test:integration": "vitest run integration --no-file-parallelism",
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@tps/db": "workspace:*",
-    "@tps/planning": "workspace:*",
-    "@tps/queue": "workspace:*",
-    "@tps/observability": "workspace:*",
-    "@tps/shared": "workspace:*",
-    "fastify": "^5.6.1",
     "@tps/schemas": "workspace:*",
+    "@tps/shared": "workspace:*",
+    "bullmq": "^5.65.0",
+    "ioredis": "^5.9.0",
     "zod": "^4.1.13"
   },
   "devDependencies": {

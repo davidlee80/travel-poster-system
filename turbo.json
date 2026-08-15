@@ -30,7 +30,7 @@
       "dependsOn": ["^build"],
       "outputs": [],
       "cache": false,
-      "env": ["DATABASE_URL"]
+      "env": ["DATABASE_URL", "REDIS_URL"]
     }
   }
 }

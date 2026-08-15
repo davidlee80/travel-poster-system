@@ -11,13 +11,29 @@ describe('错误码体系（13.7、13.9.6）', () => {
   const codes = Object.keys(ERROR_CATALOG) as ErrorCode[];
 
   it('每个码都有 HTTP 状态、retryable 与中文提示', () => {
+    /*
+     * `JOB_CANCELLED` 是全表唯一的非 4xx/5xx 码：13.7 给它 200 ——
+     * 取消是用户主动行为，不是错误，但它仍然通过同一个响应信封返回，
+     * 因此留在码表里。
+     *
+     * 显式列出而不是把下界放宽到 200：放宽后任何新增的「2xx 错误码」
+     * 都会静默通过，而那通常意味着某个失败被当成了成功。
+     */
+    const nonErrorCodes = new Set<ErrorCode>(['JOB_CANCELLED']);
+
     for (const code of codes) {
       const def = errorDefinition(code);
-      expect(def.httpStatus, code).toBeGreaterThanOrEqual(400);
+      if (!nonErrorCodes.has(code)) {
+        expect(def.httpStatus, code).toBeGreaterThanOrEqual(400);
+      }
       expect(def.httpStatus, code).toBeLessThan(600);
       expect(typeof def.retryable, code).toBe('boolean');
       expect(def.message, code).toMatch(/\S/);
     }
+
+    expect([...codes].filter((code) => errorDefinition(code).httpStatus < 400)).toEqual([
+      'JOB_CANCELLED',
+    ]);
   });
 
   it('4xx 中只有 429 可重试（其余 4xx 是客户端问题，重试无用）', () => {

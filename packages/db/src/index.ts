@@ -30,3 +30,17 @@ export {
   type RetrievalRepository,
   type RetrievalSource,
 } from './retrieval.js';
+export {
+  createTravelPlansRepository,
+  decodeCursor,
+  encodeCursor,
+  type CreateGenerationInput,
+  type ExistingGeneration,
+  type GenerationHandles,
+  type JobDetail,
+  type ListPlansInput,
+  type PlanDetail,
+  type PlanListItem,
+  type PlanListPage,
+  type TravelPlansRepository,
+} from './travel-plans.js';

@@ -6,12 +6,25 @@ import {
   loadServiceConfig,
   nodeEnv,
   optionalBool,
-  InMemoryCounterStore,
+  requireString,
 } from '@tps/shared';
 import { registerDefaultMetrics } from '@tps/observability';
-import { checkDatabase, createPool, createUsersRepository, loadDbConfig } from '@tps/db';
+import {
+  checkDatabase,
+  createPool,
+  createTravelPlansRepository,
+  createUsersRepository,
+  loadDbConfig,
+} from '@tps/db';
+import {
+  BullMqPlanQueue,
+  RedisCounterStore,
+  RedisIdempotencyLock,
+  createQueueRedis,
+  createRedis,
+} from '@tps/queue';
 import { IdentityService } from './identity/service.js';
-import { InMemorySessionStore } from './identity/session-store.js';
+import { RedisSessionStore } from './identity/redis-session-store.js';
 import { buildServer } from './server.js';
 
 const SERVICE_NAME = 'tps-api';
@@ -42,18 +55,28 @@ async function main(): Promise<void> {
   });
 
   /*
-   * P1 使用进程内的会话与计数存储。
+   * P2：会话、配额计数、幂等锁、队列全部走 Redis。
    *
-   * 两者都是**多实例不安全**的：会话存内存会导致负载均衡下随机登出，
-   * 计数存内存会导致配额按实例各算一份。Redis 实现在 P2 随队列一起接入
-   * （TP-2-08 的幂等锁同样需要 Redis），届时只需替换这两处的实现。
-   *
-   * 现在就用内存实现而不是等 Redis：身份链路的正确性可以先在单实例下
-   * 验证完，避免把「身份逻辑对不对」与「Redis 接得对不对」两个问题耦合在
-   * 一起排查。
+   * `REDIS_URL` 是**必填**，没有内存兜底。兜底的诱惑很大（本地少起一个容器），
+   * 但它的失效方式是静默的：多实例下会话存内存 → 随机登出，
+   * 计数存内存 → 配额按实例各算一份（3 个实例等于 3 倍额度），
+   * 幂等锁存内存 → 同键并发落到不同实例时都能抢到锁。
+   * 三者都不会报错，只会「偶尔行为不对」。启动就失败要好得多。
    */
-  const sessions = new InMemorySessionStore();
-  const counters = new InMemoryCounterStore();
+  const redisUrl = requireString('REDIS_URL');
+  const redis = createRedis(redisUrl);
+  const queueRedis = createQueueRedis(redisUrl);
+  shutdown.register('redis', async () => {
+    await redis.quit();
+    await queueRedis.quit();
+  });
+
+  const sessions = new RedisSessionStore(redis);
+  const counters = new RedisCounterStore(redis);
+  const queue = new BullMqPlanQueue(queueRedis);
+  shutdown.register('plan-queue', async () => {
+    await queue.close();
+  });
 
   const quota = new QuotaGuard({ config: quotaConfig, store: counters, now: () => new Date() });
 
@@ -76,13 +99,28 @@ async function main(): Promise<void> {
       quota,
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
     },
+    travelPlans: {
+      identity,
+      quota,
+      queue,
+      plans: createTravelPlansRepository(pool),
+      idempotencyLock: new RedisIdempotencyLock(redis),
+      secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
+      now: () => new Date(),
+    },
     checkDependencies: async () => {
+      const detail = { postgres: false, redis: false };
       try {
-        const db = await checkDatabase(pool);
-        return { ok: db.ok, detail: { postgres: db.ok } };
+        detail.postgres = (await checkDatabase(pool)).ok;
       } catch {
-        return { ok: false, detail: { postgres: false } };
+        detail.postgres = false;
       }
+      try {
+        detail.redis = (await redis.ping()) === 'PONG';
+      } catch {
+        detail.redis = false;
+      }
+      return { ok: detail.postgres && detail.redis, detail };
     },
   });
 
@@ -103,7 +141,7 @@ async function main(): Promise<void> {
       anon_daily_quota: quotaConfig.anonymous.dailyPlans,
       registered_daily_quota: quotaConfig.registered.dailyPlans,
       ip_daily_quota: quotaConfig.ip.plansPerDay,
-      session_store: 'in-memory (P1)',
+      session_store: 'redis',
     },
     'API 已启动',
   );

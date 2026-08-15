@@ -1,8 +1,16 @@
+import { DOMAIN_ERRORS } from '@tps/schemas';
+
 /**
  * 错误码体系（设计稿 13.7、13.9.6）。
  *
- * P1 只落地 `AUTH` 域 —— 其余域随对应功能在 P2/P4 加入。
- * 每个码有唯一的 HTTP 状态与 `retryable` 语义，由类型保证不漏配。
+ * 全表由两部分拼成：
+ *   `AUTH` 域       在本文件 —— 它与会话、Cookie、限流紧密耦合，
+ *                   只有 api 会产生它，没有第二个引用方；
+ *   其余四域        在 `@tps/schemas` 的 `DOMAIN_ERRORS` —— 生产它们的地方
+ *                   不止一个（请求校验在 @tps/planning、渲染在 render-worker），
+ *                   放共享包里三处引用同一张表。
+ *
+ * 每个码有唯一的 HTTP 状态与 `retryable` 语义，由测试保证两部分不重名。
  *
  * 命名规则：`<域>_<具体原因>`，全大写下划线。
  */
@@ -73,22 +81,14 @@ export const AUTH_ERRORS = {
   },
 } as const satisfies Record<string, ErrorDefinition>;
 
-/** 请求校验域（13.7）。P2 补全 N-01～N-12，P1 只需通用形态。 */
-export const REQ_ERRORS = {
-  REQ_SCHEMA_INVALID: {
-    httpStatus: 400,
-    retryable: false,
-    message: '请求内容格式不正确。',
-  },
-} as const satisfies Record<string, ErrorDefinition>;
-
-/** 系统域（13.7） */
+/**
+ * api 独有的系统域。
+ *
+ * `SYS_INTERNAL_ERROR` 在 `DOMAIN_ERRORS` 里（JOB 域），这里只补
+ * `SYS_DEPENDENCY_UNAVAILABLE` —— 它只由 `/readyz` 产生，
+ * 属于运维探针而不是业务错误。
+ */
 export const SYS_ERRORS = {
-  SYS_INTERNAL_ERROR: {
-    httpStatus: 500,
-    retryable: true,
-    message: '服务暂时不可用，请稍后重试。',
-  },
   SYS_DEPENDENCY_UNAVAILABLE: {
     httpStatus: 503,
     retryable: true,
@@ -97,8 +97,8 @@ export const SYS_ERRORS = {
 } as const satisfies Record<string, ErrorDefinition>;
 
 export const ERROR_CATALOG = {
+  ...DOMAIN_ERRORS,
   ...AUTH_ERRORS,
-  ...REQ_ERRORS,
   ...SYS_ERRORS,
 } as const;
 
@@ -106,6 +106,18 @@ export type ErrorCode = keyof typeof ERROR_CATALOG;
 
 export function errorDefinition(code: ErrorCode): ErrorDefinition {
   return ERROR_CATALOG[code];
+}
+
+/**
+ * 按**任意字符串**查文案，用于数据库里存的 `error_code`。
+ *
+ * `generation_jobs.error_code` 是 `VARCHAR(60)`，可能是旧版本写入的码，
+ * 也可能是某次改名后失效的码。返回 `undefined` 让调用方走兜底文案，
+ * 而不是让 `ERROR_CATALOG[code]` 返回 `undefined` 再被拼成
+ * 「undefined」显示给用户。
+ */
+export function messageForCode(code: string): string | undefined {
+  return (ERROR_CATALOG as Record<string, ErrorDefinition | undefined>)[code]?.message;
 }
 
 /** 13.0 定义的统一错误响应体 */

@@ -189,13 +189,6 @@ export const RENDER_ERRORS = {
     retryable: true,
     message: '渲染超时，请重试。',
   },
-  RENDER_OVERFLOW_UNRESOLVED: {
-    httpStatus: 500,
-    retryable: false,
-    // 17.3：产物仍然输出，只标记降级。因此它其实不该走 HTTP 错误路径 ——
-    // 保留映射是为了让 13.7 的表完整，实际使用见 plan_presentations.validation_status
-    message: '部分内容排版拥挤，已按可读性优先调整。',
-  },
   EXPORT_PNG_FAILED: {
     httpStatus: 500,
     retryable: true,
@@ -217,6 +210,29 @@ export const RENDER_ERRORS = {
     message: '计划已更新，请重新发起导出。',
   },
 } as const satisfies Record<string, ErrorDefinition>;
+
+/**
+ * 渲染域的**非阻断**告警码（R-24 修订）。
+ *
+ * `RENDER_OVERFLOW_UNRESOLVED` 原本在上面的 HTTP 表里，标成
+ * `500` + `retryable: false`。那个组合本身是矛盾的：5xx 表示服务端出错、
+ * 客户端应当重试，而一个不可重试的 5xx 让客户端无从处置。
+ *
+ * 根因是它压根不走 HTTP 错误路径 —— 17.3 明确「输出当前产物 +
+ * `validation_status = 'DEGRADED'`」，任务照常 `COMPLETED`。给它一个
+ * httpStatus 只会诱导某处把降级当失败返回，而那会让「有一页排版拥挤」
+ * 变成「整个任务失败」。
+ *
+ * 因此按 `ASSET_WARNING_CODES` 的先例移出 HTTP 表：非阻断的东西不是 HTTP
+ * 错误，这一点由类型保证 —— 它根本没有 `httpStatus` 可取。
+ */
+export const RENDER_WARNING_CODES = ['RENDER_OVERFLOW_UNRESOLVED'] as const;
+export type RenderWarningCode = (typeof RENDER_WARNING_CODES)[number];
+
+/** 降级时给用户的说明。它不是错误文案，因此与错误表分开 */
+export const RENDER_WARNING_MESSAGES: Record<RenderWarningCode, string> = {
+  RENDER_OVERFLOW_UNRESOLVED: '部分内容排版拥挤，已按可读性优先调整。',
+};
 
 /** JOB / SYS 域（13.7） */
 export const JOB_ERRORS = {
