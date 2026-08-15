@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
 import { createPool } from './pool.js';
 import { migrate } from './migrate.js';
+import { migrationsDirectory } from './migrations-dir.js';
 import { UniqueViolationError, createUsersRepository, type UsersRepository } from './users.js';
 
 /**
@@ -34,7 +35,7 @@ describeIntegration('users 表约束（集成，需 PostgreSQL）', () => {
       connectionTimeoutMs: 5_000,
       statementTimeoutMs: 10_000,
     });
-    await migrate(pool, new URL('../../../infrastructure/migrations', import.meta.url).pathname);
+    await migrate(pool, migrationsDirectory());
     repo = createUsersRepository(pool);
   });
 

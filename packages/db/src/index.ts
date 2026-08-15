@@ -21,3 +21,4 @@ export {
   type Migration,
   type MigrationStatus,
 } from './migrate.js';
+export { migrationsDirectory } from './migrations-dir.js';

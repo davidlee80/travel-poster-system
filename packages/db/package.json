@@ -18,7 +18,7 @@
     "lint": "eslint src",
     "test": "vitest run --exclude \"**/*.integration.test.ts\" --passWithNoTests",
     "clean": "rimraf dist .turbo *.tsbuildinfo",
-    "test:integration": "vitest run src/**/*.integration.test.ts"
+    "test:integration": "vitest run integration --no-file-parallelism"
   },
   "dependencies": {
     "@tps/shared": "workspace:*",
