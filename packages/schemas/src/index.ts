@@ -19,6 +19,9 @@ export { SCHEMA_VERSIONS, type SchemaVersion, type SchemaVersionKey } from './ve
 
 export * from './enums.js';
 export * from './primitives.js';
+export * from './conditions.js';
+export * from './travel-request.js';
+export * from './error-codes.js';
 export * from './travel-plan.js';
 export * from './view-model.js';
 export { travelPlanJsonSchema, travelPlanLlmOutputJsonSchema } from './json-schema.js';

@@ -11,6 +11,12 @@
  */
 export const SCHEMA_VERSIONS = {
   travelRequestUi: 'travel_request_ui_v1',
+  /*
+   * 标准化结果也有版本号：它被持久化在 travel_requests.normalized_request，
+   * 而标准化规则会演进（3.1.1 的默认值表、5.1 的条件字典）。
+   * 没有版本号时，改了规则就无法判断库里那行是按哪版算出来的。
+   */
+  normalizedTravelRequest: 'normalized_travel_request_v1',
   travelPlan: 'travel_plan_v1',
   assetRequirement: 'asset_requirement_v1',
   resolvedAsset: 'resolved_asset_v1',
