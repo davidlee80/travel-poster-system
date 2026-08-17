@@ -108,6 +108,51 @@ export const LOCALE_VALUES = ['zh-CN'] as const;
 export const LocaleSchema = z.enum(LOCALE_VALUES);
 export type Locale = (typeof LOCALE_VALUES)[number];
 
+// ── 七章：AssetRequirement ─────────────────────────────────
+
+/**
+ * 槽位角色（设计稿七章的 `role`）。
+ *
+ * 只有四个 —— 与九章的四条来源决策规则一一对应（9.2 路线图、9.3 Hero、
+ * 9.4 景点图、9.5 美食图）。图标不在此列：9.1 的图标在编译期内联进产物，
+ * 不走素材解析（因此也没有 `ICON` 角色的槽位）。
+ *
+ * 16.3：只有 `HERO_BACKGROUND` 与 `ROUTE_MAP` 是 `required: true`。
+ */
+export const ASSET_ROLE_VALUES = [
+  'HERO_BACKGROUND',
+  'FOOD_IMAGE',
+  'DESTINATION_PHOTO',
+  'ROUTE_MAP',
+] as const;
+export const AssetRoleSchema = z.enum(ASSET_ROLE_VALUES);
+export type AssetRole = (typeof ASSET_ROLE_VALUES)[number];
+
+/**
+ * 需求侧的素材类型（设计稿七章的 `asset_type`）。
+ *
+ * 注意它与八章 `asset.asset_type`（`IMAGE`/`SVG`/`ICON`）**不是同一个枚举**：
+ * 这里表达的是「可以接受哪些来源」，八章表达的是「拿到的东西是什么」。
+ * 同名不同义是设计稿的写法，改名会让代码与文档对不上，因此保留原名，
+ * 用类型名区分（`RequirementAssetType` / `AssetType`）。
+ */
+export const REQUIREMENT_ASSET_TYPE_VALUES = [
+  'AI_ILLUSTRATION',
+  'PHOTO_OR_AI',
+  'REAL_PHOTO_PREFERRED',
+  'GENERATED_SVG',
+] as const;
+export const RequirementAssetTypeSchema = z.enum(REQUIREMENT_ASSET_TYPE_VALUES);
+export type RequirementAssetType = (typeof REQUIREMENT_ASSET_TYPE_VALUES)[number];
+
+/** 视觉风格（七章 `visual_constraints.style`）。小写形式进缓存键（19.1） */
+export const VISUAL_STYLE_VALUES = [
+  'CHINESE_TRAVEL_EDITORIAL',
+  'REALISTIC_FOOD_PHOTOGRAPHY',
+] as const;
+export const VisualStyleSchema = z.enum(VISUAL_STYLE_VALUES);
+export type VisualStyle = (typeof VISUAL_STYLE_VALUES)[number];
+
 // ── 八章：ResolvedAsset ────────────────────────────────────
 
 export const ASSET_STATUS_VALUES = ['RESOLVED', 'FALLBACK', 'SKIPPED', 'FAILED'] as const;
@@ -136,6 +181,88 @@ export type AssetSourceType = (typeof ASSET_SOURCE_TYPE_VALUES)[number];
 export const REPRESENTATION_TYPE_VALUES = ['PHOTOGRAPHIC', 'ILLUSTRATIVE'] as const;
 export const RepresentationTypeSchema = z.enum(REPRESENTATION_TYPE_VALUES);
 export type RepresentationType = (typeof REPRESENTATION_TYPE_VALUES)[number];
+
+/** 授权类型（8.1）。评分见 10.1 的 `license_score` */
+export const LICENSE_TYPE_VALUES = ['PLATFORM_OWNED', 'LICENSED', 'AI_GENERATED', 'CC0'] as const;
+export const LicenseTypeSchema = z.enum(LICENSE_TYPE_VALUES);
+export type LicenseType = (typeof LICENSE_TYPE_VALUES)[number];
+
+/**
+ * 解析策略（8.1）。
+ *
+ * `CACHE_HIT` 与其余策略不是同一量纲：它的 `score` 恒为 1.0，表示「精确键
+ * 命中」而不是相似度 1.0（19.4）。区分二者靠的就是这个字段。
+ */
+export const RESOLUTION_STRATEGY_VALUES = [
+  'LOCAL_LIBRARY_MATCH',
+  'LICENSED_SOURCE_MATCH',
+  'AI_GENERATION',
+  'SVG_RENDER',
+  'CACHE_HIT',
+  'STATIC_DEFAULT',
+  'TEXT_FALLBACK',
+] as const;
+export const ResolutionStrategySchema = z.enum(RESOLUTION_STRATEGY_VALUES);
+export type ResolutionStrategy = (typeof RESOLUTION_STRATEGY_VALUES)[number];
+
+/** 文字降级的形态（8.2）。V1 只有路线节点列表一种 */
+export const TEXT_FALLBACK_KIND_VALUES = ['ROUTE_NODE_LIST'] as const;
+export const TextFallbackKindSchema = z.enum(TEXT_FALLBACK_KIND_VALUES);
+export type TextFallbackKind = (typeof TEXT_FALLBACK_KIND_VALUES)[number];
+
+// ── 十五章 / 十九章：素材存储 ──────────────────────────────
+
+/**
+ * 素材的在架状态。
+ *
+ * 19.3 的失效条件表里三类素材都写着「人工下架（`assets.status`）」，
+ * 但十五章的建表 SQL 没有这一列 —— 迁移 0005 补上了它，见该文件头。
+ * 下架是**标记**而不是删除：`plan_asset_bindings.asset_id` 是
+ * `ON DELETE RESTRICT`，而绑定记录本身是二十章可追溯性的一环。
+ */
+export const ASSET_RECORD_STATUS_VALUES = ['ACTIVE', 'RETIRED'] as const;
+export const AssetRecordStatusSchema = z.enum(ASSET_RECORD_STATUS_VALUES);
+export type AssetRecordStatus = (typeof ASSET_RECORD_STATUS_VALUES)[number];
+
+/** `asset_variants.variant_type`（11.2 第 5 步） */
+export const ASSET_VARIANT_TYPE_VALUES = ['ORIGINAL', 'THUMBNAIL'] as const;
+export const AssetVariantTypeSchema = z.enum(ASSET_VARIANT_TYPE_VALUES);
+export type AssetVariantType = (typeof ASSET_VARIANT_TYPE_VALUES)[number];
+
+/**
+ * 路线图风格（14.2 的 `style`，进地图缓存键）。
+ *
+ * V1 只有一种 —— 与 `DESTINATION_MODE`（仅 `FIXED`）、`CURRENCY`（仅 `CNY`）
+ * 同样的处理：枚举先立起来，键格式与类型不必等到第二种风格出现才改。
+ */
+export const MAP_STYLE_VALUES = ['CANAL_GREEN'] as const;
+export const MapStyleSchema = z.enum(MAP_STYLE_VALUES);
+export type MapStyle = (typeof MAP_STYLE_VALUES)[number];
+
+/**
+ * 主题语义桶（19.1 的 12 个 + `general`）。
+ *
+ * 这是 Hero 缓存能命中的**唯一原因**：`theme` 是 LLM 自由生成的中文短语
+ * （「运河人文·古今交融」），直接归一化会得到几乎唯一的键。
+ * 值本身就是小写形式，因为它们直接进缓存键，不再转换。
+ */
+export const THEME_BUCKET_VALUES = [
+  'canal_culture',
+  'lake_scenery',
+  'old_town',
+  'museum_art',
+  'food_street',
+  'mountain_nature',
+  'temple_heritage',
+  'modern_city',
+  'night_view',
+  'garden_classic',
+  'coastal',
+  'family_park',
+  'general',
+] as const;
+export const ThemeBucketSchema = z.enum(THEME_BUCKET_VALUES);
+export type ThemeBucket = (typeof THEME_BUCKET_VALUES)[number];
 
 // ── 三章 3.3.1：展示编排 ───────────────────────────────────
 
