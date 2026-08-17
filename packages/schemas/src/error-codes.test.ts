@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ASSET_WARNING_CODES,
+  BLOCKING_DECISIONS,
   DOMAIN_ERRORS,
   JOB_ERRORS,
   PLAN_ERRORS,
   RENDER_ERRORS,
   REQUEST_ERRORS,
+  isBlocking,
 } from './error-codes.js';
 
 /**
@@ -153,5 +155,57 @@ describe('ASSET 域', () => {
     for (const code of ASSET_WARNING_CODES) {
       expect(Object.keys(DOMAIN_ERRORS), `${code} 混进了 HTTP 错误表`).not.toContain(code);
     }
+  });
+});
+
+describe('16.3 阻断判定表（TP-4-09）', () => {
+  it('16.3 的六个阻断码全部登记为阻断', () => {
+    for (const code of [
+      'PLAN_SCHEMA_INVALID',
+      'PLAN_HARD_CONSTRAINT_UNSATISFIABLE',
+      'PLAN_REPAIR_EXHAUSTED',
+      'PLAN_PERSIST_FAILED',
+      'RENDER_CORE_ASSET_MISSING',
+      'RENDER_TEMPLATE_FAILED',
+    ]) {
+      expect(isBlocking(code), code).toBe(true);
+    }
+  });
+
+  it('全部 ASSET 告警码都是非阻断（13.7：只写入任务告警）', () => {
+    for (const code of ASSET_WARNING_CODES) {
+      expect(isBlocking(code), code).toBe(false);
+    }
+  });
+
+  it('RENDER_OVERFLOW_UNRESOLVED 非阻断（R-24：它压根不走 HTTP 错误路径）', () => {
+    expect(isBlocking('RENDER_OVERFLOW_UNRESOLVED')).toBe(false);
+  });
+
+  it('两个导出失败非阻断（16.1：重试一次后跳到下一状态，最终仍 COMPLETED）', () => {
+    expect(isBlocking('EXPORT_PNG_FAILED')).toBe(false);
+    expect(isBlocking('EXPORT_PDF_FAILED')).toBe(false);
+  });
+
+  it('未登记的码按阻断处理（宁可明确失败，不要标成已完成但内容不全）', () => {
+    expect(isBlocking('SOMETHING_WE_DID_NOT_FORESEE')).toBe(true);
+  });
+
+  it('每条决定都带一句降级动作，供排查时对照 16.3', () => {
+    for (const [code, decision] of Object.entries(BLOCKING_DECISIONS)) {
+      expect(decision.degradation.length, code).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('16.3 超时码', () => {
+  it('任务与队列超时各有专属码，且可重试', () => {
+    expect(DOMAIN_ERRORS.JOB_TIMEOUT).toMatchObject({ httpStatus: 504, retryable: true });
+    expect(DOMAIN_ERRORS.JOB_TIMEOUT.message.length).toBeGreaterThan(0);
+    expect(DOMAIN_ERRORS.JOB_QUEUE_TIMEOUT.retryable).toBe(true);
+  });
+
+  it('13.7 的 SYS_DEPENDENCY_UNAVAILABLE 是 503', () => {
+    expect(DOMAIN_ERRORS.SYS_DEPENDENCY_UNAVAILABLE.httpStatus).toBe(503);
   });
 });

@@ -252,11 +252,35 @@ export const JOB_ERRORS = {
     retryable: false,
     message: '任务已取消。',
   },
+  /**
+   * 16.3 的两个超时码。13.7 的表格里没有它们，但 16.3 的超时表点名要求
+   * 「`FAILED` + `JOB_TIMEOUT`」与「`FAILED` + `JOB_QUEUE_TIMEOUT`」——
+   * 少了它们，超时只能落成 `SYS_INTERNAL_ERROR`，而那会让
+   * 「模型太慢」与「代码抛异常」在工单里无法区分。
+   *
+   * 两者都 `retryable: true`：超时多数是瞬时的（模型排队、队列积压），
+   * 而客户端重试的成本远低于让用户重填一遍需求。
+   */
+  JOB_TIMEOUT: {
+    httpStatus: 504,
+    retryable: true,
+    message: '生成用时过长已中止，请重试。',
+  },
+  JOB_QUEUE_TIMEOUT: {
+    httpStatus: 504,
+    retryable: true,
+    message: '当前排队过久，请稍后重试。',
+  },
   SYS_INTERNAL_ERROR: {
     httpStatus: 500,
     retryable: true,
     // 13.7：message 固定为通用文案，不透出任何内部细节
     message: '服务暂时不可用，请稍后重试。',
+  },
+  SYS_DEPENDENCY_UNAVAILABLE: {
+    httpStatus: 503,
+    retryable: true,
+    message: '依赖服务暂时不可用，请稍后重试。',
   },
 } as const satisfies Record<string, ErrorDefinition>;
 
@@ -273,3 +297,71 @@ export type PlanErrorCode = keyof typeof PLAN_ERRORS;
 export type RenderErrorCode = keyof typeof RENDER_ERRORS;
 export type JobErrorCode = keyof typeof JOB_ERRORS;
 export type DomainErrorCode = keyof typeof DOMAIN_ERRORS;
+
+/**
+ * 16.3 阻断判定表（TP-4-09）。
+ *
+ * ## 为什么这张表必须是代码而不是散文
+ *
+ * V1.0 用散文描述哪些错误阻断，16.3 把它改成了映射表。但表只在文档里的话，
+ * 判定就散落在各个 `catch` 里 —— 而这类判定错一处的后果是**不对称的**：
+ *
+ * ```text
+ * 把非阻断判成阻断  → 用户拿不到已经生成好的计划（最坏的一种失败）
+ * 把阻断判成非阻断  → 用户拿到一个空壳页面，且任务标着「已完成」
+ * ```
+ *
+ * 两种都很糟，而它们都不会报错。因此收敛到一张表，由 `isBlocking` 统一查询。
+ *
+ * ## `degradation` 是给人看的，不是给程序分派的
+ *
+ * 降级动作的**实现**在各自的 resolver 里（十八章的降级链）。这里记一句话
+ * 是为了让排查的人知道「这个码本该触发什么」—— 而不是让某处按字符串分派。
+ */
+export interface BlockingDecision {
+  readonly blocking: boolean;
+  /** 16.3 的「降级动作」列 */
+  readonly degradation: string;
+}
+
+export const BLOCKING_DECISIONS = {
+  // ── 阻断（16.3 的前六行）──
+  PLAN_SCHEMA_INVALID: { blocking: true, degradation: '计入 LLM 重生成次数；耗尽则 FAILED' },
+  PLAN_HARD_CONSTRAINT_UNSATISFIABLE: { blocking: true, degradation: '立即 FAILED，不重试' },
+  PLAN_REPAIR_EXHAUSTED: { blocking: true, degradation: 'FAILED' },
+  PLAN_PERSIST_FAILED: { blocking: true, degradation: '重试 3 次后 FAILED' },
+  RENDER_CORE_ASSET_MISSING: { blocking: true, degradation: 'FAILED' },
+  RENDER_TEMPLATE_FAILED: { blocking: true, degradation: 'FAILED' },
+
+  // ── 非阻断（16.3 的后七行）──
+  ASSET_AI_GENERATION_FAILED: {
+    blocking: false,
+    degradation: 'Hero → 缓存城市图 → 渐变背景；景点/美食 → 默认占位图',
+  },
+  ASSET_AI_GENERATION_TIMEOUT: { blocking: false, degradation: '同上（20 秒超时即降级）' },
+  ASSET_MAP_RENDER_FAILED: { blocking: false, degradation: '简化 SVG → 文字路线（8.2）' },
+  ASSET_LIBRARY_MISS: { blocking: false, degradation: '进入下一层来源' },
+  ASSET_LICENSED_SOURCE_UNAVAILABLE: { blocking: false, degradation: '进入下一层来源' },
+  ASSET_POSTPROCESS_FAILED: { blocking: false, degradation: '丢弃该产物，进入下一层来源' },
+  ASSET_UPLOAD_FAILED: { blocking: false, degradation: '重试 3 次后使用占位图' },
+  RENDER_OVERFLOW_UNRESOLVED: {
+    blocking: false,
+    degradation: "输出产物但 plan_presentations.validation_status = 'DEGRADED'",
+  },
+  EXPORT_PNG_FAILED: { blocking: false, degradation: '重试 1 次后跳过，warnings 记录' },
+  EXPORT_PDF_FAILED: { blocking: false, degradation: '重试 1 次后跳过，warnings 记录' },
+} as const satisfies Record<string, BlockingDecision>;
+
+export type BlockingDecisionCode = keyof typeof BLOCKING_DECISIONS;
+
+/**
+ * 某个错误码是否阻断任务。
+ *
+ * 未登记的码按**阻断**处理。这个默认值是有意的：一个我们没预料到的错误
+ * 让任务失败（用户看到明确的失败并可重试），比让它标成「已完成」但内容
+ * 不完整要好 —— 后者用户看不出问题在哪，我们也收不到任何信号。
+ */
+export function isBlocking(code: string): boolean {
+  const decision = (BLOCKING_DECISIONS as Record<string, BlockingDecision | undefined>)[code];
+  return decision?.blocking ?? true;
+}

@@ -280,6 +280,90 @@ describeIntegration('计划仓储（集成，需 PostgreSQL）', () => {
     });
   });
 
+  describe('appendJobWarnings（TP-4-09、13.7）', () => {
+    async function jobWarnings(jobId: string): Promise<unknown> {
+      const { rows } = await pool.query<{ warnings: unknown }>(
+        'SELECT warnings FROM generation_jobs WHERE id = $1',
+        [jobId],
+      );
+      return rows[0]?.warnings;
+    }
+
+    it('追加并去重', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('warn1')));
+
+      await repository.appendJobWarnings(handles.jobId, [
+        'ASSET_LIBRARY_MISS',
+        'ASSET_AI_GENERATION_FAILED',
+      ]);
+      await repository.appendJobWarnings(handles.jobId, [
+        'ASSET_LIBRARY_MISS',
+        'ASSET_MAP_RENDER_FAILED',
+      ]);
+
+      const warnings = (await jobWarnings(handles.jobId)) as string[];
+      expect([...warnings].sort()).toEqual([
+        'ASSET_AI_GENERATION_FAILED',
+        'ASSET_LIBRARY_MISS',
+        'ASSET_MAP_RENDER_FAILED',
+      ]);
+    });
+
+    it('并发追加不互相覆盖（合并在 SQL 里做，不是读-改-写）', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('warn2')));
+
+      /*
+       * 素材解析本来就是并发的（21.2 天级 8、槽位 6），因此这条并发路径是
+       * 常态而不是极端情况。用「读出来 → 合并 → 写回」的实现，这里会丢码 ——
+       * 而丢一个告警码的表现是排查时看不到某一类降级发生过。
+       */
+      await Promise.all([
+        repository.appendJobWarnings(handles.jobId, ['ASSET_LIBRARY_MISS']),
+        repository.appendJobWarnings(handles.jobId, ['ASSET_AI_GENERATION_TIMEOUT']),
+        repository.appendJobWarnings(handles.jobId, ['ASSET_UPLOAD_FAILED']),
+      ]);
+
+      const warnings = (await jobWarnings(handles.jobId)) as string[];
+      expect(warnings).toHaveLength(3);
+    });
+
+    it('空数组不写库（避免每个无告警的任务都产生一次 UPDATE）', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('warn3')));
+
+      const before = await pool.query<{ updated_at: Date }>(
+        'SELECT updated_at FROM generation_jobs WHERE id = $1',
+        [handles.jobId],
+      );
+      await repository.appendJobWarnings(handles.jobId, []);
+      const after = await pool.query<{ updated_at: Date }>(
+        'SELECT updated_at FROM generation_jobs WHERE id = $1',
+        [handles.jobId],
+      );
+
+      expect(after.rows[0]!.updated_at).toEqual(before.rows[0]!.updated_at);
+      expect(await jobWarnings(handles.jobId)).toEqual([]);
+    });
+  });
+
+  describe('findJobQueuedAt（16.3 队列超时）', () => {
+    it('返回 generation_jobs.created_at', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('queued')));
+
+      const queuedAt = await repository.findJobQueuedAt(handles.jobId);
+      expect(queuedAt).toBeInstanceOf(Date);
+      // 入队与建行在同一事务，因此它就是入队时刻
+      expect(Date.now() - queuedAt!.getTime()).toBeLessThan(60_000);
+    });
+
+    it('任务不存在时返回 null', async () => {
+      expect(await repository.findJobQueuedAt('00000000-0000-4000-8000-000000000000')).toBeNull();
+    });
+  });
+
   describe('listPlansForUser（13.9.5）', () => {
     async function seedPlans(userId: string, count: number): Promise<void> {
       for (let i = 0; i < count; i += 1) {

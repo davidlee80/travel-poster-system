@@ -191,6 +191,23 @@ export interface TravelPlansRepository {
   /** 状态与进度同事务更新（16.1），进度取 `GREATEST` 保证单调不减（16.2） */
   updateJobState(input: UpdateJobStateInput): Promise<boolean>;
 
+  /**
+   * 追加非阻断告警码（13.7、16.3，TP-4-09）。
+   *
+   * 合并去重在 SQL 里做（`jsonb` 数组的并集），不是「读出来 → 合并 → 写回」：
+   * 后者在并发写入时会互相覆盖，而素材解析本来就是并发的（21.2 天级 8）。
+   * 丢掉一个告警码的表现是排查时看不到某一类降级发生过。
+   */
+  appendJobWarnings(jobId: string, codes: readonly string[]): Promise<void>;
+
+  /**
+   * 16.3 的队列等待上限判定所需：任务创建时刻。
+   *
+   * 单独一个方法而不是塞进 `findJobContext`：队列超时的判定发生在
+   * **消费的第一件事**，而那时还没必要读回标准化请求（它可能有几十 KB）。
+   */
+  findJobQueuedAt(jobId: string): Promise<Date | null>;
+
   /** TP-2-14：写版本 + 提升 `current_version_id`，同一事务 */
   savePlanVersion(input: SavePlanVersionInput): Promise<SavedPlanVersion>;
 }
@@ -555,6 +572,36 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
       );
 
       return (rowCount ?? 0) > 0;
+    },
+
+    async appendJobWarnings(jobId, codes) {
+      if (codes.length === 0) return;
+      /*
+       * `jsonb` 的并集：把现有数组与新数组拼起来，用 `jsonb_agg(DISTINCT …)`
+       * 去重。`COALESCE` 兜住空数组（`jsonb_agg` 对空集返回 NULL）。
+       *
+       * 顺序按去重后的文本序而不是首次出现序 —— 数组本身是集合语义
+       * （13.7 的告警码集合），顺序不承载信息。
+       */
+      await pool.query(
+        `UPDATE generation_jobs
+            SET warnings = COALESCE(
+                  (SELECT jsonb_agg(DISTINCT value)
+                     FROM jsonb_array_elements(warnings || $2::jsonb) AS t(value)),
+                  '[]'::jsonb
+                ),
+                updated_at = NOW()
+          WHERE id = $1`,
+        [jobId, JSON.stringify(codes)],
+      );
+    },
+
+    async findJobQueuedAt(jobId) {
+      const { rows } = await pool.query<{ created_at: Date }>(
+        'SELECT created_at FROM generation_jobs WHERE id = $1',
+        [jobId],
+      );
+      return rows[0]?.created_at ?? null;
     },
 
     async savePlanVersion(input) {

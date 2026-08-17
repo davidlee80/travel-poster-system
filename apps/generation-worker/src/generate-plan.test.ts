@@ -44,8 +44,12 @@ function llmOutputOf(plan: TravelPlan): Record<string, unknown> {
 class FakePlans implements TravelPlansRepository {
   readonly transitions: UpdateJobStateInput[] = [];
   readonly saved: SavePlanVersionInput[] = [];
+  /** TP-4-09：落库的告警码（去重后） */
+  readonly warnings = new Set<string>();
   context: JobContext | null;
   savePlanVersionError: Error | null = null;
+  /** 16.3 的队列等待判定输入。null 表示「查不到入队时刻」 */
+  queuedAt: Date | null = null;
 
   constructor(context: JobContext | null) {
     this.context = context;
@@ -77,6 +81,15 @@ class FakePlans implements TravelPlansRepository {
       this.context = { ...this.context, status: input.to, progress: input.progress };
     }
     return Promise.resolve(true);
+  }
+
+  appendJobWarnings(_jobId: string, codes: readonly string[]): Promise<void> {
+    for (const code of codes) this.warnings.add(code);
+    return Promise.resolve();
+  }
+
+  findJobQueuedAt(): Promise<Date | null> {
+    return Promise.resolve(this.queuedAt);
   }
 
   savePlanVersion(input: SavePlanVersionInput): Promise<SavedPlanVersion> {
@@ -541,5 +554,59 @@ describe('日志', () => {
       expect(line).not.toContain('拱宸桥');
       expect(line).not.toContain('希望安排运河');
     }
+  });
+});
+
+describe('16.3 超时（TP-4-10）', () => {
+  it('队列等待超过 600 秒 → FAILED + JOB_QUEUE_TIMEOUT，不调用模型', async () => {
+    const { deps, plans, llm } = harness();
+    plans.queuedAt = new Date('2026-08-17T10:00:00Z');
+
+    const result = await generatePlan(
+      { ...deps, now: () => plans.queuedAt!.getTime() + 601_000 },
+      payload,
+    );
+
+    expect(result).toEqual({ outcome: 'failed', errorCode: 'JOB_QUEUE_TIMEOUT' });
+    /*
+     * 关键在于**一次模型调用都没发生**：这条路径存在的意义就是省下
+     * 一个用户已经离开页面的任务的生成成本。
+     */
+    expect(llm.calls).toHaveLength(0);
+    expect(plans.path).toEqual(['FAILED']);
+  });
+
+  it('查不到入队时刻时照常执行（不因为读不到一个辅助字段就拒绝干活）', async () => {
+    const { deps, plans } = harness();
+    plans.queuedAt = null;
+    expect((await generatePlan(deps, payload)).outcome).toBe('saved');
+  });
+
+  it('任务预算耗尽 → FAILED + JOB_TIMEOUT，且停在 GENERATING_PLAN 之前', async () => {
+    const { deps, plans, llm } = harness();
+    /*
+     * 第一次读时钟给 0（任务预算从此刻起算），之后一律给 300_001 ——
+     * 也就是「刚开始就已经超了 300 秒」。这样写不依赖 now() 被调用几次，
+     * 而按调用序号排布返回值的写法会随实现里多一次读时钟而失效。
+     */
+    let clock = 0;
+    const result = await generatePlan(
+      {
+        ...deps,
+        now: () => {
+          const value = clock;
+          clock = 300_001;
+          return value;
+        },
+      },
+      payload,
+    );
+
+    expect(result).toEqual({ outcome: 'failed', errorCode: 'JOB_TIMEOUT' });
+    expect(llm.calls).toHaveLength(0);
+    // 已经推进过的阶段保留（progress 单调不减），最后一跳是 FAILED
+    expect(plans.path.at(-1)).toBe('FAILED');
+    expect(plans.path).toContain('RETRIEVING_REFERENCES');
+    expect(plans.path).not.toContain('GENERATING_PLAN');
   });
 });

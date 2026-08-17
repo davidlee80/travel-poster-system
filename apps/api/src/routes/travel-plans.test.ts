@@ -228,6 +228,12 @@ class FakePlansRepository implements TravelPlansRepository {
   findJobContext(): never {
     throw new Error('API 端点不应调用 findJobContext');
   }
+  appendJobWarnings(): never {
+    throw new Error('API 端点不应调用 appendJobWarnings（告警由 Worker 写入）');
+  }
+  findJobQueuedAt(): never {
+    throw new Error('API 端点不应调用 findJobQueuedAt（队列超时判定在 Worker 侧）');
+  }
   updateJobState(): never {
     throw new Error('API 端点不应调用 updateJobState');
   }

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { TravelPlansRepository } from '@tps/db';
 import type { EmbeddingClient, LlmClient } from '@tps/llm';
 import {
+  LlmTimeoutError,
   buildPlanPrompt,
   buildRepairPrompt,
   llmErrorCode,
@@ -35,6 +36,12 @@ import type { GenerationJobPayload } from '@tps/queue';
 import type { Logger, UserType } from '@tps/shared';
 
 import type { AiLayerDeps } from './assets/resolve-assets.js';
+import {
+  JOB_TIMEOUT_MS,
+  createJobDeadline,
+  queueWaitExceeded,
+  type JobDeadline,
+} from './job-deadline.js';
 import { createPlanValidationObserver } from './plan-metrics.js';
 import {
   buildAndSavePresentations,
@@ -87,6 +94,8 @@ export interface GeneratePlanDeps {
   readonly embedding: EmbeddingClient;
   readonly logger: Logger;
   readonly llmTimeoutMs: number;
+  /** 注入以便测试超时；生产用 Date.now */
+  readonly now?: () => number;
   /**
    * 展示编排与素材解析（P3）。
    *
@@ -112,6 +121,8 @@ export interface GeneratePlanDeps {
   readonly aiAssets?: (userType: UserType) => AiLayerDeps;
 }
 
+export type JobFailureCode = PlanErrorCode | 'JOB_TIMEOUT' | 'JOB_QUEUE_TIMEOUT';
+
 export type GenerateOutcome =
   | {
       readonly outcome: 'saved';
@@ -125,7 +136,7 @@ export type GenerateOutcome =
       };
     }
   | { readonly outcome: 'rejected'; readonly versionId: string; readonly errorCode: PlanErrorCode }
-  | { readonly outcome: 'failed'; readonly errorCode: PlanErrorCode }
+  | { readonly outcome: 'failed'; readonly errorCode: JobFailureCode }
   | { readonly outcome: 'skipped'; readonly reason: 'not_found' | 'already_terminal' };
 
 /** 推进状态并写进度（16.1：状态与 progress 同一事务） */
@@ -152,7 +163,7 @@ async function advance(
 async function fail(
   deps: GeneratePlanDeps,
   jobId: string,
-  errorCode: PlanErrorCode,
+  errorCode: JobFailureCode,
   planVersionId?: string,
 ): Promise<GenerateOutcome> {
   await deps.plans.updateJobState({
@@ -180,14 +191,23 @@ async function callModel(
   messages: { readonly system: string; readonly user: string },
   maxTokens: number,
   purpose: 'plan' | 'repair',
+  deadline: JobDeadline,
 ): Promise<{ output: TravelPlanLlmOutput; inputTokens: number; outputTokens: number }> {
+  /*
+   * 单次超时压到任务剩余预算内（16.3）。剩 8 秒时不该再发一个 30 秒超时的
+   * 请求 —— 它一定在 300 秒边界之后才返回，而那时任务已经算超时，
+   * 这次调用的钱白花。
+   */
+  const timeoutMs = deadline.remainingFor(deps.llmTimeoutMs);
+  if (timeoutMs <= 0) throw new LlmTimeoutError(0);
+
   const result = await llm.complete({
     system: messages.system,
     user: messages.user,
     jsonSchema: { name: 'travel_plan', schema: travelPlanLlmOutputJsonSchema },
     maxTokens,
     purpose,
-    timeoutMs: deps.llmTimeoutMs,
+    timeoutMs,
   });
 
   const parsed = TravelPlanLlmOutputSchema.safeParse(result.data);
@@ -224,6 +244,7 @@ async function generateContent(
   llm: LlmClient,
   normalized: NormalizedTravelRequest,
   references: Awaited<ReturnType<typeof retrieveReferences>>['references'],
+  deadline: JobDeadline,
 ): Promise<{ output: TravelPlanLlmOutput; inputTokens: number; outputTokens: number }> {
   const segments = planSegments(normalized.total_days);
   const maxTokens = maxTokensForDays(normalized.total_days);
@@ -233,13 +254,20 @@ async function generateContent(
   let outputTokens = 0;
 
   for (const segment of segments) {
+    /*
+     * 分段之间检查预算：8～14 天要串行调两次模型（各最多 30 秒）。
+     * 第一段吃掉大半预算时，第二段发出去只会在中途撞上 300 秒上限 ——
+     * 那时钱已经花了，任务照样失败。
+     */
+    if (deadline.expired()) throw new LlmTimeoutError(0);
+
     const messages = buildPlanPrompt({
       normalized,
       segment,
       totalSegments: segments.length,
       references: references.map((reference) => reference.projection),
     });
-    const result = await callModel(deps, llm, messages, maxTokens, 'plan');
+    const result = await callModel(deps, llm, messages, maxTokens, 'plan', deadline);
     outputs.push(result.output);
     inputTokens += result.inputTokens;
     outputTokens += result.outputTokens;
@@ -267,6 +295,23 @@ export async function generatePlan(
   }
 
   const log = deps.logger.child({ job_id: context.jobId, user_id: context.userId });
+  const now = deps.now ?? Date.now;
+
+  /*
+   * 16.3：队列等待上限 600 秒。判定放在消费的第一件事 ——
+   * 等了 11 分钟的任务，用户早已离开页面，而生成它仍要花掉一次模型调用的钱。
+   */
+  const queuedAt = await deps.plans.findJobQueuedAt(context.jobId);
+  if (queuedAt !== null && queueWaitExceeded(queuedAt, now())) {
+    log.warn(
+      { stage: 'QUEUED', error_code: 'JOB_QUEUE_TIMEOUT' },
+      `任务排队超过上限（入队于 ${queuedAt.toISOString()}）`,
+    );
+    return fail(deps, context.jobId, 'JOB_QUEUE_TIMEOUT');
+  }
+
+  // 16.3：整个生成任务 300 秒。协作式检查，理由见 job-deadline.ts
+  const deadline = createJobDeadline(now(), JOB_TIMEOUT_MS, now);
 
   // ── NORMALIZING：标准化结果已在同步路径算好，这里只读回并校验形状 ──
   await advance(deps, context.jobId, 'NORMALIZING');
@@ -307,10 +352,15 @@ export async function generatePlan(
   );
 
   // ── GENERATING_PLAN（6.3）──
+  if (deadline.expired()) {
+    log.warn({ stage: 'GENERATING_PLAN', error_code: 'JOB_TIMEOUT' }, '任务超过 300 秒上限，中止');
+    return fail(deps, context.jobId, 'JOB_TIMEOUT');
+  }
+
   await advance(deps, context.jobId, 'GENERATING_PLAN');
   let generated;
   try {
-    generated = await generateContent(deps, llm, normalized, retrieved.references);
+    generated = await generateContent(deps, llm, normalized, retrieved.references, deadline);
   } catch (error) {
     const code = errorCodeFor(error);
     log.error({ stage: 'GENERATING_PLAN', error_code: code }, '计划生成失败');
@@ -358,6 +408,7 @@ export async function generatePlan(
           messages,
           maxTokensForDays(normalized.total_days),
           'repair',
+          deadline,
         );
         generated.inputTokens += result.inputTokens;
         generated.outputTokens += result.outputTokens;
@@ -379,6 +430,12 @@ export async function generatePlan(
   const planContent = TravelPlanContentSchema.parse({ ...resolved.plan, status: finalStatus });
 
   // ── SAVING_PLAN（TP-2-14）──
+  /*
+   * 这里**不检查超时**。计划已经生成并通过校验，落库只差一次 INSERT ——
+   * 此刻因为超了 300 秒而丢弃它，等于把已经花掉的模型成本连同用户的全部
+   * 等待一起扔掉，而重试要从零开始再花一遍。超时的意义是「别再启动新的
+   * 昂贵工作」，不是「把做好的东西扔掉」。
+   */
   await advance(deps, context.jobId, 'SAVING_PLAN');
 
   /*
@@ -511,6 +568,14 @@ export async function generatePlan(
       `展示数据已保存：${result.pages} 页、${result.bindings} 个素材绑定` +
         (result.omitted > 0 ? `，${result.omitted} 条内容因限额未展示` : ''),
     );
+
+    /*
+     * TP-4-09：非阻断告警落库。写在状态推进之后、返回之前 ——
+     * 13.2 会把 warnings 返回给客户端，它应当与任务的当前状态一致。
+     */
+    if (result.warnings.length > 0) {
+      await deps.plans.appendJobWarnings(context.jobId, result.warnings);
+    }
 
     if (result.budgetMismatch) {
       // 12.1：预算数字对不上是用户可见的严重错误，V-20 定为 REPAIRABLE
