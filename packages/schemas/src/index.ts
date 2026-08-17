@@ -10,6 +10,7 @@
  *   P1  TravelPlan + 全部枚举 + TravelPosterViewModel  ← 已完成
  *   P2  TravelRequestUI、NormalizedTravelRequest、条件字典（TP-2-03）  ← 已完成
  *   P3  AssetRequirement、ResolvedAsset（TP-3-02）                    ← 已完成
+ *   P4  VisualBrief、GenerationMetadata、导出契约（TP-4-01/04/12）    ← 已完成
  *
  * 约束：本包**不得引入除 zod 以外的运行时依赖** —— 它被所有应用引用，
  * 任何额外依赖都会成为全仓库的版本冲突面。
@@ -26,6 +27,7 @@ export * from './travel-plan.js';
 export * from './retrieval-projection.js';
 export * from './asset-requirement.js';
 export * from './resolved-asset.js';
+export * from './ai-asset.js';
 export * from './job-status.js';
 export * from './view-model.js';
 export { travelPlanJsonSchema, travelPlanLlmOutputJsonSchema } from './json-schema.js';

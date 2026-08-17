@@ -5,6 +5,7 @@
  *   TP-2-21  向量化（本地哈希实现 + 接口）  ← 本增量
  *   TP-2-10  `LlmClient` + Direct + Gateway
  *   TP-2-11  Prompt 模板与结构化输出
+ *   TP-4-01  `ImageClient` + 20 秒超时（11.1、21.2 措施二）
  *
  * 本包**不含任何业务规则**：它只负责「把文本变成向量」「把提示变成结构化
  * 输出」。规则与修复在 `@tps/planning`，两者不互相依赖。
@@ -36,6 +37,26 @@ export {
   type LlmResult,
   type LlmUsage,
 } from './client.js';
+
+export {
+  AI_IMAGE_TIMEOUT_MS,
+  FakeImageClient,
+  HttpImageClient,
+  IMAGE_MODES,
+  ImageTimeoutError,
+  ImageUnavailableError,
+  createImageClient,
+  imageWarningCode,
+  loadImageConfig,
+  type CreateImageClientOptions,
+  type FakeImageRenderer,
+  type HttpImageOptions,
+  type ImageClient,
+  type ImageConfig,
+  type ImageMode,
+  type ImageRequest,
+  type ImageResult,
+} from './image.js';
 
 export {
   DEFAULT_LLM_TIMEOUT_MS,

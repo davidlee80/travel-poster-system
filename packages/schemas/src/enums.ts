@@ -239,6 +239,47 @@ export const MAP_STYLE_VALUES = ['CANAL_GREEN'] as const;
 export const MapStyleSchema = z.enum(MAP_STYLE_VALUES);
 export type MapStyle = (typeof MAP_STYLE_VALUES)[number];
 
+// ── 十一章 / 14.3：AI 图片生成 ─────────────────────────────
+
+/**
+ * 14.3 允许生成的四种受控素材类型。
+ *
+ * 「受控」的含义是**白名单**：不在表内的类型一律拒绝，而不是「拒绝已知的
+ * 危险类型」。差别在新增角色时 —— 白名单会让新角色显式地走一次评审
+ * （它的 AI 产物是否可接受、要不要标示意图），黑名单会让它默默获得生成权限。
+ *
+ * `ROUTE_MAP` 不在表内且永远不会进：11.3 禁止 AI 绘制地图文字，
+ * 而 9.2 的路线图是程序生成的 SVG。
+ *
+ * `DECORATIVE_ILLUSTRATION` 在 V1 没有对应槽位（模板的装饰元素是 9.1 的
+ * 内联图标）。保留它是因为 14.3 明确列了它，去掉会让端点与设计稿不一致 ——
+ * 而端点的存在价值就是冻结契约（R-28）。
+ */
+export const AI_ASSET_TYPE_VALUES = [
+  'HERO_ILLUSTRATION',
+  'DECORATIVE_ILLUSTRATION',
+  'FOOD_FALLBACK',
+  'DESTINATION_ILLUSTRATION_FALLBACK',
+] as const;
+export const AiAssetTypeSchema = z.enum(AI_ASSET_TYPE_VALUES);
+export type AiAssetType = (typeof AI_ASSET_TYPE_VALUES)[number];
+
+/**
+ * 11.1 的 `task`。
+ *
+ * 与 `AI_ASSET_TYPE` 一一对应，但不是同一个枚举：类型说的是「产物在库里
+ * 算哪一类」（进配额与成本统计），task 说的是「模型该画什么」。
+ * 合成一个的代价是提示词模板与库内分类从此不能各自演化。
+ */
+export const VISUAL_BRIEF_TASK_VALUES = [
+  'GENERATE_TRAVEL_HERO',
+  'GENERATE_DESTINATION_ILLUSTRATION',
+  'GENERATE_FOOD_ILLUSTRATION',
+  'GENERATE_DECORATIVE_ILLUSTRATION',
+] as const;
+export const VisualBriefTaskSchema = z.enum(VISUAL_BRIEF_TASK_VALUES);
+export type VisualBriefTask = (typeof VISUAL_BRIEF_TASK_VALUES)[number];
+
 /**
  * 主题语义桶（19.1 的 12 个 + `general`）。
  *

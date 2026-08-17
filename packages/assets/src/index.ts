@@ -47,6 +47,18 @@ export {
 
 export { THEME_KEYWORDS, themeBucket } from './theme-buckets.js';
 
+export {
+  AI_ASSET_TYPE_BY_ROLE,
+  IMAGE_PROMPT_VERSION,
+  NEGATIVE_REQUIREMENTS,
+  briefForRequirement,
+  buildVisualBrief,
+  imageSizeFor,
+  renderNegativePrompt,
+  renderPrompt,
+  type BuildBriefInput,
+} from './visual-brief.js';
+
 export { buildSearchText, type SearchTextInput } from './search-text.js';
 
 export {
