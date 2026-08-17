@@ -39,6 +39,16 @@ export {
 } from './redis.js';
 
 export {
+  BullMqExportQueue,
+  EXPORT_JOB_OPTIONS,
+  EXPORT_QUEUE_NAME,
+  ExportJobPayloadSchema,
+  InMemoryExportQueue,
+  type ExportJobPayload,
+  type ExportQueue,
+} from './export-queue.js';
+
+export {
   BullMqPlanQueue,
   DEFAULT_JOB_OPTIONS,
   GenerationJobPayloadSchema,

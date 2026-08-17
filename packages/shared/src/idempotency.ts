@@ -93,6 +93,41 @@ export function computeIdempotencyKey(input: IdempotencyKeyInput): string {
 }
 
 /**
+ * 导出的幂等键（13.5，TP-4-13）。
+ *
+ * 13.5：「相同 `(plan_version_id, format, scope, day_numbers, template_id)`
+ * 的未过期已完成导出**直接返回原 `export_id`**，不重复渲染」。
+ *
+ * ## 为什么这里不含 `user_id`，而生成的幂等键含
+ *
+ * 生成的幂等键必须含 `user_id`（13.8：两个用户提交相同需求各自生成一份，
+ * 这是归属隔离的必然要求）。导出不同：`plan_version_id` 本身就只属于一个
+ * 用户 —— 一个版本导出成 PDF，结果与谁点的按钮无关，逐字节相同。
+ * 加上 `user_id` 只会让「同一个人换个会话再点一次」变成一次重复渲染。
+ *
+ * ## `day_numbers` 排序后再入哈希
+ *
+ * `[3]` 与 `[3]` 显然相同，但 V2 的多选天导出会出现 `[1,3]` 与 `[3,1]`——
+ * 它们要的是同一份产物。不排序的话会渲染两遍，而两份产物内容一致、
+ * 键不同，缓存与配额都白算一次。
+ */
+export function computeExportIdempotencyKey(input: {
+  readonly planVersionId: string;
+  readonly format: string;
+  readonly scope: string;
+  readonly dayNumbers: readonly number[] | null;
+  readonly templateId: string;
+}): string {
+  const days =
+    input.dayNumbers === null ? '' : [...input.dayNumbers].sort((a, b) => a - b).join(',');
+  const material = [input.planVersionId, input.format, input.scope, days, input.templateId].join(
+    '|',
+  );
+
+  return createHash('sha256').update(material, 'utf8').digest('hex');
+}
+
+/**
  * 13.8：幂等结果有效期 7 天。
  *
  * 超过后同一幂等键视为新任务 —— 否则用户想「重新生成」时会被永久锁死在

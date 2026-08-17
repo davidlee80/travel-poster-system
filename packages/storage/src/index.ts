@@ -14,4 +14,13 @@ export {
   type StorageConfig,
 } from './storage.js';
 
+export {
+  InMemoryExportStorage,
+  S3ExportStorage,
+  exportFileName,
+  exportObjectKey,
+  loadExportsStorageConfig,
+  type ExportStorage,
+} from './exports-storage.js';
+
 export { loadAssetsStorageConfig } from './config.js';

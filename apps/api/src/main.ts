@@ -12,6 +12,7 @@ import {
 import { registerDefaultMetrics } from '@tps/observability';
 import {
   checkDatabase,
+  createExportsRepository,
   createPool,
   createPresentationsRepository,
   createTravelPlansRepository,
@@ -19,12 +20,14 @@ import {
   loadDbConfig,
 } from '@tps/db';
 import {
+  BullMqExportQueue,
   BullMqPlanQueue,
   RedisCounterStore,
   RedisIdempotencyLock,
   createQueueRedis,
   createRedis,
 } from '@tps/queue';
+import { S3ExportStorage, loadExportsStorageConfig } from '@tps/storage';
 import { IdentityService } from './identity/service.js';
 import { RedisSessionStore } from './identity/redis-session-store.js';
 import { buildServer } from './server.js';
@@ -117,6 +120,22 @@ async function main(): Promise<void> {
       idempotencyLock: new RedisIdempotencyLock(redis),
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
       now: () => new Date(),
+    },
+    /*
+     * 13.5/13.6 的导出端点。
+     *
+     * 对象存储只用于**预签名**（一次本地 HMAC 计算），因此这个进程的 S3 凭据
+     * 只需要导出桶的 GetObject 权限 —— 类型上已经收窄到 `presign`
+     * （见 routes/exports.ts）。
+     */
+    exports: {
+      identity,
+      quota,
+      plans: createTravelPlansRepository(pool),
+      exports: createExportsRepository(pool),
+      queue: new BullMqExportQueue(queueRedis),
+      storage: new S3ExportStorage(loadExportsStorageConfig()),
+      secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
     },
     /*
      * 14.1/14.2 的内部端点：只在配置了共享密钥时注册。

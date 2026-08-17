@@ -31,6 +31,7 @@
     "@tps/queue": "workspace:*",
     "@tps/schemas": "workspace:*",
     "@tps/shared": "workspace:*",
+    "@tps/storage": "workspace:*",
     "fastify": "^5.6.1",
     "zod": "^4.1.13"
   },

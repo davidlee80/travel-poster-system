@@ -28,6 +28,7 @@ export * from './retrieval-projection.js';
 export * from './asset-requirement.js';
 export * from './resolved-asset.js';
 export * from './ai-asset.js';
+export * from './export.js';
 export * from './job-status.js';
 export * from './view-model.js';
 export { travelPlanJsonSchema, travelPlanLlmOutputJsonSchema } from './json-schema.js';

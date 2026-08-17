@@ -10,6 +10,7 @@ import {
   registerInternalPresentationRoutes,
   type InternalPresentationRoutesDeps,
 } from './routes/internal-presentations.js';
+import { registerExportRoutes, type ExportRoutesDeps } from './routes/exports.js';
 import { registerTravelPlanRoutes, type TravelPlanRoutesDeps } from './routes/travel-plans.js';
 
 /**
@@ -31,6 +32,13 @@ export interface ServerDeps {
   readonly auth?: AuthRoutesDeps;
   /** 计划端点（13.1～13.3、13.9.5）。同上，未提供时不注册。 */
   readonly travelPlans?: TravelPlanRoutesDeps;
+  /**
+   * 导出端点（13.5、13.6）。未提供时不注册。
+   *
+   * 与 `travelPlans` 分开是因为它多两项依赖（导出队列与对象存储的预签名），
+   * 而只跑「读计划」的部署（比如一个只读副本）不需要它们。
+   */
+  readonly exports?: ExportRoutesDeps;
   /**
    * 素材服务内部端点（14.1、14.2）。
    *
@@ -56,6 +64,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     checkDependencies,
     auth,
     travelPlans,
+    exports: exportRoutes,
     internalAssets,
     internalPresentations,
   } = deps;
@@ -126,6 +135,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   }
   if (travelPlans !== undefined) {
     registerTravelPlanRoutes(app, travelPlans);
+  }
+  if (exportRoutes !== undefined) {
+    registerExportRoutes(app, exportRoutes);
   }
   if (internalAssets !== undefined) {
     registerInternalAssetRoutes(app, internalAssets);

@@ -31,6 +31,13 @@ export {
   type RetrievalSource,
 } from './retrieval.js';
 export {
+  createExportsRepository,
+  type CreateExportInput,
+  type ExportRow,
+  type ExportsRepository,
+  type FinishExportInput,
+} from './exports.js';
+export {
   createAssetsRepository,
   type AssetCandidateRow,
   type AssetsRepository,

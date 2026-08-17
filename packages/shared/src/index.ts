@@ -14,6 +14,7 @@ export {
   IDEMPOTENCY_RESULT_TTL_DAYS,
   InMemoryIdempotencyLock,
   canonicalJson,
+  computeExportIdempotencyKey,
   computeIdempotencyKey,
   type IdempotencyKeyInput,
   type IdempotencyLock,
