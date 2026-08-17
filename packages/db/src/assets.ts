@@ -56,6 +56,16 @@ export interface FindCandidatesQuery {
 }
 
 export interface InsertAssetInput {
+  /**
+   * 素材 ID 由**调用方**生成，不用数据库默认值。
+   *
+   * 理由与 `savePlanVersion` 的 `versionId` 相同（见 travel-plans.ts）：
+   * 对象存储的键里含素材 ID（`assets/{role}/{ab}/{id}.webp`），
+   * 而对象必须在写库**之前**上传完成。让数据库生成的话，上传时还不知道 ID，
+   * 只能先用一个临时 ID —— 于是键里的 ID 与行的 ID 永远对不上，
+   * 「这个对象属于哪个素材」只能靠 `storage_url` 反查字符串。
+   */
+  readonly assetId: string;
   readonly assetType: string;
   readonly sourceType: string;
   readonly representationType: string;
@@ -222,12 +232,12 @@ export function createAssetsRepository(pool: Pool): AssetsRepository {
     async insertAsset(input) {
       const { rows } = await pool.query<{ id: string }>(
         `INSERT INTO assets (
-           asset_type, source_type, representation_type, entity_name, destination_name,
+           id, asset_type, source_type, representation_type, entity_name, destination_name,
            destination_place_id, title, original_url, storage_url, thumbnail_url,
            mime_type, width, height, aspect_ratio, style_tags, search_text,
            license_type, attribution_text, license_expires_at, quality_score,
            embedding, cache_key, generation_metadata)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+         VALUES ($24::uuid, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
                  $15::jsonb, $16, $17, $18, $19, $20, $21::vector, $22, $23::jsonb)
          ON CONFLICT (cache_key) WHERE cache_key IS NOT NULL DO NOTHING
          RETURNING id`,
@@ -255,6 +265,7 @@ export function createAssetsRepository(pool: Pool): AssetsRepository {
           input.embedding === null ? null : toVectorLiteral(input.embedding),
           input.cacheKey,
           input.generationMetadata === null ? null : JSON.stringify(input.generationMetadata),
+          input.assetId,
         ],
       );
 

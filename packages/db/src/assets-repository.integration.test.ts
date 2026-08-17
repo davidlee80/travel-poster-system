@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
 import { createPool } from './pool.js';
@@ -50,6 +52,8 @@ describeIntegration('素材库仓储（集成，需 PostgreSQL）', () => {
 
   function input(overrides: Partial<InsertAssetInput> = {}): InsertAssetInput {
     return {
+      // 素材 ID 由调用方生成（对象键里含它，见 InsertAssetInput 的说明）
+      assetId: randomUUID(),
       assetType: 'IMAGE',
       sourceType: 'PLATFORM_LIBRARY',
       representationType: 'PHOTOGRAPHIC',

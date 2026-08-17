@@ -37,7 +37,8 @@
     "fonts:build": "pnpm --filter @tps/fonts fonts:build",
     "fonts:scan": "pnpm --filter @tps/fonts fonts:scan -- --strict",
     "visual:check": "node tools/visual-baseline.mjs check",
-    "visual:update": "node tools/visual-baseline.mjs update"
+    "visual:update": "node tools/visual-baseline.mjs update",
+    "assets:ingest": "pnpm --filter \"@tps/generation-worker...\" run build && node apps/generation-worker/dist/assets/ingest-cli.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

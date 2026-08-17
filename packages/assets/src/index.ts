@@ -47,6 +47,8 @@ export {
 
 export { THEME_KEYWORDS, themeBucket } from './theme-buckets.js';
 
+export { buildSearchText, type SearchTextInput } from './search-text.js';
+
 export {
   KEY_VERSION,
   aspectRatioSegment,

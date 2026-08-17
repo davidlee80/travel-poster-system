@@ -22,7 +22,10 @@
     "@tps/queue": "workspace:*",
     "@tps/schemas": "workspace:*",
     "@tps/shared": "workspace:*",
-    "bullmq": "^5.65.0"
+    "@tps/storage": "workspace:*",
+    "bullmq": "^5.65.0",
+    "sharp": "^0.34.5",
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@tps/api": "workspace:*",
