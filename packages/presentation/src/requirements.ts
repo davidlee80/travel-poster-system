@@ -84,6 +84,7 @@ export function requirementsForDay(input: DayRequirementsInput): AssetRequiremen
   const items: AssetRequirementItem[] = [
     {
       slot_id: heroSlotId(dayNumber),
+      day_number: dayNumber,
       role: 'HERO_BACKGROUND',
       asset_type: 'AI_ILLUSTRATION',
       required: true,
@@ -98,6 +99,7 @@ export function requirementsForDay(input: DayRequirementsInput): AssetRequiremen
     },
     {
       slot_id: routeMapSlotId(dayNumber),
+      day_number: dayNumber,
       role: 'ROUTE_MAP',
       asset_type: 'GENERATED_SVG',
       required: true,
@@ -122,6 +124,7 @@ export function requirementsForDay(input: DayRequirementsInput): AssetRequiremen
   for (const food of applyLimit(day.food_recommendations, limits.food_max_items)) {
     items.push({
       slot_id: foodSlotId(dayNumber, food.meal),
+      day_number: dayNumber,
       role: 'FOOD_IMAGE',
       asset_type: 'PHOTO_OR_AI',
       required: false,
@@ -143,6 +146,7 @@ export function requirementsForDay(input: DayRequirementsInput): AssetRequiremen
   spots.forEach((spot, index) => {
     items.push({
       slot_id: photoSpotSlotId(dayNumber, index),
+      day_number: dayNumber,
       role: 'DESTINATION_PHOTO',
       asset_type: 'REAL_PHOTO_PREFERRED',
       required: false,

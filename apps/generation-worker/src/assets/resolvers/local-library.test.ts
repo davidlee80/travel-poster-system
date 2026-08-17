@@ -14,6 +14,7 @@ import { resolveFromLocalLibrary, scoreCandidates } from './local-library.js';
 function requirement(overrides: Partial<AssetRequirementItem> = {}): AssetRequirementItem {
   return {
     slot_id: 'day_1.photo_spot.1',
+    day_number: 1,
     role: 'DESTINATION_PHOTO',
     asset_type: 'REAL_PHOTO_PREFERRED',
     required: false,

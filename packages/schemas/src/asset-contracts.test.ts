@@ -24,6 +24,7 @@ import {
 function heroRequirement(overrides: Partial<AssetRequirementItem> = {}): AssetRequirementItem {
   return {
     slot_id: 'day_1.hero_background',
+    day_number: 1,
     role: 'HERO_BACKGROUND',
     asset_type: 'AI_ILLUSTRATION',
     required: true,
@@ -61,6 +62,7 @@ describe('AssetRequirement（七章）', () => {
         heroRequirement(),
         {
           slot_id: 'day_3.food.breakfast',
+          day_number: 3,
           role: 'FOOD_IMAGE',
           asset_type: 'PHOTO_OR_AI',
           required: false,
@@ -73,6 +75,7 @@ describe('AssetRequirement（七章）', () => {
         },
         {
           slot_id: 'day_3.photo_spot.1',
+          day_number: 3,
           role: 'DESTINATION_PHOTO',
           asset_type: 'REAL_PHOTO_PREFERRED',
           required: false,
@@ -81,6 +84,7 @@ describe('AssetRequirement（七章）', () => {
         },
         {
           slot_id: 'day_3.route_map',
+          day_number: 3,
           role: 'ROUTE_MAP',
           asset_type: 'GENERATED_SVG',
           required: true,
@@ -126,6 +130,7 @@ describe('AssetRequirement（七章）', () => {
       envelope([
         {
           slot_id: 'day_1.route_map',
+          day_number: 1,
           role: 'ROUTE_MAP',
           asset_type: 'GENERATED_SVG',
           required: true,
@@ -149,6 +154,7 @@ describe('AssetRequirement（七章）', () => {
       envelope([
         {
           slot_id: 'day_1.food.lunch',
+          day_number: 1,
           role: 'FOOD_IMAGE',
           asset_type: 'PHOTO_OR_AI',
           // 美食图标成必需会让「没找到合适的美食图」变成任务失败，

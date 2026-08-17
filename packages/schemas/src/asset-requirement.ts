@@ -129,6 +129,16 @@ export const REQUIRED_ROLES = ['HERO_BACKGROUND', 'ROUTE_MAP'] as const;
 export const AssetRequirementItemSchema = z
   .object({
     slot_id: NonEmptyStringSchema,
+    /**
+     * 所属天号。
+     *
+     * 七章的示例里没有这个字段（槽位 ID 已含 `day_3.` 前缀），但它是必要的：
+     *   - `plan_asset_bindings.day_number` 要写它；
+     *   - 21.2 的并发模型是「天级 8、单天内槽位 6」，分组需要天号。
+     * 从 `slot_id` 反解字符串前缀能得到同样的值，代价是槽位命名规则
+     * 变成两处依赖 —— 改一次命名就要同步改解析。显式字段没有这个耦合。
+     */
+    day_number: z.number().int().positive(),
     role: AssetRoleSchema,
     asset_type: RequirementAssetTypeSchema,
     required: z.boolean(),

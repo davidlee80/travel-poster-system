@@ -52,10 +52,10 @@ export function destinationSegment(input: {
 }
 
 export interface HeroKeyInput {
-  readonly destinationPlaceId?: string | null;
-  readonly destinationName?: string | null;
+  readonly destinationPlaceId?: string | null | undefined;
+  readonly destinationName?: string | null | undefined;
   /** LLM 生成的中文主题短语；归桶后进键（19.1） */
-  readonly theme?: string | null;
+  readonly theme?: string | null | undefined;
   /** 已归好的桶。给出时不再从 `theme` 推导（避免重复计算与不一致） */
   readonly bucket?: ThemeBucket;
   readonly visualStyle: VisualStyle;
@@ -75,9 +75,9 @@ export function heroCacheKey(input: HeroKeyInput): string {
 }
 
 export interface PlaceKeyInput {
-  readonly placeId?: string | null;
+  readonly placeId?: string | null | undefined;
   /** `place_id` 缺失时的退路 */
-  readonly entityName?: string | null;
+  readonly entityName?: string | null | undefined;
   readonly role: AssetRole;
   readonly aspectRatio: string;
 }
@@ -94,8 +94,8 @@ export function placeCacheKey(input: PlaceKeyInput): string {
 
 export interface FoodKeyInput {
   readonly dishName: string;
-  readonly cityPlaceId?: string | null;
-  readonly cityName?: string | null;
+  readonly cityPlaceId?: string | null | undefined;
+  readonly cityName?: string | null | undefined;
   readonly visualStyle: VisualStyle;
 }
 
