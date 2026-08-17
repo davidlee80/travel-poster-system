@@ -7,7 +7,12 @@ import {
   type QuotaDecision,
   type QuotaGuard,
 } from '@tps/shared';
-import { UniqueViolationError, type ExistingGeneration, type TravelPlansRepository } from '@tps/db';
+import {
+  UniqueViolationError,
+  type ExistingGeneration,
+  type PresentationsRepository,
+  type TravelPlansRepository,
+} from '@tps/db';
 import {
   TravelRequestUISchema,
   isTerminalJobStatus,
@@ -49,10 +54,17 @@ const ListQuerySchema = z.object({
   cursor: z.string().min(1).max(500).optional(),
 });
 
+/** 13.4 的可选版本参数。UUID 形态在仓储层由 `::uuid` 转换兜住 */
+const PresentationQuerySchema = z.object({
+  plan_version_id: z.string().uuid().optional(),
+});
+
 export const DEFAULT_LIST_LIMIT = 20;
 
 export interface TravelPlanRoutesDeps extends IdentityContextDeps {
   readonly plans: TravelPlansRepository;
+  /** 13.4 的展示数据（P3 起） */
+  readonly presentations: PresentationsRepository;
   readonly quota: QuotaGuard;
   readonly queue: PlanQueue;
   readonly idempotencyLock: IdempotencyLock;
@@ -111,7 +123,7 @@ function generateResponse(existing: ExistingGeneration): GenerateResponse {
 }
 
 export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanRoutesDeps): void {
-  const { plans, quota, queue, idempotencyLock } = deps;
+  const { plans, presentations, quota, queue, idempotencyLock } = deps;
 
   /**
    * 13.1 创建生成任务。
@@ -304,6 +316,94 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
     },
   );
 
+  /**
+   * 13.4 获取展示数据。
+   *
+   *   GET /api/v1/travel-plans/{plan_id}/presentations/{day_number}
+   *   GET /api/v1/travel-plans/{plan_id}/presentations/full
+   *
+   * 两个端点默认返回**最新的有效版本**，带 `?plan_version_id=` 时返回指定版本；
+   * `REJECTED` 版本一律 404（验收标准 15，仓储层的谓词保证）。
+   *
+   * 完整页是**一次请求**返回全部天数（13.4 的 R-04 补充）——
+   * 前端渲染完整计划页不必对 14 天发起 14 次调用。
+   */
+  async function sendPresentation(
+    request: FastifyRequest<{
+      Params: { plan_id: string; day_number?: string };
+      Querystring: Record<string, unknown>;
+    }>,
+    reply: FastifyReply,
+    pageType: 'DAILY_POSTER' | 'FULL_PLAN',
+  ): Promise<FastifyReply> {
+    const resolved = await resolveIdentity(deps, request, reply, {
+      allowAnonymousCreation: false,
+    });
+    if (resolved === null) return reply;
+
+    const query = PresentationQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      return fail(request, reply, 'REQ_SCHEMA_INVALID', {
+        field: query.error.issues[0]?.path.join('.') ?? 'query',
+      });
+    }
+
+    let dayNumber: number | undefined;
+    if (pageType === 'DAILY_POSTER') {
+      const parsed = Number(request.params.day_number);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 14) {
+        // 天号不是 1～14 的整数：不存在这样的页面，与「计划不存在」同一个 404
+        return fail(request, reply, 'PLAN_NOT_FOUND');
+      }
+      dayNumber = parsed;
+    }
+
+    const presentation = await presentations.findPresentation({
+      planId: request.params.plan_id,
+      userId: resolved.identity.userId,
+      pageType,
+      ...(dayNumber === undefined ? {} : { dayNumber }),
+      ...(query.data.plan_version_id === undefined
+        ? {}
+        : { planVersionId: query.data.plan_version_id }),
+    });
+
+    /*
+     * 一个 404 覆盖五种情况：计划不存在、不属于你、版本是 REJECTED、
+     * 该天不存在、编排还没跑完。最后一种是**正常的时序**（16.1 的
+     * BUILDING_PRESENTATION 在 SAVING_PLAN 之后），前端据 13.2 的进度判断
+     * 该不该重试 —— 给它一个独立错误码会让「还没好」看起来像「出错了」。
+     */
+    if (presentation === null) return fail(request, reply, 'PLAN_NOT_FOUND');
+
+    return reply.code(200).send({
+      plan_id: request.params.plan_id,
+      plan_version_id: presentation.planVersionId,
+      template_id: presentation.templateId,
+      page_type: presentation.pageType,
+      day_number: presentation.dayNumber,
+      /*
+       * `validation_status` 一并返回：DEGRADED 表示存在降级槽位但可渲染
+       * （十五章）。前端据此决定是否提示「部分图片暂不可用」——
+       * 不返回的话，用户只会看到几个占位块而不知道原因。
+       */
+      validation_status: presentation.validationStatus,
+      view_model: presentation.viewModel,
+    });
+  }
+
+  app.get<{ Params: { plan_id: string }; Querystring: Record<string, unknown> }>(
+    '/api/v1/travel-plans/:plan_id/presentations/full',
+    (request, reply) => sendPresentation(request, reply, 'FULL_PLAN'),
+  );
+
+  app.get<{
+    Params: { plan_id: string; day_number: string };
+    Querystring: Record<string, unknown>;
+  }>('/api/v1/travel-plans/:plan_id/presentations/:day_number', (request, reply) =>
+    sendPresentation(request, reply, 'DAILY_POSTER'),
+  );
+
   /** 13.9.5 计划列表（对匿名与注册行为一致） */
   app.get('/api/v1/travel-plans', async (request, reply) => {
     const resolved = await resolveIdentity(deps, request, reply, {
@@ -332,12 +432,10 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
         start_date: item.startDate,
         total_days: item.totalDays,
         status: item.status,
-        /*
-         * 封面图来自素材绑定（P3 的 TP-3-xx）。现在返回 null 而不是省略
-         * 这个键：前端按 13.9.5 的响应结构写死了字段名，省略会让它读到
-         * undefined 并渲染出破图。
-         */
-        cover_url: null,
+        // 封面取当前版本第 1 天的 Hero 缩略图（TP-3-15 的绑定）。
+        // 没有绑定时为 null，前端渲染渐变占位 —— 键必须存在，
+        // 省略会让前端读到 undefined 并渲染出破图
+        cover_url: item.coverUrl,
         created_at: item.createdAt.toISOString(),
       })),
       next_cursor: page.nextCursor,

@@ -73,6 +73,24 @@ export interface PresentationsRepository {
   /** N+1 页一次事务写入（重复编排走 upsert，见 `plan_presentations_uk`） */
   savePresentations(inputs: readonly SavePresentationInput[]): Promise<void>;
   findPresentation(input: FindPresentationInput): Promise<PresentationDetail | null>;
+
+  /**
+   * 按版本直取（供 17.1 的内部渲染路由）。
+   *
+   * **没有 `userId` 参数** —— 这是 13.0 归属约束的第二个例外
+   * （第一个是 `findJobContext`）。理由：渲染路由**刻意不读任何身份 Cookie**
+   * （17.1：渲染页面不带用户会话，因此不存在会话泄漏面），
+   * 它的访问控制是绑定了 `plan_version_id` 的 HMAC 令牌 + 网络隔离。
+   *
+   * 在这里加 `user_id` 谓词需要渲染器先知道计划归谁 —— 而那意味着要么
+   * 把 user_id 塞进渲染令牌（等于把归属信息发给一个不需要它的组件），
+   * 要么让渲染器带上用户会话（那才是真正的泄漏面）。
+   */
+  findPresentationByVersion(input: {
+    readonly planVersionId: string;
+    readonly pageType: PageTypeValue;
+    readonly dayNumber?: number;
+  }): Promise<PresentationDetail | null>;
   /** TP-3-15：重复解析不产生重复绑定 */
   saveBindings(inputs: readonly SaveBindingInput[]): Promise<void>;
   /** 渲染与回填 ViewModel 用：连素材表一起取出展示所需字段 */
@@ -158,6 +176,44 @@ export function createPresentationsRepository(pool: Pool): PresentationsReposito
           ORDER BY pr.created_at DESC
           LIMIT 1`,
         [planId, userId, pageType, dayNumber ?? null, planVersionId ?? null],
+      );
+
+      const row = rows[0];
+      if (row === undefined) return null;
+
+      return {
+        planVersionId: row.plan_version_id,
+        templateId: row.template_id,
+        pageType: row.page_type,
+        dayNumber: row.day_number,
+        validationStatus: row.validation_status,
+        viewModel: row.view_model,
+      };
+    },
+
+    async findPresentationByVersion({ planVersionId, pageType, dayNumber }) {
+      /*
+       * 同样拦住 REJECTED 版本：渲染一份未通过校验的草稿会产出 PNG/PDF，
+       * 而那些产物一旦落到对象存储就可能被分享出去（验收标准 15）。
+       */
+      const { rows } = await pool.query<{
+        plan_version_id: string;
+        template_id: string;
+        page_type: PageTypeValue;
+        day_number: number | null;
+        validation_status: ValidationStatusValue;
+        view_model: unknown;
+      }>(
+        `SELECT pr.plan_version_id, pr.template_id, pr.page_type, pr.day_number,
+                pr.validation_status, pr.view_model
+           FROM plan_presentations pr
+           JOIN travel_plan_versions v ON v.id = pr.plan_version_id
+          WHERE pr.plan_version_id = $1
+            AND pr.page_type = $2
+            AND ($3::int IS NULL OR pr.day_number = $3::int)
+            AND v.status IN ('READY', 'REPAIRED')
+          LIMIT 1`,
+        [planVersionId, pageType, dayNumber ?? null],
       );
 
       const row = rows[0];

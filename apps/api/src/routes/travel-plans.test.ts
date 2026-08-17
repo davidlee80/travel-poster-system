@@ -18,7 +18,12 @@ import {
   type QuotaConfig,
   type ServiceConfig,
 } from '@tps/shared';
-import { UniqueViolationError, type TravelPlansRepository } from '@tps/db';
+import {
+  UniqueViolationError,
+  type PresentationDetail,
+  type PresentationsRepository,
+  type TravelPlansRepository,
+} from '@tps/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { FakeUsersRepository } from '../identity/fake-users-repository.js';
@@ -54,6 +59,59 @@ const quotaConfig: QuotaConfig = {
    */
   anonTokenTtlDays: 30,
 };
+
+/**
+ * 假展示仓储（13.4）。
+ *
+ * 按 `(plan_id, page_type, day_number)` 存 ViewModel，**不按 user_id**：
+ * 归属过滤与 REJECTED 过滤都是真实仓储的 SQL 谓词，
+ * 由 `presentations.integration.test.ts` 覆盖。在假实现里再写一遍
+ * 只会测到我对那条 SQL 的理解，而不是那条 SQL。
+ *
+ * 这里要覆盖的是端点自己的行为：路由匹配、天号校验、404 与 401 的分界。
+ */
+class FakePresentationsRepository implements PresentationsRepository {
+  readonly rows = new Map<string, PresentationDetail>();
+
+  private key(planId: string, pageType: string, dayNumber?: number): string {
+    return [planId, pageType, dayNumber ?? 'full'].join('|');
+  }
+
+  put(input: {
+    planId: string;
+    pageType: 'DAILY_POSTER' | 'FULL_PLAN';
+    dayNumber?: number;
+    detail: PresentationDetail;
+  }): void {
+    this.rows.set(this.key(input.planId, input.pageType, input.dayNumber), input.detail);
+  }
+
+  savePresentations(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  findPresentation(input: {
+    planId: string;
+    pageType: 'DAILY_POSTER' | 'FULL_PLAN';
+    dayNumber?: number;
+  }): Promise<PresentationDetail | null> {
+    return Promise.resolve(
+      this.rows.get(this.key(input.planId, input.pageType, input.dayNumber)) ?? null,
+    );
+  }
+
+  findPresentationByVersion(): Promise<PresentationDetail | null> {
+    throw new Error('API 端点不应调用 findPresentationByVersion（那是渲染路由的入口）');
+  }
+
+  saveBindings(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  listBindings(): Promise<never[]> {
+    return Promise.resolve([]);
+  }
+}
 
 /**
  * 假仓储。
@@ -190,6 +248,8 @@ class FakePlansRepository implements TravelPlansRepository {
         startDate: '2026-04-10',
         totalDays: 5,
         status: 'READY',
+        // TP-3-15 的封面：假仓储不产生绑定，因此恒为 null
+        coverUrl: null,
         createdAt: entry.createdAt,
       })),
       hasMore,
@@ -201,6 +261,7 @@ class FakePlansRepository implements TravelPlansRepository {
 interface Harness {
   readonly app: ReturnType<typeof buildServer>;
   readonly repository: FakePlansRepository;
+  readonly presentations: FakePresentationsRepository;
   readonly queue: InMemoryPlanQueue;
   readonly users: FakeUsersRepository;
 }
@@ -237,6 +298,7 @@ function build(lock: IdempotencyLock = new InMemoryIdempotencyLock()): Harness {
   });
 
   const repository = new FakePlansRepository();
+  const presentations = new FakePresentationsRepository();
   const queue = new InMemoryPlanQueue();
 
   const app = buildServer({
@@ -249,6 +311,7 @@ function build(lock: IdempotencyLock = new InMemoryIdempotencyLock()): Harness {
       quota,
       queue,
       plans: repository,
+      presentations,
       idempotencyLock: lock,
       secureCookies: false,
       // N-01 需要「今天」；请求 fixture 的出发日期是 2026-04-10
@@ -256,7 +319,7 @@ function build(lock: IdempotencyLock = new InMemoryIdempotencyLock()): Harness {
     },
   });
 
-  return { app, repository, queue, users };
+  return { app, repository, presentations, queue, users };
 }
 
 beforeEach(() => {
@@ -989,6 +1052,7 @@ describe('TP-2-31：日志不含禁记字段', () => {
         quota,
         queue: new InMemoryPlanQueue(),
         plans: new FakePlansRepository(),
+        presentations: new FakePresentationsRepository(),
         idempotencyLock: new InMemoryIdempotencyLock(),
         secureCookies: false,
         now,
@@ -1025,5 +1089,115 @@ describe('TP-2-31：日志不含禁记字段', () => {
     expect(output).not.toContain('cookie-secret-value');
     // raw_request 里的目的地不该出现（整体被剥离）
     expect(output).not.toContain('希望安排运河');
+  });
+});
+describe('13.4 获取展示数据', () => {
+  const VIEW_MODEL = { schema_version: 'travel_poster_view_model_v1', day_number: 3 };
+
+  function detail(overrides: Partial<PresentationDetail> = {}): PresentationDetail {
+    return {
+      planVersionId: '11111111-1111-4111-8111-111111111111',
+      templateId: 'travel_infographic_v1',
+      pageType: 'DAILY_POSTER',
+      dayNumber: 3,
+      validationStatus: 'DEGRADED',
+      viewModel: VIEW_MODEL,
+      ...overrides,
+    };
+  }
+
+  it('按天取到 ViewModel，并带上 validation_status', async () => {
+    const cookie = await anonymousCookie();
+    h().presentations.put({
+      planId: 'plan-1',
+      pageType: 'DAILY_POSTER',
+      dayNumber: 3,
+      detail: detail(),
+    });
+
+    const response = await h().app.inject({
+      method: 'GET',
+      url: '/api/v1/travel-plans/plan-1/presentations/3',
+      headers: { cookie },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      plan_id: 'plan-1',
+      plan_version_id: '11111111-1111-4111-8111-111111111111',
+      template_id: 'travel_infographic_v1',
+      page_type: 'DAILY_POSTER',
+      day_number: 3,
+      /*
+       * DEGRADED 必须返回给前端：它据此提示「部分图片暂不可用」。
+       * 不返回的话，用户只会看到几个占位块而不知道原因。
+       */
+      validation_status: 'DEGRADED',
+      view_model: VIEW_MODEL,
+    });
+  });
+
+  it('完整页走静态路由，不会被 :day_number 参数路由截走', async () => {
+    const cookie = await anonymousCookie();
+    h().presentations.put({
+      planId: 'plan-1',
+      pageType: 'FULL_PLAN',
+      detail: detail({ pageType: 'FULL_PLAN', dayNumber: null, validationStatus: 'VALID' }),
+    });
+
+    const response = await h().app.inject({
+      method: 'GET',
+      url: '/api/v1/travel-plans/plan-1/presentations/full',
+      headers: { cookie },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ page_type: 'FULL_PLAN', day_number: null });
+  });
+
+  it.each([['0'], ['15'], ['abc'], ['-1'], ['1.5']])(
+    '天号 %s 不合法 → 404（与「不存在」同一个码）',
+    async (dayNumber) => {
+      const cookie = await anonymousCookie();
+      const response = await h().app.inject({
+        method: 'GET',
+        url: `/api/v1/travel-plans/plan-1/presentations/${dayNumber}`,
+        headers: { cookie },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json<{ error: { code: string } }>().error.code).toBe('PLAN_NOT_FOUND');
+    },
+  );
+
+  it('尚未编排 → 404（正常时序，不是错误）', async () => {
+    const cookie = await anonymousCookie();
+    const response = await h().app.inject({
+      method: 'GET',
+      url: '/api/v1/travel-plans/plan-1/presentations/1',
+      headers: { cookie },
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('无身份 → 401（13.0：只有生成端点会现场建号）', async () => {
+    const response = await h().app.inject({
+      method: 'GET',
+      url: '/api/v1/travel-plans/plan-1/presentations/1',
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('plan_version_id 不是 UUID → 400（不把垃圾字符串带进 SQL）', async () => {
+    const cookie = await anonymousCookie();
+    const response = await h().app.inject({
+      method: 'GET',
+      url: '/api/v1/travel-plans/plan-1/presentations/1?plan_version_id=not-a-uuid',
+      headers: { cookie },
+    });
+
+    expect(response.statusCode).toBe(400);
   });
 });

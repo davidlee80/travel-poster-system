@@ -74,6 +74,14 @@ export interface PlanListItem {
   readonly startDate: string;
   readonly totalDays: number;
   readonly status: string;
+  /**
+   * 封面图（13.9.5 的 `cover_url`）。
+   *
+   * 取当前版本第 1 天 Hero 槽位绑定的素材缩略图。用缩略图而不是原图：
+   * 列表页可能同时显示 20 个封面，原图（最大 2400 宽）会让首屏多下载几十 MB。
+   * 没有绑定时为 null，前端渲染渐变占位。
+   */
+  readonly coverUrl: string | null;
   readonly createdAt: Date;
 }
 
@@ -414,14 +422,30 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
         start_date: string;
         total_days: number;
         status: string;
+        cover_url: string | null;
         created_at: Date;
       }>(
-        `SELECT id, title, destination_name, start_date::text AS start_date,
-                total_days, status, created_at
-           FROM travel_plans
-          WHERE user_id = $1
-            AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
-          ORDER BY created_at DESC, id DESC
+        /*
+         * 封面走两次 LEFT JOIN 而不是子查询：绑定表的唯一约束是
+         * (plan_version_id, template_id, slot_id)，加上 role 与 day_number
+         * 的过滤后最多命中一行，因此不会让结果集变多。
+         * LEFT JOIN 保证「还没解析素材的计划」仍然出现在列表里 ——
+         * 内连接会让刚提交的计划从历史列表里消失。
+         */
+        `SELECT p.id, p.title, p.destination_name, p.start_date::text AS start_date,
+                p.total_days, p.status, p.created_at,
+                COALESCE(a.thumbnail_url, a.storage_url) AS cover_url
+           FROM travel_plans p
+           LEFT JOIN plan_asset_bindings b
+                  ON b.plan_version_id = p.current_version_id
+                 AND b.role = 'HERO_BACKGROUND'
+                 AND b.day_number = 1
+           LEFT JOIN assets a
+                  ON a.id = b.asset_id
+                 AND a.status = 'ACTIVE'
+          WHERE p.user_id = $1
+            AND ($2::timestamptz IS NULL OR (p.created_at, p.id) < ($2::timestamptz, $3::uuid))
+          ORDER BY p.created_at DESC, p.id DESC
           LIMIT $4`,
         [userId, decoded?.createdAt ?? null, decoded?.id ?? null, limit + 1],
       );
@@ -435,6 +459,7 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
         startDate: row.start_date,
         totalDays: row.total_days,
         status: row.status,
+        coverUrl: row.cover_url,
         createdAt: row.created_at,
       }));
 

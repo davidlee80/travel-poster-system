@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { TRAVEL_PLAN_FIXTURES, makeTravelPlanFixture } from '@tps/schemas';
-import { buildFullPlan } from '@tps/presentation';
+import { buildFullPlan, type FullPlanViewModel } from '@tps/presentation';
+import { isFixtureVersion, loadFullPlanViewModel } from '@/lib/presentation-source';
 import { TravelFullPlan } from '@/templates/travel-full-plan-v1';
 import { RenderReadyProbe } from '@/components/RenderReadyProbe';
 
@@ -28,13 +29,32 @@ function fixtureFor(planVersionId: string) {
   return TRAVEL_PLAN_FIXTURES.sevenDays();
 }
 
+/**
+ * 两条来源，与单日路由同一处理（见那里的说明）。
+ *
+ * 完整页的 ViewModel 没有 Zod 契约（`FullPlanViewModel` 是 TS 接口 ——
+ * 它不跨进程，由 `@tps/presentation` 独占产出）。因此这里只做形状探测：
+ * 缺 `days` 数组就当作旧契约，返回 null 让路由 404。
+ */
+async function loadViewModel(planVersionId: string): Promise<FullPlanViewModel | null> {
+  if (isFixtureVersion(planVersionId)) {
+    const plan = fixtureFor(planVersionId);
+    if (plan.days.length === 0) return null;
+    return buildFullPlan({ plan }).viewModel;
+  }
+
+  const stored = (await loadFullPlanViewModel(planVersionId)) as FullPlanViewModel | null;
+  if (stored === null || !Array.isArray(stored.days) || stored.days.length === 0) {
+    return null;
+  }
+  return stored;
+}
+
 export default async function RenderFullPlanPage({ params }: PageProps) {
   const { planVersionId } = await params;
 
-  const plan = fixtureFor(planVersionId);
-  if (plan.days.length === 0) notFound();
-
-  const { viewModel } = buildFullPlan({ plan });
+  const viewModel = await loadViewModel(planVersionId);
+  if (viewModel === null) notFound();
 
   return (
     <>

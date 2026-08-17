@@ -6,12 +6,14 @@ import {
   loadServiceConfig,
   nodeEnv,
   optionalBool,
+  optionalString,
   requireString,
 } from '@tps/shared';
 import { registerDefaultMetrics } from '@tps/observability';
 import {
   checkDatabase,
   createPool,
+  createPresentationsRepository,
   createTravelPlansRepository,
   createUsersRepository,
   loadDbConfig,
@@ -90,6 +92,13 @@ async function main(): Promise<void> {
     secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
   });
 
+  /*
+   * 内部端点的共享密钥。未配置则不注册那些路由 ——
+   * 少一个默认密钥就少一个「忘了改默认值」的事故。
+   */
+  const rawInternalKey = optionalString('INTERNAL_API_KEY', '');
+  const internalApiKey = rawInternalKey.length === 0 ? undefined : rawInternalKey;
+
   const app = buildServer({
     config,
     logger,
@@ -104,10 +113,25 @@ async function main(): Promise<void> {
       quota,
       queue,
       plans: createTravelPlansRepository(pool),
+      presentations: createPresentationsRepository(pool),
       idempotencyLock: new RedisIdempotencyLock(redis),
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
       now: () => new Date(),
     },
+    /*
+     * 14.1/14.2 的内部端点：只在配置了共享密钥时注册。
+     * 它们做 CPU 与数据库工作，挂在公网服务上必须有认证
+     * （见 routes/internal-assets.ts）。
+     */
+    ...(internalApiKey === undefined
+      ? {}
+      : {
+          internalAssets: { internalApiKey },
+          internalPresentations: {
+            internalApiKey,
+            presentations: createPresentationsRepository(pool),
+          },
+        }),
     checkDependencies: async () => {
       const detail = { postgres: false, redis: false };
       try {

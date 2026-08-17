@@ -1,7 +1,9 @@
 import { IdentityService, RedisSessionStore } from '@tps/api/identity';
 import { buildServer } from '@tps/api/server';
 import {
+  createAssetsRepository,
   createPool,
+  createPresentationsRepository,
   createUsersRepository,
   createRetrievalRepository,
   createTravelPlansRepository,
@@ -9,6 +11,8 @@ import {
   migrationsDirectory,
 } from '@tps/db';
 import { FakeLlmClient, LocalHashingEmbeddingClient } from '@tps/llm';
+import { InMemoryObjectStorage } from '@tps/storage';
+import { TravelPosterViewModelSchema } from '@tps/schemas';
 import { parseRetrievalProjection, projectionToEmbeddingText } from '@tps/planning';
 import {
   BullMqPlanQueue,
@@ -129,6 +133,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
         quota,
         queue,
         plans: createTravelPlansRepository(pool),
+        presentations: createPresentationsRepository(pool),
         idempotencyLock: new RedisIdempotencyLock(redis),
         secureCookies: false,
         now: () => new Date(),
@@ -148,9 +153,25 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
 
   beforeEach(async () => {
     await pool.query('DELETE FROM users');
+    // 绑定引用素材且是 RESTRICT，顺序不能反
+    await pool.query('DELETE FROM plan_asset_bindings');
+    await pool.query('DELETE FROM assets');
     await redis.flushdb();
     await rawQueue.obliterate({ force: true }).catch(() => undefined);
   });
+
+  /**
+   * 从 Set-Cookie 里取出匿名令牌。
+   *
+   * 必须按前缀找到那一条再截到第一个 `;` —— 直接 join 再解析会把
+   * `Expires=Thu, 01 Jan ...` 里的逗号与分号一起卷进来，得到一个被截断的令牌。
+   */
+  function anonymousCookie(header: string | string[] | undefined): string {
+    const cookies = Array.isArray(header) ? header.map(String) : [String(header)];
+    const anon = cookies.find((entry) => entry.startsWith(`${COOKIE_NAMES.anonymous}=`))!;
+    const value = anon.slice(COOKIE_NAMES.anonymous.length + 1).split(';')[0]!;
+    return `${COOKIE_NAMES.anonymous}=${value}`;
+  }
 
   /** 出发日期取「明天」，否则 N-01（出发日期不早于今天）会拒掉请求 */
   function requestBody(): Record<string, unknown> {
@@ -205,6 +226,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
 
   function workerDeps() {
     const embedding = new LocalHashingEmbeddingClient();
+    const storage = new InMemoryObjectStorage();
     return {
       plans: createTravelPlansRepository(pool),
       retrieval: { repository: createRetrievalRepository(pool), embedding },
@@ -214,6 +236,18 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
       embedding,
       logger: createSilentLogger(),
       llmTimeoutMs: 30_000,
+      /*
+       * P3 的展示编排。对象存储用进程内实现 —— 真实 MinIO 的写入由
+       * @tps/storage 的集成测试覆盖，这条链路要验证的是
+       * 「编排 → 解析 → 落库 → 13.4 能读到」。
+       */
+      presentation: {
+        assets: createAssetsRepository(pool),
+        presentations: createPresentationsRepository(pool),
+        storage,
+        embedding,
+      },
+      storage,
     };
   }
 
@@ -234,10 +268,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     }>();
     expect(handles.status).toBe('QUEUED');
 
-    const cookieHeader = created.headers['set-cookie'];
-    const cookies = Array.isArray(cookieHeader) ? cookieHeader.map(String) : [String(cookieHeader)];
-    const anon = cookies.find((entry) => entry.startsWith(`${COOKIE_NAMES.anonymous}=`))!;
-    const cookie = `${COOKIE_NAMES.anonymous}=${anon.slice(COOKIE_NAMES.anonymous.length + 1).split(';')[0]!}`;
+    const cookie = anonymousCookie(created.headers['set-cookie']);
 
     // 2. 队列里确实有这条任务，且载荷只含标识符
     const payload = await takeQueuedPayload();
@@ -260,14 +291,14 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     const outcome = await generatePlan(workerDeps(), payload);
     expect(outcome).toMatchObject({ outcome: 'saved' });
 
-    // 5. 任务状态推进到 SAVING_PLAN（P2 的边界，见 generate-plan.ts）
+    // 5. 任务状态推进到 RESOLVING_ASSETS（P3 的边界，见 generate-plan.ts）
     const job = await app.inject({
       method: 'GET',
       url: `/api/v1/generation-jobs/${handles.job_id}`,
       headers: { cookie },
     });
     expect(job.statusCode).toBe(200);
-    expect(job.json()).toMatchObject({ status: 'SAVING_PLAN', progress: 60 });
+    expect(job.json()).toMatchObject({ status: 'RESOLVING_ASSETS', progress: 76 });
 
     // 6. 计划可读，且是一份合法的 TravelPlan
     const plan = await app.inject({
@@ -298,6 +329,205 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     expect(list.json<{ items: { plan_id: string }[] }>().items.map((item) => item.plan_id)).toEqual(
       [handles.plan_id],
     );
+  });
+
+  it('展示数据可读：每日 ViewModel + 完整页 + 路线图（TP-3-16、P3 门禁）', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      payload: requestBody(),
+    });
+    expect(created.statusCode).toBe(201);
+    const handles = created.json<{ plan_id: string; job_id: string }>();
+    const cookie = anonymousCookie(created.headers['set-cookie']);
+
+    const outcome = await generatePlan(workerDeps(), await takeQueuedPayload());
+    expect(outcome).toMatchObject({ outcome: 'saved' });
+
+    // N+1 页（5 天 + 完整页）
+    const rows = await pool.query<{ count: string }>(
+      'SELECT count(*) FROM plan_presentations WHERE plan_id = $1',
+      [handles.plan_id],
+    );
+    expect(rows.rows[0]!.count).toBe('6');
+
+    // 13.4：按天取
+    for (const day of [1, 3, 5]) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/travel-plans/${handles.plan_id}/presentations/${day}`,
+        headers: { cookie },
+      });
+      expect(response.statusCode).toBe(200);
+
+      const body = response.json<{
+        page_type: string;
+        day_number: number;
+        validation_status: string;
+        view_model: unknown;
+      }>();
+      expect(body.page_type).toBe('DAILY_POSTER');
+      expect(body.day_number).toBe(day);
+
+      // ViewModel 必须能被契约解析 —— 前端就是按它渲染的
+      const parsed = TravelPosterViewModelSchema.safeParse(body.view_model);
+      expect(parsed.success, `第 ${day} 天的 ViewModel 不合法`).toBe(true);
+      if (!parsed.success) continue;
+
+      // 路线图：SVG 已生成并上传，因此 svg_url 有值（9.2，不是文字降级）
+      expect(parsed.data.route_map.svg_url).toContain('.svg');
+      expect(parsed.data.route_map.nodes.length).toBeGreaterThan(0);
+      // 图标 8 个键齐全（12.2）
+      expect(Object.keys(parsed.data.icons)).toHaveLength(8);
+    }
+
+    // 13.4：完整页一次请求返回全部天数（R-04 补充）
+    const full = await app.inject({
+      method: 'GET',
+      url: `/api/v1/travel-plans/${handles.plan_id}/presentations/full`,
+      headers: { cookie },
+    });
+    expect(full.statusCode).toBe(200);
+    const fullBody = full.json<{
+      page_type: string;
+      day_number: number | null;
+      view_model: { days: unknown[]; overview: { total_days: number } };
+    }>();
+    expect(fullBody.page_type).toBe('FULL_PLAN');
+    expect(fullBody.day_number).toBeNull();
+    expect(fullBody.view_model.days).toHaveLength(5);
+    expect(fullBody.view_model.overview.total_days).toBe(5);
+
+    // 越界天号 404（13.0：不存在的页面与不属于你的页面同一个码）
+    const outOfRange = await app.inject({
+      method: 'GET',
+      url: `/api/v1/travel-plans/${handles.plan_id}/presentations/9`,
+      headers: { cookie },
+    });
+    expect(outOfRange.statusCode).toBe(404);
+  });
+
+  it('素材绑定落库且来源可追溯（TP-3-15、二十章）', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      payload: requestBody(),
+    });
+    const handles = created.json<{ plan_id: string }>();
+    const cookie = anonymousCookie(created.headers['set-cookie']);
+
+    await generatePlan(workerDeps(), await takeQueuedPayload());
+
+    /*
+     * 本地素材库是空的（没有灌种子素材，也没灌占位图），因此只有路线图
+     * 真正产出了素材，其余槽位是 SKIPPED。这正是「没有素材数据时链路
+     * 仍然完整」的证据 —— 也是 TP-3-06 那 2000 条种子素材属于数据工作、
+     * 不属于代码的直接体现。
+     */
+    const bindings = await pool.query<{
+      role: string;
+      resolution_strategy: string;
+      source_type: string;
+      representation_type: string;
+    }>(
+      `SELECT b.role, b.resolution_strategy, a.source_type, a.representation_type
+         FROM plan_asset_bindings b
+         JOIN assets a ON a.id = b.asset_id
+        WHERE b.plan_id = $1
+        ORDER BY b.day_number`,
+      [handles.plan_id],
+    );
+
+    expect(bindings.rows).toHaveLength(5);
+    for (const row of bindings.rows) {
+      expect(row.role).toBe('ROUTE_MAP');
+      expect(row.source_type).toBe('GENERATED_SVG');
+      // 示意图不是照片（9.4 的同一条原则）
+      expect(row.representation_type).toBe('ILLUSTRATIVE');
+    }
+
+    // 素材未齐 → DEGRADED 而不是 VALID（十五章）
+    const presentation = await app.inject({
+      method: 'GET',
+      url: `/api/v1/travel-plans/${handles.plan_id}/presentations/1`,
+      headers: { cookie },
+    });
+    expect(presentation.json<{ validation_status: string }>().validation_status).toBe('DEGRADED');
+  });
+
+  it('重跑生成产出新版本，展示数据按版本隔离且素材被复用（19.3、19.5）', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      payload: requestBody(),
+    });
+    const handles = created.json<{ plan_id: string }>();
+    const cookie = anonymousCookie(created.headers['set-cookie']);
+    const payload = await takeQueuedPayload();
+
+    const first = await generatePlan(workerDeps(), payload);
+    /*
+     * 第二次消费不会被「终态」挡住（任务停在 RESOLVING_ASSETS），因此会
+     * 真的重跑一遍：生成 → 落一个**新版本** → 重新编排。
+     *
+     * 这不是缺陷：19.3 明确「新计划版本产生时不删旧行，按 plan_version_id
+     * 隔离」。真正需要断言的是三件事 —— 新版本有自己完整的 N+1 页、
+     * 13.4 默认返回新版本、素材没有被重复生成。
+     */
+    const second = await generatePlan(workerDeps(), payload);
+
+    expect(first.outcome).toBe('saved');
+    expect(second.outcome).toBe('saved');
+    if (first.outcome !== 'saved' || second.outcome !== 'saved') return;
+    expect(second.versionId).not.toBe(first.versionId);
+
+    const perVersion = await pool.query<{ plan_version_id: string; count: string }>(
+      `SELECT plan_version_id, count(*) AS count
+         FROM plan_presentations WHERE plan_id = $1
+        GROUP BY plan_version_id`,
+      [handles.plan_id],
+    );
+    expect(perVersion.rows).toHaveLength(2);
+    for (const row of perVersion.rows) {
+      // 每个版本各自完整的 5 天 + 完整页
+      expect(row.count).toBe('6');
+    }
+
+    // 13.4 默认返回当前版本（13.4「默认返回最新的有效版本」）
+    const current = await app.inject({
+      method: 'GET',
+      url: `/api/v1/travel-plans/${handles.plan_id}/presentations/1`,
+      headers: { cookie },
+    });
+    expect(current.json<{ plan_version_id: string }>().plan_version_id).toBe(second.versionId);
+
+    // 指定旧版本仍可取到（回滚与对比用）
+    const old = await app.inject({
+      method: 'GET',
+      url: `/api/v1/travel-plans/${handles.plan_id}/presentations/1?plan_version_id=${first.versionId}`,
+      headers: { cookie },
+    });
+    expect(old.json<{ plan_version_id: string }>().plan_version_id).toBe(first.versionId);
+
+    /*
+     * 19.5 的内容寻址复用，两个方向同时生效：
+     *   跨天   —— fixture 的每一天走的是同一批地点，route_node_hash 相同；
+     *   跨版本 —— 两次生成的路线也相同。
+     * 因此 10 个路线槽位（2 版本 × 5 天）总共只落了**一张** SVG。
+     * 这条断言是「重复编排不重复花钱」的直接证据 ——
+     * 数字从 10 降到 1 全靠 assets_cache_key_uk 与内容寻址的哈希。
+     */
+    const svgCount = await pool.query<{ count: string }>(
+      `SELECT count(*) FROM assets WHERE source_type = 'GENERATED_SVG'`,
+    );
+    expect(svgCount.rows[0]!.count).toBe('1');
+
+    const bindings = await pool.query<{ count: string }>(
+      'SELECT count(*) FROM plan_asset_bindings WHERE plan_id = $1',
+      [handles.plan_id],
+    );
+    // 两个版本各 5 条绑定，指向同一批素材
+    expect(bindings.rows[0]!.count).toBe('10');
   });
 
   it('落库的版本带脱敏投影与向量，且能被同城的相似计划检索到（门禁 #26）', async () => {
@@ -386,10 +616,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     });
     expect(first.statusCode).toBe(201);
 
-    const cookieHeader = first.headers['set-cookie'];
-    const cookies = Array.isArray(cookieHeader) ? cookieHeader.map(String) : [String(cookieHeader)];
-    const anon = cookies.find((entry) => entry.startsWith(`${COOKIE_NAMES.anonymous}=`))!;
-    const cookie = `${COOKIE_NAMES.anonymous}=${anon.slice(COOKIE_NAMES.anonymous.length + 1).split(';')[0]!}`;
+    const cookie = anonymousCookie(first.headers['set-cookie']);
 
     // 同一身份、同一 client_request_id、同一内容 → 任务仍在进行中 → 409
     const again = await app.inject({

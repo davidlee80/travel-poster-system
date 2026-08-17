@@ -1,7 +1,7 @@
 import { GracefulShutdown, createSilentLogger, type ServiceConfig } from '@tps/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../server.js';
-import { INTERNAL_API_KEY_HEADER } from './internal-assets.js';
+import { INTERNAL_API_KEY_HEADER } from './internal-auth.js';
 
 /**
  * 14.2 生成路线 SVG（TP-3-10 的端点部分）。

@@ -13,14 +13,14 @@
     "fonts:copy": "node scripts/copy-fonts.mjs"
   },
   "dependencies": {
+    "@tps/fonts": "workspace:*",
+    "@tps/icon-library": "workspace:*",
+    "@tps/presentation": "workspace:*",
     "@tps/schemas": "workspace:*",
+    "@tps/shared": "workspace:*",
     "next": "^15.5.4",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "@tps/presentation": "workspace:*",
-    "@tps/icon-library": "workspace:*",
-    "@tps/shared": "workspace:*",
-    "@tps/fonts": "workspace:*"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

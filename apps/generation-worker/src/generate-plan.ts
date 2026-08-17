@@ -35,6 +35,10 @@ import type { GenerationJobPayload } from '@tps/queue';
 import type { Logger } from '@tps/shared';
 
 import { createPlanValidationObserver } from './plan-metrics.js';
+import {
+  buildAndSavePresentations,
+  type BuildPresentationDeps,
+} from './presentation/build-presentation.js';
 import { retrieveReferences, type RetrievalDeps } from './retrieval.js';
 
 /**
@@ -46,15 +50,21 @@ import { retrieveReferences, type RetrievalDeps } from './retrieval.js';
  *        → GENERATING_PLAN → VALIDATING_PLAN ⇄ REPAIRING_PLAN → SAVING_PLAN
  * ```
  *
- * **P2 的任务停在 `SAVING_PLAN`，不进入 `COMPLETED`。** 这是有意的：
- * 16.1 的 `COMPLETED` 必须经过 `BUILDING_PRESENTATION` → `RESOLVING_ASSETS`
- * → `RENDERING_HTML`，而那三段在 P3 交付。让 P2 直接跳到 `COMPLETED`
- * 会在状态机上开一条非法边，而那条边一旦存在，P3 接上真实渲染后
- * 「跳过渲染直接完成」的路径仍然可走 —— 用户会拿到一个没有图的「已完成」。
+ * P3 把它推进到 `RESOLVING_ASSETS`：
+ * ```text
+ * SAVING_PLAN → BUILDING_PRESENTATION → RESOLVING_ASSETS
+ * ```
  *
- * 用户可见的效果不受影响：计划在 `SAVING_PLAN` 完成的那一刻就能通过
- * `GET /api/v1/travel-plans/{plan_id}` 读到完整文字版（13.3），
- * 这正是 TP-2-17 要的那个页面。
+ * **P3 的任务停在 `RESOLVING_ASSETS`，仍然不进入 `COMPLETED`。**
+ * 16.1 的 `COMPLETED` 还要经过 `RENDERING_HTML`（渲染服务出 HTML 快照）
+ * 与两个导出阶段，它们在 P4（TP-4-08 的完整状态机、TP-4-12 的导出）。
+ * 理由与 P2 同一条：跳过去会在状态机上开一条非法边，而那条边一旦存在，
+ * 「跳过渲染直接完成」就永远可走。
+ *
+ * 用户可见的效果不受影响：
+ *   - `SAVING_PLAN` 完成即可读完整文字版计划（13.3）；
+ *   - `RESOLVING_ASSETS` 完成即可读带图的展示数据（13.4），
+ *     前端据此渲染信息图页面 —— 这正是 P3 门禁要的那个页面。
  */
 
 /** 提示模板版本。落库到 `llm_prompt_version`，便于按版本回溯输出质量 */
@@ -76,10 +86,30 @@ export interface GeneratePlanDeps {
   readonly embedding: EmbeddingClient;
   readonly logger: Logger;
   readonly llmTimeoutMs: number;
+  /**
+   * 展示编排与素材解析（P3）。
+   *
+   * 可选：缺省时任务停在 `SAVING_PLAN`，与 P2 的行为一致。
+   * 这让「只想跑计划生成」的场景（如 P2 时期的测试、故障时的降级部署）
+   * 不必装配对象存储与素材库依赖。
+   *
+   * `logger` 由本模块注入（带 job_id / user_id 的子 logger），因此这里排除它。
+   */
+  readonly presentation?: Omit<BuildPresentationDeps, 'logger'>;
 }
 
 export type GenerateOutcome =
-  | { readonly outcome: 'saved'; readonly versionId: string; readonly status: 'READY' | 'REPAIRED' }
+  | {
+      readonly outcome: 'saved';
+      readonly versionId: string;
+      readonly status: 'READY' | 'REPAIRED';
+      /** 展示编排的结果。未装配或编排失败时缺省 */
+      readonly presentation?: {
+        readonly pages: number;
+        readonly validationStatus: string;
+        readonly bindings: number;
+      };
+    }
   | { readonly outcome: 'rejected'; readonly versionId: string; readonly errorCode: PlanErrorCode }
   | { readonly outcome: 'failed'; readonly errorCode: PlanErrorCode }
   | { readonly outcome: 'skipped'; readonly reason: 'not_found' | 'already_terminal' };
@@ -406,10 +436,6 @@ export async function generatePlan(
     return { outcome: 'rejected', versionId: saved.versionId, errorCode: code };
   }
 
-  /*
-   * 停在 SAVING_PLAN，不推进到 COMPLETED —— 见文件头说明。
-   * 计划此刻已可通过 13.3 读到。
-   */
   await deps.plans.updateJobState({
     jobId: context.jobId,
     to: 'SAVING_PLAN',
@@ -429,5 +455,67 @@ export async function generatePlan(
     '计划已保存',
   );
 
-  return { outcome: 'saved', versionId: saved.versionId, status: finalStatus };
+  /*
+   * ── BUILDING_PRESENTATION → RESOLVING_ASSETS（TP-3-03～TP-3-16）──
+   *
+   * 展示编排缺失不该让「已经生成好的计划」变成失败：13.3 的文字版计划
+   * 此刻已经可读，用户手里有一份完整的行程。因此这一段的异常只记
+   * `warnings` 级别的日志并把任务留在 `SAVING_PLAN`，
+   * 而不是 `FAILED`（16.3：只有「页面核心结构无法生成」才阻断，
+   * 而那要等到 P4 接上真实渲染才能判定）。
+   */
+  const presentation = deps.presentation;
+  if (presentation === undefined) {
+    log.warn({ stage: 'SAVING_PLAN' }, '未装配展示编排依赖，任务停在 SAVING_PLAN');
+    return { outcome: 'saved', versionId: saved.versionId, status: finalStatus };
+  }
+
+  try {
+    await advance(deps, context.jobId, 'BUILDING_PRESENTATION');
+
+    const plan = {
+      ...planContent,
+      plan_id: context.planId,
+      plan_version_id: saved.versionId,
+      request_id: context.requestId,
+    };
+
+    await advance(deps, context.jobId, 'RESOLVING_ASSETS');
+    const result = await buildAndSavePresentations({ ...presentation, logger: log }, plan);
+
+    log.info(
+      {
+        stage: 'RESOLVING_ASSETS',
+        plan_version_id: saved.versionId,
+        status: result.validationStatus,
+      },
+      `展示数据已保存：${result.pages} 页、${result.bindings} 个素材绑定` +
+        (result.omitted > 0 ? `，${result.omitted} 条内容因限额未展示` : ''),
+    );
+
+    if (result.budgetMismatch) {
+      // 12.1：预算数字对不上是用户可见的严重错误，V-20 定为 REPAIRABLE
+      log.warn(
+        { stage: 'RESOLVING_ASSETS', rule_id: 'V-20' },
+        '预算明细之和与总计不一致，展示以明细之和为准',
+      );
+    }
+
+    return {
+      outcome: 'saved',
+      versionId: saved.versionId,
+      status: finalStatus,
+      presentation: {
+        pages: result.pages,
+        validationStatus: result.validationStatus,
+        bindings: result.bindings,
+      },
+    };
+  } catch (error) {
+    log.error(
+      { stage: 'RESOLVING_ASSETS', plan_version_id: saved.versionId },
+      `展示编排失败，计划仍可通过 13.3 读取：${String(error)}`,
+    );
+    return { outcome: 'saved', versionId: saved.versionId, status: finalStatus };
+  }
 }

@@ -6,6 +6,10 @@ import {
   registerInternalAssetRoutes,
   type InternalAssetRoutesDeps,
 } from './routes/internal-assets.js';
+import {
+  registerInternalPresentationRoutes,
+  type InternalPresentationRoutesDeps,
+} from './routes/internal-presentations.js';
 import { registerTravelPlanRoutes, type TravelPlanRoutesDeps } from './routes/travel-plans.js';
 
 /**
@@ -34,10 +38,27 @@ export interface ServerDeps {
    * 挂在公网服务上必须有认证（见 routes/internal-assets.ts）。
    */
   readonly internalAssets?: InternalAssetRoutesDeps;
+  /**
+   * 渲染路由取展示数据的内部端点（17.1）。
+   *
+   * 与 `internalAssets` 分开：前者是素材服务的契约（14.x），
+   * 后者是渲染链路的取数入口。两者共用同一把共享密钥，
+   * 但装配条件不同 —— 只跑渲染的部署不需要素材端点。
+   */
+  readonly internalPresentations?: InternalPresentationRoutesDeps;
 }
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
-  const { config, logger, shutdown, checkDependencies, auth, travelPlans, internalAssets } = deps;
+  const {
+    config,
+    logger,
+    shutdown,
+    checkDependencies,
+    auth,
+    travelPlans,
+    internalAssets,
+    internalPresentations,
+  } = deps;
 
   /*
    * 显式标注为 FastifyBaseLogger，而不是直接把 pino 的 Logger 传进 Fastify。
@@ -108,6 +129,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   }
   if (internalAssets !== undefined) {
     registerInternalAssetRoutes(app, internalAssets);
+  }
+  if (internalPresentations !== undefined) {
+    registerInternalPresentationRoutes(app, internalPresentations);
   }
 
   return app;
