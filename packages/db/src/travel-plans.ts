@@ -90,6 +90,66 @@ export interface ListPlansInput {
   readonly cursor?: string;
 }
 
+/** Worker 侧推进任务需要的上下文（13.1 的载荷只带 ID，内容从库里读回） */
+export interface JobContext {
+  readonly jobId: string;
+  readonly requestId: string;
+  readonly planId: string;
+  readonly userId: string;
+  readonly status: JobStatusValue;
+  readonly progress: number;
+  /** `travel_requests.normalized_request`，由调用方用 schema 解析 */
+  readonly normalizedRequest: unknown;
+}
+
+export interface UpdateJobStateInput {
+  readonly jobId: string;
+  readonly to: JobStatusValue;
+  /** 16.2 查表得到的目标进度。实际写入取 `GREATEST(现值, 该值)` */
+  readonly progress: number;
+  readonly message: string | null;
+  /** 期望的当前状态。给出时用于乐观并发控制（16.1 的合法转移） */
+  readonly from?: JobStatusValue;
+  readonly errorCode?: string;
+  readonly planVersionId?: string;
+}
+
+export interface SavePlanVersionInput {
+  /**
+   * 版本 ID 由**调用方**生成，不用数据库的 `gen_random_uuid()` 默认值。
+   *
+   * 理由是 `plan_json` 里必须含 `plan_version_id`（六章的 `TravelPlan`
+   * 三个 ID 都是必填）。让数据库生成的话，插入完成才知道 ID，
+   * 而那时 `plan_json` 已经写进去了 —— 只能再 UPDATE 一次，
+   * 中间那一瞬间库里存着一份读不回来的计划（`TravelPlanSchema` 会拒绝它）。
+   */
+  readonly versionId: string;
+  readonly planId: string;
+  readonly status: 'READY' | 'REPAIRED' | 'REJECTED';
+  readonly planJson: unknown;
+  readonly constraintReport: unknown;
+  /** 3.2.4 的脱敏投影。NOT NULL，因此**必须**在这里就构造好 */
+  readonly retrievalProjection: unknown;
+  readonly destinationPlaceId: string | null;
+  readonly totalDays: number;
+  /** 15.2：必须由投影计算。null 表示向量化失败，检索时该版本不参与 */
+  readonly planEmbedding: readonly number[] | null;
+  readonly title: string | null;
+  readonly llmModel: string | null;
+  readonly llmPromptVersion: string | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly repairIterations: number;
+  readonly regenerationCount: number;
+}
+
+export interface SavedPlanVersion {
+  readonly versionId: string;
+  readonly versionNumber: number;
+  /** 是否被设为 `current_version_id`（REJECTED 永远不会） */
+  readonly promoted: boolean;
+}
+
 export interface TravelPlansRepository {
   /**
    * 同事务插入 `travel_requests` + `travel_plans` + `generation_jobs`。
@@ -101,6 +161,21 @@ export interface TravelPlansRepository {
   findPlanForUser(planId: string, userId: string): Promise<PlanDetail | null>;
   findJobForUser(jobId: string, userId: string): Promise<JobDetail | null>;
   listPlansForUser(input: ListPlansInput): Promise<PlanListPage>;
+
+  /**
+   * Worker 侧：按 job_id 读回上下文。
+   *
+   * **没有 `userId` 参数** —— 这是 13.0 的例外之一，且理由与检索路径不同：
+   * Worker 消费的是自己入队的任务，队列载荷里的 `userId` 就是归属，
+   * 再加一个谓词只会让「载荷与库里不一致」这种真正的故障被静默跳过。
+   */
+  findJobContext(jobId: string): Promise<JobContext | null>;
+
+  /** 状态与进度同事务更新（16.1），进度取 `GREATEST` 保证单调不减（16.2） */
+  updateJobState(input: UpdateJobStateInput): Promise<boolean>;
+
+  /** TP-2-14：写版本 + 提升 `current_version_id`，同一事务 */
+  savePlanVersion(input: SavePlanVersionInput): Promise<SavedPlanVersion>;
 }
 
 /** PostgreSQL unique_violation */
@@ -369,6 +444,159 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
         hasMore,
         nextCursor: hasMore && last !== undefined ? encodeCursor(last) : null,
       };
+    },
+
+    async findJobContext(jobId) {
+      const { rows } = await pool.query<{
+        id: string;
+        request_id: string;
+        plan_id: string | null;
+        user_id: string;
+        status: string;
+        progress: number;
+        normalized_request: unknown;
+      }>(
+        `SELECT j.id, j.request_id, j.plan_id, j.user_id, j.status, j.progress,
+                r.normalized_request
+           FROM generation_jobs j
+           JOIN travel_requests r ON r.id = j.request_id
+          WHERE j.id = $1`,
+        [jobId],
+      );
+
+      const row = rows[0];
+      if (row === undefined || row.plan_id === null) return null;
+
+      return {
+        jobId: row.id,
+        requestId: row.request_id,
+        planId: row.plan_id,
+        userId: row.user_id,
+        status: row.status,
+        progress: row.progress,
+        normalizedRequest: row.normalized_request,
+      };
+    },
+
+    async updateJobState(input) {
+      const terminal = ['COMPLETED', 'FAILED', 'CANCELLED'];
+      const isTerminal = terminal.includes(input.to);
+
+      /*
+       * `GREATEST(progress, $3)` 而不是直接赋值：16.2 要求 progress 单调不减，
+       * 而回边（REPAIRING_PLAN → VALIDATING_PLAN）的表值是往下走的。
+       * 放在 SQL 里而不是应用层，是因为并发写入时应用层的
+       * 「读-比较-写」会互相覆盖 —— 而 SQL 的 GREATEST 是原子的。
+       *
+       * `finished_at` 必须与终态一致（0003 有 CHECK 约束），因此在同一条
+       * 语句里按状态设值，不能留给调用方。
+       */
+      const { rowCount } = await pool.query(
+        `UPDATE generation_jobs
+            SET status = $2,
+                progress = GREATEST(progress, $3::smallint),
+                message = $4,
+                error_code = COALESCE($5, error_code),
+                plan_version_id = COALESCE($6::uuid, plan_version_id),
+                started_at = COALESCE(started_at, NOW()),
+                finished_at = CASE WHEN $7::boolean THEN NOW() ELSE finished_at END,
+                updated_at = NOW()
+          WHERE id = $1
+            AND ($8::text IS NULL OR status = $8::text)
+            AND status <> ALL($9::text[])`,
+        [
+          input.jobId,
+          input.to,
+          input.progress,
+          input.message,
+          input.errorCode ?? null,
+          input.planVersionId ?? null,
+          isTerminal,
+          input.from ?? null,
+          terminal,
+        ],
+      );
+
+      return (rowCount ?? 0) > 0;
+    },
+
+    async savePlanVersion(input) {
+      const client: PoolClient = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        /*
+         * 版本号在事务里取 `MAX + 1`。`travel_plan_versions` 上有
+         * `UNIQUE (plan_id, version_number)`，因此两个并发写入里必有一个
+         * 冲突失败 —— 这正是想要的：同一计划不该被两个 Worker 同时保存
+         * （13.8 的 `lock:job:{job_id}` 是第一道防线，这里是最后一道）。
+         */
+        const next = await client.query<{ version_number: number }>(
+          `SELECT COALESCE(MAX(version_number), 0) + 1 AS version_number
+             FROM travel_plan_versions WHERE plan_id = $1`,
+          [input.planId],
+        );
+        const versionNumber = next.rows[0]?.version_number ?? 1;
+
+        const version = await client.query<{ id: string }>(
+          `INSERT INTO travel_plan_versions (
+             id, plan_id, version_number, status, plan_json, constraint_report,
+             retrieval_projection, destination_place_id, total_days,
+             llm_model, llm_prompt_version, input_tokens, output_tokens,
+             repair_iterations, regeneration_count, plan_embedding)
+           VALUES ($16::uuid, $1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8,
+                   $9, $10, $11, $12, $13, $14, $15::vector)
+           RETURNING id`,
+          [
+            input.planId,
+            versionNumber,
+            input.status,
+            JSON.stringify(input.planJson),
+            JSON.stringify(input.constraintReport),
+            JSON.stringify(input.retrievalProjection),
+            input.destinationPlaceId,
+            input.totalDays,
+            input.llmModel,
+            input.llmPromptVersion,
+            input.inputTokens,
+            input.outputTokens,
+            input.repairIterations,
+            input.regenerationCount,
+            input.planEmbedding === null ? null : `[${input.planEmbedding.join(',')}]`,
+            input.versionId,
+          ],
+        );
+        const versionId = version.rows[0]!.id;
+
+        /*
+         * 3.2.2 / 验收标准 15：`REJECTED` 版本只落库供排查，**不提升**为
+         * 当前版本。数据库的触发器也会拒绝这么做，这里的分支是为了让
+         * 「不提升」成为显式意图而不是依赖异常。
+         */
+        const promoted = input.status !== 'REJECTED';
+        if (promoted) {
+          await client.query(
+            `UPDATE travel_plans
+                SET current_version_id = $2,
+                    status = 'READY',
+                    title = COALESCE($3, title),
+                    updated_at = NOW()
+              WHERE id = $1`,
+            [input.planId, versionId, input.title],
+          );
+        }
+
+        await client.query('COMMIT');
+        return { versionId, versionNumber, promoted };
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        if (isUniqueViolation(error)) {
+          throw new UniqueViolationError(error.constraint ?? 'unknown');
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
     },
   };
 }

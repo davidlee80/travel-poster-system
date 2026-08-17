@@ -139,3 +139,83 @@ export function login(input: {
 export function logout(): Promise<ApiResult<void>> {
   return request<void>('/api/v1/auth/logout', { method: 'POST' });
 }
+
+// ── 计划相关（13.1～13.3、13.9.5）─────────────────────────────
+
+export interface GenerateResponse {
+  readonly request_id: string;
+  readonly plan_id: string;
+  readonly job_id: string;
+  readonly status: string;
+}
+
+export interface JobStatusResponse {
+  readonly job_id: string;
+  readonly status: string;
+  readonly progress: number;
+  readonly message: string;
+  readonly error_code?: string;
+}
+
+export interface PlanListItem {
+  readonly plan_id: string;
+  readonly title: string | null;
+  readonly destination_name: string;
+  readonly start_date: string;
+  readonly total_days: number;
+  readonly status: string;
+  readonly cover_url: string | null;
+  readonly created_at: string;
+}
+
+export interface PlanListResponse {
+  readonly items: readonly PlanListItem[];
+  readonly next_cursor: string | null;
+  readonly has_more: boolean;
+}
+
+/**
+ * 13.1 提交生成请求。
+ *
+ * 无身份时服务端会现场建匿名号（13.0 第 3.a 条），因此这个调用**永不因为
+ * 未登录而失败** —— 前端不需要先确保有身份。
+ */
+export function generatePlan(body: unknown): Promise<ApiResult<GenerateResponse>> {
+  return request<GenerateResponse>('/api/v1/travel-plans/generate', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** 13.2 查询任务状态。轮询用。 */
+export function getJobStatus(jobId: string): Promise<ApiResult<JobStatusResponse>> {
+  return request<JobStatusResponse>(`/api/v1/generation-jobs/${encodeURIComponent(jobId)}`, {
+    method: 'GET',
+  });
+}
+
+/**
+ * 13.3 获取完整计划。
+ *
+ * 返回类型是 `unknown`：调用方必须用 `TravelPlanSchema` 解析后再用。
+ * 直接标成 `TravelPlan` 会让「后端改了契约」表现为渲染时的
+ * `undefined is not an object`，而那时离根因已经很远。
+ */
+export function getPlan(planId: string): Promise<ApiResult<unknown>> {
+  return request<unknown>(`/api/v1/travel-plans/${encodeURIComponent(planId)}`, { method: 'GET' });
+}
+
+/** 13.9.5 计划列表。 */
+export function listPlans(
+  params: {
+    readonly limit?: number;
+    readonly cursor?: string;
+  } = {},
+): Promise<ApiResult<PlanListResponse>> {
+  const query = new URLSearchParams();
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.cursor !== undefined) query.set('cursor', params.cursor);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return request<PlanListResponse>(`/api/v1/travel-plans${suffix}`, { method: 'GET' });
+}

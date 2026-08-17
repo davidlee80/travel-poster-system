@@ -162,6 +162,21 @@ class FakePlansRepository implements TravelPlansRepository {
     });
   }
 
+  /*
+   * Worker 侧的三个方法在 API 测试里不该被调用 —— 它们属于生成链路。
+   * 抛错而不是返回空值：真被调用了说明端点越界碰了 Worker 的职责，
+   * 而返回空值会让那种越界静默通过。
+   */
+  findJobContext(): never {
+    throw new Error('API 端点不应调用 findJobContext');
+  }
+  updateJobState(): never {
+    throw new Error('API 端点不应调用 updateJobState');
+  }
+  savePlanVersion(): never {
+    throw new Error('API 端点不应调用 savePlanVersion');
+  }
+
   listPlansForUser(input: { userId: string; limit: number; cursor?: string }) {
     const all = this.listByUser.get(input.userId) ?? [];
     const start = input.cursor === undefined ? 0 : Number(input.cursor);

@@ -1,12 +1,13 @@
 import { AnonymousNotice } from '@/components/AnonymousNotice';
 import { AuthPanel } from '@/components/AuthPanel';
+import { PlanRequestForm } from '@/components/PlanRequestForm';
 import { SessionProvider } from '@/components/SessionProvider';
 
 /**
  * 首页（TP-1-40）。
  *
- * P1 只有身份相关的界面：注册 / 登录 / 登出 + 匿名状态提示条。
- * 旅行需求表单在 P2（提交生成请求）、完整信息图展示在 P3。
+ * P1 只有身份相关的界面；P2 接入旅行需求表单与文字版计划页（TP-2-17）。
+ * 每日信息图与长图导出在 P3/P4。
  */
 export default function HomePage() {
   return (
@@ -22,10 +23,7 @@ export default function HomePage() {
         <div className="home__grid">
           <section className="home__main">
             <AnonymousNotice />
-            <div className="home__placeholder">
-              <h2>旅行需求表单</h2>
-              <p>P2 实现。届时可直接提交生成请求 —— 未注册也能使用。</p>
-            </div>
+            <PlanRequestForm />
           </section>
 
           <aside className="home__aside">

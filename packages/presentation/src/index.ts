@@ -38,6 +38,13 @@ export {
   type CompactLimitKey,
 } from './compact.js';
 
+export {
+  CONDITION_CODES,
+  CONDITION_DOMAIN_LABEL,
+  CONDITION_LABEL,
+  MUST_BY_DEFAULT_DOMAINS,
+} from './condition-labels.js';
+
 export { MODULE_ICON_PATHS, moduleIcons } from './icons.js';
 
 export { foodSlotId, heroSlotId, photoSpotSlotId, routeMapSlotId } from './slots.js';

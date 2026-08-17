@@ -51,6 +51,34 @@ export class RedisIdempotencyLock implements IdempotencyLock {
 }
 
 /**
+ * 13.8 的 Worker 侧并发保护：`lock:job:{job_id}`，TTL 600 秒。
+ *
+ * BullMQ 的 jobId 去重只防「同一队列里入两条」，防不住**同一条消息被两个
+ * Worker 实例同时消费**（消息可见性超时、实例重启后的重投递都会造成）。
+ * 双执行意味着一次提交调两次 LLM：成本翻倍，而两份结果会互相覆盖 ——
+ * 后写入的那份版本号更大，用户看到的是其中随机一份。
+ *
+ * 处理完成后主动释放：600 秒的 TTL 是给「进程崩了」兜底的，
+ * 正常路径下不该让下一次重试等 10 分钟。
+ */
+export class RedisJobLock {
+  constructor(private readonly redis: Redis) {}
+
+  private key(jobId: string): string {
+    return `lock:job:${jobId}`;
+  }
+
+  async acquire(jobId: string, ttlSeconds = 600): Promise<boolean> {
+    const result = await this.redis.set(this.key(jobId), '1', 'EX', ttlSeconds, 'NX');
+    return result === 'OK';
+  }
+
+  async release(jobId: string): Promise<void> {
+    await this.redis.del(this.key(jobId));
+  }
+}
+
+/**
  * 21.4 的配额计数。
  *
  * `INCR` 返回自增后的值，天然原子；TTL 只在首次出现时设置

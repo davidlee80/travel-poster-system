@@ -270,3 +270,138 @@ body {
   margin: 0;
   font-size: 14px;
 }
+
+/* ── 旅行需求表单（TP-2-17）───────────────────────────────── */
+
+.request-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+  border: 1px solid #e3ded2;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.request-form__title {
+  margin: 0;
+  font-size: 18px;
+  color: #1b1b1b;
+}
+
+.request-form__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.request-form__row > .request-form__field {
+  flex: 1 1 160px;
+}
+
+.request-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #4a4a4a;
+}
+
+.request-form__field input,
+.request-form__field select,
+.request-form__field textarea {
+  padding: 8px 10px;
+  border: 1px solid #d8d3c8;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 14px;
+  color: #1b1b1b;
+  background: #fff;
+}
+
+.request-form__conditions {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #e3ded2;
+  border-radius: 6px;
+}
+
+.request-form__conditions legend {
+  padding: 0 6px;
+  font-size: 13px;
+  color: #4a4a4a;
+}
+
+.request-form__condition-group h3 {
+  margin: 10px 0 6px;
+  font-size: 13px;
+  color: #1b1b1b;
+}
+
+.request-form__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.request-form__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  color: #3a3a3a;
+}
+
+.request-form__submit {
+  align-self: flex-start;
+  padding: 10px 20px;
+  border: 0;
+  border-radius: 6px;
+  background: #1b4d3e;
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.request-form__submit:disabled {
+  background: #8a9a94;
+  cursor: progress;
+}
+
+.request-form__bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #ece7dc;
+  overflow: hidden;
+}
+
+.request-form__bar-fill {
+  height: 100%;
+  background: #1b4d3e;
+  transition: width 240ms ease;
+}
+
+.request-form__status p,
+.request-form__done,
+.request-form__error {
+  margin: 6px 0 0;
+  font-size: 14px;
+}
+
+.request-form__done {
+  color: #1b4d3e;
+}
+
+.request-form__error {
+  color: #8a2b1f;
+}
+
+/* ── 用户可见的计划页 ─────────────────────────────────────── */
+
+.plan-page--pending {
+  max-width: 640px;
+  margin: 80px auto;
+  padding: 0 24px;
+  font-size: 15px;
+  color: #4a4a4a;
+}

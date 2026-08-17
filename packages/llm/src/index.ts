@@ -19,3 +19,46 @@ export {
   tokenize,
   type EmbeddingClient,
 } from './embedding.js';
+
+export {
+  DirectLlmClient,
+  FakeLlmClient,
+  GatewayLlmClient,
+  LlmOutputUnparseableError,
+  LlmTimeoutError,
+  LlmUnavailableError,
+  llmErrorCode,
+  type HttpLlmOptions,
+  type LlmClient,
+  type LlmJsonSchema,
+  type LlmPurpose,
+  type LlmRequest,
+  type LlmResult,
+  type LlmUsage,
+} from './client.js';
+
+export {
+  DEFAULT_LLM_TIMEOUT_MS,
+  LLM_MODES,
+  LlmConfigError,
+  createLlmClient,
+  loadLlmConfig,
+  type CreateLlmClientOptions,
+  type LlmConfig,
+  type LlmMode,
+} from './config.js';
+
+export {
+  MAX_DAYS_PER_SEGMENT,
+  MAX_TOKENS_TIERS,
+  PLAN_SYSTEM_PROMPT,
+  buildPlanPrompt,
+  buildRepairPrompt,
+  maxTokensForDays,
+  mergeSegments,
+  planSegments,
+  type PlanPromptInput,
+  type PlanSegment,
+  type PromptMessages,
+  type RepairPromptInput,
+} from './prompt.js';

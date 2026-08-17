@@ -14,7 +14,13 @@
  */
 export type { Redis } from 'ioredis';
 
-export { RedisCounterStore, RedisIdempotencyLock, createQueueRedis, createRedis } from './redis.js';
+export {
+  RedisCounterStore,
+  RedisIdempotencyLock,
+  RedisJobLock,
+  createQueueRedis,
+  createRedis,
+} from './redis.js';
 
 export {
   BullMqPlanQueue,

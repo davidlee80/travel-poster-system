@@ -3,6 +3,17 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "//exports": "只为端到端集成测试暴露 buildServer：TP-2-17 的验收点要求「提交表单 → 看到文字版计划」跨 API 与 Worker 两个进程，而那条链路只有把两侧装在同一个测试里才能自动验证。生产不从这里引用。",
+  "exports": {
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./identity": {
+      "types": "./dist/identity/index.d.ts",
+      "default": "./dist/identity/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

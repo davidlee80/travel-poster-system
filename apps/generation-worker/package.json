@@ -7,7 +7,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --exclude \"**/*.integration.test.ts\" --passWithNoTests",
+    "test:integration": "vitest run integration --no-file-parallelism",
     "start": "node --enable-source-maps dist/main.js",
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
@@ -16,10 +17,16 @@
     "@tps/llm": "workspace:*",
     "@tps/observability": "workspace:*",
     "@tps/planning": "workspace:*",
+    "@tps/queue": "workspace:*",
     "@tps/schemas": "workspace:*",
-    "@tps/shared": "workspace:*"
+    "@tps/shared": "workspace:*",
+    "bullmq": "^5.65.0"
   },
   "devDependencies": {
+    "@tps/api": "workspace:*",
+    "@types/pg": "^8.15.6",
+    "ioredis": "^5.9.0",
+    "pg": "^8.16.3",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"

@@ -41,6 +41,10 @@ export {
   type ListPlansInput,
   type PlanDetail,
   type PlanListItem,
+  type JobContext,
   type PlanListPage,
+  type SavePlanVersionInput,
+  type SavedPlanVersion,
   type TravelPlansRepository,
+  type UpdateJobStateInput,
 } from './travel-plans.js';
