@@ -23,6 +23,13 @@ export {
 } from './redis.js';
 
 export {
+  ASSET_CACHE_TTL_SECONDS,
+  InMemoryAssetCacheIndex,
+  RedisAssetCacheIndex,
+  type AssetCacheIndex,
+} from './asset-cache.js';
+
+export {
   BullMqPlanQueue,
   DEFAULT_JOB_OPTIONS,
   GenerationJobPayloadSchema,

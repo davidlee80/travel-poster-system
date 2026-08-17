@@ -50,6 +50,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@tps/assets':
+        specifier: workspace:*
+        version: link:../../packages/assets
       '@tps/db':
         specifier: workspace:*
         version: link:../../packages/db

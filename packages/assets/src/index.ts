@@ -45,6 +45,34 @@ export {
   type ScoringRequirement,
 } from './scoring.js';
 
+export { THEME_KEYWORDS, themeBucket } from './theme-buckets.js';
+
+export {
+  KEY_VERSION,
+  aspectRatioSegment,
+  destinationSegment,
+  foodCacheKey,
+  heroCacheKey,
+  mapCacheKey,
+  placeCacheKey,
+  routeNodeHash,
+  validRouteNodes,
+  type FoodKeyInput,
+  type HeroKeyInput,
+  type PlaceKeyInput,
+} from './cache-keys.js';
+
+export {
+  MAP_HEIGHT,
+  MAP_WIDTH,
+  MIN_ROUTE_NODES,
+  escapeXml,
+  renderSchematicMap,
+  type RenderMapInput,
+  type RenderMapResult,
+  type RenderedMap,
+} from './svg-map.js';
+
 export {
   CANDIDATE_LIMIT,
   SELECTION_BUDGET_MS,

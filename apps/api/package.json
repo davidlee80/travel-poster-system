@@ -24,13 +24,14 @@
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@tps/assets": "workspace:*",
     "@tps/db": "workspace:*",
+    "@tps/observability": "workspace:*",
     "@tps/planning": "workspace:*",
     "@tps/queue": "workspace:*",
-    "@tps/observability": "workspace:*",
+    "@tps/schemas": "workspace:*",
     "@tps/shared": "workspace:*",
     "fastify": "^5.6.1",
-    "@tps/schemas": "workspace:*",
     "zod": "^4.1.13"
   },
   "devDependencies": {

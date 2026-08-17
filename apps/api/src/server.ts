@@ -2,6 +2,10 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { metricsContentType, metricsText } from '@tps/observability';
 import type { GracefulShutdown, Logger, ServiceConfig } from '@tps/shared';
 import { registerAuthRoutes, type AuthRoutesDeps } from './routes/auth.js';
+import {
+  registerInternalAssetRoutes,
+  type InternalAssetRoutesDeps,
+} from './routes/internal-assets.js';
 import { registerTravelPlanRoutes, type TravelPlanRoutesDeps } from './routes/travel-plans.js';
 
 /**
@@ -23,10 +27,17 @@ export interface ServerDeps {
   readonly auth?: AuthRoutesDeps;
   /** 计划端点（13.1～13.3、13.9.5）。同上，未提供时不注册。 */
   readonly travelPlans?: TravelPlanRoutesDeps;
+  /**
+   * 素材服务内部端点（14.1、14.2）。
+   *
+   * 未配置共享密钥时不注册 —— 这些端点做 CPU 与数据库工作，
+   * 挂在公网服务上必须有认证（见 routes/internal-assets.ts）。
+   */
+  readonly internalAssets?: InternalAssetRoutesDeps;
 }
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
-  const { config, logger, shutdown, checkDependencies, auth, travelPlans } = deps;
+  const { config, logger, shutdown, checkDependencies, auth, travelPlans, internalAssets } = deps;
 
   /*
    * 显式标注为 FastifyBaseLogger，而不是直接把 pino 的 Logger 传进 Fastify。
@@ -94,6 +105,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   }
   if (travelPlans !== undefined) {
     registerTravelPlanRoutes(app, travelPlans);
+  }
+  if (internalAssets !== undefined) {
+    registerInternalAssetRoutes(app, internalAssets);
   }
 
   return app;
