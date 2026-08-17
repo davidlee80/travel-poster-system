@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   ASSET_LOCK_TTL_SECONDS,
   BullMqPlanQueue,
+  RedisDeadLetterQueue,
   PLAN_QUEUE_NAME,
   RedisAssetLock,
   RedisCounterStore,
@@ -149,6 +150,38 @@ describeIntegration('Redis 基础设施（集成，需 Redis）', () => {
       } finally {
         await queue.close();
       }
+    });
+  });
+
+  describe('死信队列（TP-4-11，13.7）', () => {
+    it('LPUSH + LTRIM：最新在前，且不过期', async () => {
+      const dlq = new RedisDeadLetterQueue(redis);
+      const queueName = 'dlq-test-queue';
+      await redis.del(`dlq:${queueName}`);
+
+      for (const jobId of ['a', 'b', 'c']) {
+        await dlq.push(queueName, {
+          jobId,
+          requestId: 'r',
+          planId: 'p',
+          userId: 'u',
+          errorCode: 'PLAN_LLM_UNAVAILABLE',
+          attemptsMade: 3,
+          failedAt: '2026-08-18T10:00:00.000Z',
+        });
+      }
+
+      const entries = await dlq.peek(queueName, 10);
+      expect(entries.map((entry) => entry.jobId)).toEqual(['c', 'b', 'a']);
+      expect(await dlq.size(queueName)).toBe(3);
+
+      /*
+       * 死信的用途是事后回捞：上游故障持续一小时，那批任务要在修复后重放，
+       * 而运维发现问题往往已经过了一天 —— 而 BullMQ 的 failed 集合按
+       * removeOnFail 一天过期。因此这份列表必须没有 TTL。
+       */
+      expect(await redis.ttl(`dlq:${queueName}`)).toBe(-1);
+      await redis.del(`dlq:${queueName}`);
     });
   });
 

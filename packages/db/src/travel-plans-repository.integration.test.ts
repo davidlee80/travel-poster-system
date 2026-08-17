@@ -280,6 +280,97 @@ describeIntegration('计划仓储（集成，需 PostgreSQL）', () => {
     });
   });
 
+  describe('cancelJob（16.1、TP-4-08）', () => {
+    it('非终态任务转 CANCELLED，且 progress 保持当前值（16.2）', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('cancel1')));
+
+      await repository.updateJobState({
+        jobId: handles.jobId,
+        to: 'GENERATING_PLAN',
+        progress: 20,
+        message: '正在生成旅行计划',
+      });
+
+      expect(await repository.cancelJob(handles.jobId, userId)).toBe('cancelled');
+
+      const { rows } = await pool.query<{ status: string; progress: number; finished_at: Date }>(
+        'SELECT status, progress, finished_at FROM generation_jobs WHERE id = $1',
+        [handles.jobId],
+      );
+      expect(rows[0]!.status).toBe('CANCELLED');
+      // 16.2：CANCELLED 保持当前 progress，不归零
+      expect(rows[0]!.progress).toBe(20);
+      expect(rows[0]!.finished_at).not.toBeNull();
+    });
+
+    it('已终态返回 already_terminal，且不覆盖原状态', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('cancel2')));
+
+      await repository.updateJobState({
+        jobId: handles.jobId,
+        to: 'FAILED',
+        progress: 0,
+        message: null,
+        errorCode: 'PLAN_LLM_TIMEOUT',
+      });
+
+      expect(await repository.cancelJob(handles.jobId, userId)).toBe('already_terminal');
+
+      const { rows } = await pool.query<{ status: string }>(
+        'SELECT status FROM generation_jobs WHERE id = $1',
+        [handles.jobId],
+      );
+      /*
+       * 不覆盖是关键：把一个已完成的任务改成 CANCELLED 会让用户的计划
+       * 在列表里凭空消失。因此判定与更新必须在同一条语句里。
+       */
+      expect(rows[0]!.status).toBe('FAILED');
+    });
+
+    it('他人的任务返回 not_found，且不被修改（13.0 的归属隔离）', async () => {
+      const owner = await anonymousUser();
+      const other = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(owner, key('cancel3')));
+
+      expect(await repository.cancelJob(handles.jobId, other)).toBe('not_found');
+
+      const { rows } = await pool.query<{ status: string }>(
+        'SELECT status FROM generation_jobs WHERE id = $1',
+        [handles.jobId],
+      );
+      expect(rows[0]!.status).toBe('QUEUED');
+    });
+
+    it('不存在的任务返回 not_found', async () => {
+      const userId = await anonymousUser();
+      expect(await repository.cancelJob('00000000-0000-4000-8000-000000000000', userId)).toBe(
+        'not_found',
+      );
+    });
+
+    it('取消后状态推进一律失败 —— 这就是 Worker 的取消信号（TP-4-08）', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('cancel4')));
+
+      await repository.cancelJob(handles.jobId, userId);
+
+      /*
+       * `updateJobState` 的 SQL 带 `AND status <> ALL(terminal)`，因此取消之后
+       * 任何推进都改 0 行并返回 false。协作式取消不需要额外查询，
+       * 靠的就是这个返回值（见 generate-plan.ts 的 advance）。
+       */
+      const advanced = await repository.updateJobState({
+        jobId: handles.jobId,
+        to: 'GENERATING_PLAN',
+        progress: 20,
+        message: '正在生成旅行计划',
+      });
+      expect(advanced).toBe(false);
+    });
+  });
+
   describe('appendJobWarnings（TP-4-09、13.7）', () => {
     async function jobWarnings(jobId: string): Promise<unknown> {
       const { rows } = await pool.query<{ warnings: unknown }>(

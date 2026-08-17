@@ -291,6 +291,60 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
         progress: job.progress,
         message: job.message ?? stageMessage(status, jobErrorMessage(job.errorCode)),
         ...(job.errorCode === null ? {} : { error_code: job.errorCode }),
+        /*
+         * 13.7 的非阻断告警码（TP-4-09）。它们**不是错误** —— 任务仍会
+         * `COMPLETED`，只是某些素材走了降级。返回给客户端是为了让前端能提示
+         * 「部分配图使用了默认样式」，而不是让用户对着一张占位图困惑。
+         */
+        warnings: Array.isArray(job.warnings) ? job.warnings : [],
+      });
+    },
+  );
+
+  /**
+   * 取消任务（16.1「任意非终态 → CANCELLED」，TP-4-08）。
+   *
+   * ## R-33：16.1 定义了 CANCELLED，十三章却没有取消端点
+   *
+   * 16.1 明确「`CANCELLED` 新增于 V1.1 —— 20～60 秒的生成过程用户必然会想
+   * 中断」，13.7 也给了 `JOB_CANCELLED` 码。但十三章的 API 清单里没有任何
+   * 能到达这个状态的入口 —— 于是这个状态在设计上存在、在运行时不可达，
+   * 而「用户必然会想中断」这个需求没有任何落地。
+   *
+   * 路径沿用 13.2 的 `/generation-jobs/{job_id}` 前缀而不是新起一套。
+   *
+   * ## 幂等：已终态返回 200 而不是 409
+   *
+   * 用户点「取消」的那一刻任务可能刚好完成。返回 409 会让前端弹一个
+   * 「操作冲突」，而用户想要的结果（任务不再继续）**已经达成**。
+   * 因此返回 200 + 当前状态，前端照常刷新。
+   */
+  app.post<{ Params: { job_id: string } }>(
+    '/api/v1/generation-jobs/:job_id/cancel',
+    async (request, reply) => {
+      const resolved = await resolveIdentity(deps, request, reply, {
+        allowAnonymousCreation: false,
+      });
+      if (resolved === null) return reply;
+
+      const outcome = await plans.cancelJob(request.params.job_id, resolved.identity.userId);
+      // 他人的任务与不存在的任务返回同一个 404（13.0）
+      if (outcome === 'not_found') return fail(request, reply, 'JOB_NOT_FOUND');
+
+      const job = await plans.findJobForUser(request.params.job_id, resolved.identity.userId);
+      const status = (job?.status ?? 'CANCELLED') as JobStatus;
+
+      return reply.code(200).send({
+        job_id: request.params.job_id,
+        status,
+        progress: job?.progress ?? 0,
+        message: stageMessage(status, jobErrorMessage(job?.errorCode ?? null)),
+        /*
+         * `cancelled` 告诉前端「本次调用真的改变了状态」。
+         * 少了它，前端无法区分「我取消成功了」与「它本来就已经结束了」——
+         * 而两种情况下要不要提示用户是不同的。
+         */
+        cancelled: outcome === 'cancelled',
       });
     },
   );

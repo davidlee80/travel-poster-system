@@ -75,12 +75,28 @@ class FakePlans implements TravelPlansRepository {
     return Promise.resolve(this.context);
   }
 
+  /**
+   * 置为 true 后，下一次状态推进返回 false —— 模拟「任务在这一刻被取消」。
+   * 真实 SQL 的行为是 `AND status <> ALL(terminal)` 改 0 行（TP-4-08）。
+   */
+  cancelOnNextTransition = false;
+
   updateJobState(input: UpdateJobStateInput): Promise<boolean> {
+    if (this.cancelOnNextTransition) {
+      this.cancelOnNextTransition = false;
+      if (this.context !== null) this.context = { ...this.context, status: 'CANCELLED' };
+      return Promise.resolve(false);
+    }
     this.transitions.push(input);
     if (this.context !== null) {
       this.context = { ...this.context, status: input.to, progress: input.progress };
     }
     return Promise.resolve(true);
+  }
+
+  cancelJob(): Promise<'cancelled'> {
+    // Worker 不调用它（取消入口在 API 侧），但接口要求实现
+    throw new Error('Worker 不应调用 cancelJob');
   }
 
   appendJobWarnings(_jobId: string, codes: readonly string[]): Promise<void> {
@@ -608,5 +624,41 @@ describe('16.3 超时（TP-4-10）', () => {
     expect(plans.path.at(-1)).toBe('FAILED');
     expect(plans.path).toContain('RETRIEVING_REFERENCES');
     expect(plans.path).not.toContain('GENERATING_PLAN');
+  });
+});
+
+describe('16.1 用户取消（TP-4-08）', () => {
+  it('状态推进被终态挡住即停止后续处理，不调用模型', async () => {
+    const { deps, plans, llm } = harness();
+    // 第一次推进（NORMALIZING）就被挡住 —— 模拟用户在排队阶段点了取消
+    plans.cancelOnNextTransition = true;
+
+    const result = await generatePlan(deps, payload);
+
+    expect(result).toEqual({ outcome: 'skipped', reason: 'cancelled' });
+    expect(llm.calls).toHaveLength(0);
+    expect(plans.saved).toHaveLength(0);
+  });
+
+  it('取消发生在模型调用之前时省下整次生成成本', async () => {
+    const { deps, plans, llm } = harness();
+    /*
+     * 前三次推进放行（NORMALIZING / VALIDATING_REQUEST /
+     * RETRIEVING_REFERENCES），第四次（GENERATING_PLAN）被挡住。
+     * 这一条边界是整条链路上唯一「不检查就会白花钱」的地方。
+     */
+    let allowed = 0;
+    const original = plans.updateJobState.bind(plans);
+    plans.updateJobState = (input) => {
+      allowed += 1;
+      if (allowed === 4) return Promise.resolve(false);
+      return original(input);
+    };
+
+    const result = await generatePlan(deps, payload);
+
+    expect(result).toEqual({ outcome: 'skipped', reason: 'cancelled' });
+    expect(llm.calls).toHaveLength(0);
+    expect(plans.path).toEqual(['NORMALIZING', 'VALIDATING_REQUEST', 'RETRIEVING_REFERENCES']);
   });
 });

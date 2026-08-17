@@ -22,6 +22,15 @@ export {
 } from './asset-lock.js';
 
 export {
+  DLQ_KEY_PREFIX,
+  DLQ_MAX_ENTRIES,
+  InMemoryDeadLetterQueue,
+  RedisDeadLetterQueue,
+  type DeadLetterEntry,
+  type DeadLetterQueue,
+} from './dlq.js';
+
+export {
   RedisCounterStore,
   RedisIdempotencyLock,
   RedisJobLock,

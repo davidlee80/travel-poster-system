@@ -137,17 +137,32 @@ export type GenerateOutcome =
     }
   | { readonly outcome: 'rejected'; readonly versionId: string; readonly errorCode: PlanErrorCode }
   | { readonly outcome: 'failed'; readonly errorCode: JobFailureCode }
-  | { readonly outcome: 'skipped'; readonly reason: 'not_found' | 'already_terminal' };
+  | {
+      readonly outcome: 'skipped';
+      readonly reason: 'not_found' | 'already_terminal' | 'cancelled';
+    };
 
-/** 推进状态并写进度（16.1：状态与 progress 同一事务） */
+/**
+ * 推进状态并写进度（16.1：状态与 progress 同一事务）。
+ *
+ * ## 返回值就是取消信号（TP-4-08）
+ *
+ * `updateJobState` 的 SQL 带 `AND status <> ALL(terminal)`，因此任务被取消
+ * （`CANCELLED` 是终态）之后，任何一次状态推进都会改 0 行并返回 false。
+ *
+ * 这让协作式取消**不需要任何额外查询**：每个阶段边界本来就要写一次状态，
+ * 那次写入的成败同时回答了「这个任务还该继续吗」。
+ * 另起一个 `SELECT status` 去轮询的话，每个阶段多一次往返，
+ * 而且查询与写入之间仍有窗口 —— 取消恰好落在窗口里就会被漏掉。
+ */
 async function advance(
   deps: GeneratePlanDeps,
   jobId: string,
   to: JobStatus,
   extra: { readonly errorCode?: string; readonly planVersionId?: string } = {},
-): Promise<void> {
+): Promise<boolean> {
   const display = JOB_STAGE_DISPLAY[to];
-  await deps.plans.updateJobState({
+  return deps.plans.updateJobState({
     jobId,
     to,
     /*
@@ -313,8 +328,17 @@ export async function generatePlan(
   // 16.3：整个生成任务 300 秒。协作式检查，理由见 job-deadline.ts
   const deadline = createJobDeadline(now(), JOB_TIMEOUT_MS, now);
 
+  /**
+   * 阶段边界的取消检查。`advance` 返回 false 说明任务已进入终态 ——
+   * 在这条路径上只可能是用户取消（失败由本函数自己写入）。
+   */
+  const cancelled = (stage: JobStatus): GenerateOutcome => {
+    log.info({ stage }, '任务已被取消，停止后续处理');
+    return { outcome: 'skipped', reason: 'cancelled' };
+  };
+
   // ── NORMALIZING：标准化结果已在同步路径算好，这里只读回并校验形状 ──
-  await advance(deps, context.jobId, 'NORMALIZING');
+  if (!(await advance(deps, context.jobId, 'NORMALIZING'))) return cancelled('NORMALIZING');
   const normalizedParsed = NormalizedTravelRequestSchema.safeParse(context.normalizedRequest);
   if (!normalizedParsed.success) {
     /*
@@ -334,10 +358,14 @@ export async function generatePlan(
    * 重跑会让「入队后到消费前跨过了午夜」的任务因 N-01（出发日期在过去）
    * 失败，而那不是用户的错。
    */
-  await advance(deps, context.jobId, 'VALIDATING_REQUEST');
+  if (!(await advance(deps, context.jobId, 'VALIDATING_REQUEST'))) {
+    return cancelled('VALIDATING_REQUEST');
+  }
 
   // ── RETRIEVING_REFERENCES（3.2.4）──
-  await advance(deps, context.jobId, 'RETRIEVING_REFERENCES');
+  if (!(await advance(deps, context.jobId, 'RETRIEVING_REFERENCES'))) {
+    return cancelled('RETRIEVING_REFERENCES');
+  }
   const retrieved = await retrieveReferences(deps.retrieval, {
     normalized,
     excludePlanId: context.planId,
@@ -357,7 +385,12 @@ export async function generatePlan(
     return fail(deps, context.jobId, 'JOB_TIMEOUT');
   }
 
-  await advance(deps, context.jobId, 'GENERATING_PLAN');
+  /*
+   * 取消检查放在**发出模型调用之前**：这是整条链路上唯一一次「不检查就会
+   * 白花钱」的边界。用户点取消的动机多数就是「我填错了」，
+   * 而此刻停下来能省掉一次完整的生成成本。
+   */
+  if (!(await advance(deps, context.jobId, 'GENERATING_PLAN'))) return cancelled('GENERATING_PLAN');
   let generated;
   try {
     generated = await generateContent(deps, llm, normalized, retrieved.references, deadline);

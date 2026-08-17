@@ -20,6 +20,7 @@ import {
 } from '@tps/shared';
 import {
   UniqueViolationError,
+  type CancelJobResult,
   type PresentationDetail,
   type PresentationsRepository,
   type TravelPlansRepository,
@@ -228,6 +229,16 @@ class FakePlansRepository implements TravelPlansRepository {
   findJobContext(): never {
     throw new Error('API 端点不应调用 findJobContext');
   }
+  cancelJob(jobId: string, userId: string): Promise<CancelJobResult> {
+    const job = this.jobs.get(jobId);
+    if (job === undefined || job.userId !== userId) return Promise.resolve('not_found');
+    if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)) {
+      return Promise.resolve('already_terminal');
+    }
+    this.jobs.set(jobId, { ...job, status: 'CANCELLED', message: '已取消生成' });
+    return Promise.resolve('cancelled');
+  }
+
   appendJobWarnings(): never {
     throw new Error('API 端点不应调用 appendJobWarnings（告警由 Worker 写入）');
   }
@@ -668,6 +679,8 @@ describe('13.2 GET /generation-jobs/{job_id}', () => {
       status: 'QUEUED',
       progress: 0,
       message: '已加入队列，正在等待处理',
+      // TP-4-09：非阻断告警随状态一起返回，前端据此提示「部分配图使用默认样式」
+      warnings: [],
     });
   });
 
@@ -751,6 +764,83 @@ describe('13.2 GET /generation-jobs/{job_id}', () => {
     const response = await h().app.inject({ method: 'GET', url: '/api/v1/generation-jobs/x' });
     expect(response.statusCode).toBe(401);
     expect(response.json<{ error: { code: string } }>().error.code).toBe('AUTH_IDENTITY_REQUIRED');
+  });
+});
+
+describe('取消任务（R-33、16.1，TP-4-08）', () => {
+  async function createJob(cookie: string): Promise<string> {
+    const created = await h().app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
+      payload: body(),
+    });
+    return created.json<{ job_id: string }>().job_id;
+  }
+
+  it('非终态任务被取消，状态转 CANCELLED', async () => {
+    const cookie = await anonymousCookie();
+    const jobId = await createJob(cookie);
+
+    const response = await h().app.inject({
+      method: 'POST',
+      url: `/api/v1/generation-jobs/${jobId}/cancel`,
+      headers: { cookie },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      job_id: jobId,
+      status: 'CANCELLED',
+      cancelled: true,
+      message: '已取消生成',
+    });
+  });
+
+  it('重复取消返回 200 且 cancelled 为 false（幂等，不是 409）', async () => {
+    /*
+     * 用户点「取消」的那一刻任务可能刚好完成。返回 409 会让前端弹一个
+     * 「操作冲突」，而用户想要的结果（任务不再继续）已经达成。
+     */
+    const cookie = await anonymousCookie();
+    const jobId = await createJob(cookie);
+
+    await h().app.inject({
+      method: 'POST',
+      url: `/api/v1/generation-jobs/${jobId}/cancel`,
+      headers: { cookie },
+    });
+    const again = await h().app.inject({
+      method: 'POST',
+      url: `/api/v1/generation-jobs/${jobId}/cancel`,
+      headers: { cookie },
+    });
+
+    expect(again.statusCode).toBe(200);
+    expect(again.json<{ cancelled: boolean }>().cancelled).toBe(false);
+  });
+
+  it('他人的任务返回 404（越权取消比越权读取更严重）', async () => {
+    const cookie = await anonymousCookie();
+    const jobId = await createJob(cookie);
+    const otherCookie = await anonymousCookie();
+
+    const response = await h().app.inject({
+      method: 'POST',
+      url: `/api/v1/generation-jobs/${jobId}/cancel`,
+      headers: { cookie: otherCookie },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json<{ error: { code: string } }>().error.code).toBe('JOB_NOT_FOUND');
+  });
+
+  it('无身份返回 401', async () => {
+    const response = await h().app.inject({
+      method: 'POST',
+      url: '/api/v1/generation-jobs/x/cancel',
+    });
+    expect(response.statusCode).toBe(401);
   });
 });
 

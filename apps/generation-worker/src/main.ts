@@ -17,19 +17,22 @@ import {
 } from '@tps/llm';
 import { metricsContentType, metricsText, registerDefaultMetrics } from '@tps/observability';
 import {
+  DEFAULT_JOB_OPTIONS,
   GenerationJobPayloadSchema,
   PLAN_QUEUE_NAME,
   RedisAssetLock,
   RedisCounterStore,
+  RedisDeadLetterQueue,
   RedisJobLock,
   createQueueRedis,
   createRedis,
 } from '@tps/queue';
 import { S3ObjectStorage, loadAssetsStorageConfig } from '@tps/storage';
 import { loadQuotaConfig, optionalInt, quotaFor, requireString, runWorker } from '@tps/shared';
-import { Worker } from 'bullmq';
+import { UnrecoverableError, Worker } from 'bullmq';
 
 import { AiImageBudget, DEFAULT_AI_IMAGE_DAILY_BUDGET } from './assets/ai-budget.js';
+import { isUnrecoverable } from './retry-policy.js';
 import { renderFakeGeneratedImage } from './assets/fake-image.js';
 import { fixturePlanFor } from './fixture-plan.js';
 import { generatePlan, type LlmClientFactory } from './generate-plan.js';
@@ -58,6 +61,7 @@ const assetsRepository = createAssetsRepository(dbPool);
 const presentationsRepository = createPresentationsRepository(dbPool);
 const jobLock = new RedisJobLock(redis);
 const assetLock = new RedisAssetLock(redis);
+const deadLetters = new RedisDeadLetterQueue(redis);
 const counters = new RedisCounterStore(redis);
 const storage = new S3ObjectStorage(loadAssetsStorageConfig());
 
@@ -113,7 +117,7 @@ await runWorker({
         }
 
         try {
-          await generatePlan(
+          const outcome = await generatePlan(
             {
               plans,
               retrieval: { repository: retrievalRepository, embedding },
@@ -146,6 +150,27 @@ await runWorker({
             },
             payload,
           );
+
+          /*
+           * 13.7 第四层：不可重试的失败以 `UnrecoverableError` 结束消费 ——
+           * BullMQ 见到它就不再重试，`attempts` 不被消耗。
+           *
+           * 抛错而不是静默返回，是因为 BullMQ 只按「消费函数是否抛错」判定
+           * 成败：静默返回会让一个失败的任务在队列里显示为成功，
+           * 而排查时「任务失败了但队列说成功」是最难定位的一类不一致。
+           */
+          if (outcome.outcome === 'failed' && isUnrecoverable(outcome.errorCode)) {
+            throw new UnrecoverableError(outcome.errorCode);
+          }
+
+          /*
+           * 可重试的失败照常抛错，交给队列退避重试（13.7 第三层）。
+           * 任务状态已经是 FAILED 且带错误码 —— 用户此刻能看到明确的失败，
+           * 而重试成功后状态会被推回去。
+           */
+          if (outcome.outcome === 'failed') {
+            throw new Error(outcome.errorCode);
+          }
         } finally {
           await jobLock.release(payload.jobId);
         }
@@ -161,6 +186,39 @@ await runWorker({
         concurrency: 2,
       },
     );
+
+    /*
+     * 13.7：队列重试耗尽后进入死信队列 `dlq:*`。
+     *
+     * 用 `failed` 事件而不是在消费函数里判断：消费函数不知道自己是第几次
+     * 尝试之后就没有下一次了（`attemptsMade` 在函数内还没自增）。
+     * 而漏掉最后一次的表现是「死信队列永远是空的」—— 看起来一切正常。
+     */
+    worker.on('failed', (job, error) => {
+      if (job === undefined) return;
+      const exhausted =
+        error instanceof UnrecoverableError ||
+        job.attemptsMade >= (job.opts.attempts ?? DEFAULT_JOB_OPTIONS.attempts ?? 1);
+      if (!exhausted) return;
+
+      const parsed = GenerationJobPayloadSchema.safeParse(job.data);
+      if (!parsed.success) return;
+
+      void deadLetters
+        .push(PLAN_QUEUE_NAME, {
+          jobId: parsed.data.jobId,
+          requestId: parsed.data.requestId,
+          planId: parsed.data.planId,
+          userId: parsed.data.userId,
+          errorCode: error.message,
+          attemptsMade: job.attemptsMade,
+          // 时钟取 Worker 侧，与日志同源，便于按时间对齐排查
+          failedAt: new Date().toISOString(),
+        })
+        .catch((pushError: unknown) => {
+          handle.logger.error({ job_id: parsed.data.jobId }, `死信入队失败：${String(pushError)}`);
+        });
+    });
 
     return Promise.resolve(async () => {
       handle.logger.info('生成 Worker 停止领取新任务');

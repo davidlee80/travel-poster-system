@@ -33,14 +33,21 @@ export interface PlanQueue {
 }
 
 /**
- * 16.3：队列中等待上限 600 秒、整个生成任务 300 秒。
+ * 13.7 的队列级重试：`attempts: 3`、指数退避基数 5 秒。
  *
- * `attempts: 2` —— 一次重试。生成失败多半是模型输出问题，重试有意义；
- * 但更多次重试会让「硬约束不可满足」这类必然失败的任务反复烧钱
- * （3.2.2 已经在任务内部管了 LLM 重生成次数，队列层再叠加会乘起来）。
+ * ## 为什么 P2 时期写的是 2，现在能回到设计稿的 3
+ *
+ * 当时的顾虑是「更多次重试会让『硬约束不可满足』这类必然失败的任务反复
+ * 烧钱」—— 而 3.2.2 已经在任务内部管了 LLM 重生成次数，队列层再叠加会乘起来。
+ *
+ * TP-4-11 补上了 13.7 的第四层「不可重试」：`PLAN_HARD_CONSTRAINT_UNSATISFIABLE`
+ * 与全部 `REQ_*` 现在以 BullMQ 的 `UnrecoverableError` 结束消费，**不占用
+ * 重试次数**（见 apps/generation-worker/src/main.ts）。那条顾虑因此不再成立：
+ * 会重试 3 次的只剩下真正瞬时的失败（模型抖动、数据库连接被回收），
+ * 而它们重试确实会成功。
  */
 export const DEFAULT_JOB_OPTIONS: JobsOptions = {
-  attempts: 2,
+  attempts: 3,
   backoff: { type: 'exponential', delay: 5_000 },
   /*
    * 完成与失败的任务都保留一段时间：`removeOnComplete: true` 会让

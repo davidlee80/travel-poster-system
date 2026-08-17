@@ -60,6 +60,7 @@ export {
   type ListPlansInput,
   type PlanDetail,
   type PlanListItem,
+  type CancelJobResult,
   type JobContext,
   type PlanListPage,
   type SavePlanVersionInput,

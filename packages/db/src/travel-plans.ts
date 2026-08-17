@@ -119,6 +119,15 @@ export interface JobContext {
   readonly normalizedRequest: unknown;
 }
 
+/**
+ * 取消的三种结局。
+ *
+ * `already_terminal` 与 `not_found` 必须分开：前者返回 200（幂等，任务确实
+ * 已经不在跑了），后者返回 404。合成一个的话，用户对一个已完成的任务点
+ * 「取消」会看到「未找到该任务」—— 而它明明就在页面上。
+ */
+export type CancelJobResult = 'cancelled' | 'already_terminal' | 'not_found';
+
 export interface UpdateJobStateInput {
   readonly jobId: string;
   readonly to: JobStatusValue;
@@ -190,6 +199,16 @@ export interface TravelPlansRepository {
 
   /** 状态与进度同事务更新（16.1），进度取 `GREATEST` 保证单调不减（16.2） */
   updateJobState(input: UpdateJobStateInput): Promise<boolean>;
+
+  /**
+   * 用户主动取消（16.1「任意非终态 → CANCELLED」，TP-4-08）。
+   *
+   * 带 `user_id` 谓词（13.0）：取消是写操作，越权取消别人的任务比越权
+   * 读取更严重 —— 它会让对方的计划永久停在一个不会继续的状态上。
+   *
+   * `progress` 保持当前值（16.2）。
+   */
+  cancelJob(jobId: string, userId: string): Promise<CancelJobResult>;
 
   /**
    * 追加非阻断告警码（13.7、16.3，TP-4-09）。
@@ -572,6 +591,39 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
       );
 
       return (rowCount ?? 0) > 0;
+    },
+
+    async cancelJob(jobId, userId) {
+      /*
+       * 一条语句完成「存在性 + 归属 + 非终态」三重判定，靠 RETURNING 区分结局。
+       * 分成「先查再更新」的话，两步之间任务可能刚好完成 —— 那时会把一个
+       * 已完成的任务改成 CANCELLED，用户的计划凭空消失。
+       */
+      const { rows } = await pool.query<{ status: string }>(
+        `WITH target AS (
+           SELECT id, status FROM generation_jobs WHERE id = $1 AND user_id = $2
+         ), updated AS (
+           UPDATE generation_jobs j
+              SET status = 'CANCELLED',
+                  -- 16.2：CANCELLED 保持当前 progress
+                  message = $3,
+                  finished_at = NOW(),
+                  updated_at = NOW()
+             FROM target t
+            WHERE j.id = t.id
+              AND j.status <> ALL($4::text[])
+           RETURNING j.status
+         )
+         SELECT status FROM updated
+         UNION ALL
+         SELECT 'ALREADY_TERMINAL' FROM target
+          WHERE NOT EXISTS (SELECT 1 FROM updated)`,
+        [jobId, userId, '已取消生成', ['COMPLETED', 'FAILED', 'CANCELLED']],
+      );
+
+      const row = rows[0];
+      if (row === undefined) return 'not_found';
+      return row.status === 'CANCELLED' ? 'cancelled' : 'already_terminal';
     },
 
     async appendJobWarnings(jobId, codes) {
