@@ -13,10 +13,12 @@
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@tps/assets": "workspace:*",
     "@tps/db": "workspace:*",
     "@tps/llm": "workspace:*",
     "@tps/observability": "workspace:*",
     "@tps/planning": "workspace:*",
+    "@tps/presentation": "workspace:*",
     "@tps/queue": "workspace:*",
     "@tps/schemas": "workspace:*",
     "@tps/shared": "workspace:*",

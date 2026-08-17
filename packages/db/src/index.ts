@@ -31,6 +31,14 @@ export {
   type RetrievalSource,
 } from './retrieval.js';
 export {
+  createAssetsRepository,
+  type AssetCandidateRow,
+  type AssetsRepository,
+  type FindCandidatesQuery,
+  type InsertAssetInput,
+  type InsertVariantInput,
+} from './assets.js';
+export {
   createPresentationsRepository,
   type BindingRow,
   type FindPresentationInput,
