@@ -48,6 +48,31 @@ export const assetResolutionDuration = createHistogram({
   buckets: [...FAST_BUCKETS],
 });
 
+/**
+ * AI 图片生成量（21.3 的 `travel_ai_image_total`，TP-4-17 的验证依据）。
+ *
+ * `user_type` 是 21.3 的 R-13 通用维度，这里是它最重要的用途：
+ * 21.4 规定匿名的 AI Hero 额度为 0，而验证方式就是
+ * `travel_ai_image_total{user_type="ANONYMOUS"}` 恒为 0（`outcome="generated"`）。
+ *
+ * `outcome` 的取值：
+ * ```text
+ * generated      真的调了模型并落库
+ * deduplicated   同键并发命中他人产物（13.8 的锁生效，没花钱）
+ * skipped        额度耗尽或全局熔断（21.4，没花钱）
+ * timeout        20 秒超时（21.2 措施二）
+ * rejected       生成物未通过 11.2 后处理（**花了钱**）
+ * failed         其余失败
+ * ```
+ * 把 `skipped` 与 `failed` 分开是必要的：前者是设计行为（成本控制生效），
+ * 后者是故障。合成一个的话，「熔断打开」与「供应商挂了」在图上没有区别。
+ */
+export const aiImageTotal = createCounter({
+  name: 'travel_ai_image_total',
+  help: 'AI 图片生成结局（按结局、角色、身份类型）',
+  labelNames: ['outcome', 'role', 'user_type'],
+});
+
 /** 21.2：全部素材解析（14 天）P95 < 25 秒 */
 export const assetBatchDuration = createHistogram({
   name: 'travel_asset_batch_duration_seconds',

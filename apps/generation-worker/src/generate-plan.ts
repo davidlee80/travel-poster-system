@@ -32,8 +32,9 @@ import {
   type TravelPlanLlmOutput,
 } from '@tps/schemas';
 import type { GenerationJobPayload } from '@tps/queue';
-import type { Logger } from '@tps/shared';
+import type { Logger, UserType } from '@tps/shared';
 
+import type { AiLayerDeps } from './assets/resolve-assets.js';
 import { createPlanValidationObserver } from './plan-metrics.js';
 import {
   buildAndSavePresentations,
@@ -94,8 +95,21 @@ export interface GeneratePlanDeps {
    * 不必装配对象存储与素材库依赖。
    *
    * `logger` 由本模块注入（带 job_id / user_id 的子 logger），因此这里排除它。
+   * `ai` 同样排除：它含每任务一个实例的预算对象，见 `aiAssets`。
    */
-  readonly presentation?: Omit<BuildPresentationDeps, 'logger'>;
+  readonly presentation?: Omit<BuildPresentationDeps, 'logger' | 'ai'>;
+
+  /**
+   * AI 兜底层的**工厂**（TP-4-02/03/17）。
+   *
+   * 是工厂而不是实例，因为 21.4 的单任务预算（3 张图、2 次 Hero）是
+   * 每任务状态，而额度上限又取决于身份类型（匿名的 AI Hero 额度为 0）。
+   * 放一个共享实例进依赖容器的表现是「第 4 个任务开始一张 AI 图都没有」——
+   * 计数从来没被重置过。
+   *
+   * 缺省时降级链没有第 1 级（等价于 21.4 的全局熔断已打开）。
+   */
+  readonly aiAssets?: (userType: UserType) => AiLayerDeps;
 }
 
 export type GenerateOutcome =
@@ -481,13 +495,18 @@ export async function generatePlan(
     };
 
     await advance(deps, context.jobId, 'RESOLVING_ASSETS');
-    const result = await buildAndSavePresentations({ ...presentation, logger: log }, plan);
+    const ai = deps.aiAssets?.(context.userType);
+    const result = await buildAndSavePresentations(
+      { ...presentation, logger: log, ...(ai === undefined ? {} : { ai }) },
+      plan,
+    );
 
     log.info(
       {
         stage: 'RESOLVING_ASSETS',
         plan_version_id: saved.versionId,
         status: result.validationStatus,
+        warnings: [...result.warnings],
       },
       `展示数据已保存：${result.pages} 页、${result.bindings} 个素材绑定` +
         (result.omitted > 0 ? `，${result.omitted} 条内容因限额未展示` : ''),

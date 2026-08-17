@@ -16,10 +16,13 @@ import {
   photoSpotSlotId,
   routeMapSlotId,
 } from '@tps/presentation';
+import { FakeImageClient, ImageUnavailableError } from '@tps/llm';
+import { InMemoryAssetLock } from '@tps/queue';
 import { InMemoryObjectStorage } from '@tps/storage';
-import { createSilentLogger } from '@tps/shared';
+import { InMemoryCounterStore, createSilentLogger } from '@tps/shared';
 import { describe, expect, it } from 'vitest';
 
+import { AiImageBudget } from './ai-budget.js';
 import { PLACEHOLDER_SPECS } from './placeholders.js';
 import {
   DAY_CONCURRENCY,
@@ -423,5 +426,106 @@ describe('schema 版本', () => {
     const { repo } = fakeRepo();
     const { all } = await resolveAssets(deps(repo), envelopeFor(1));
     expect(all[0]!.schema_version).toBe(SCHEMA_VERSIONS.resolvedAsset);
+  });
+});
+
+describe('AI 层的位置（十八章第 1 级，TP-4-02）', () => {
+  /** 记录调用的 AI 层。不真的生成 —— 这里只验编排顺序 */
+  function spyAi(resolve: boolean): {
+    ai: NonNullable<Parameters<typeof resolveAssets>[0]['ai']>;
+    calls: string[];
+  } {
+    const calls: string[] = [];
+    const image = new FakeImageClient((request) => {
+      calls.push(`${request.width}x${request.height}`);
+      if (!resolve) throw new ImageUnavailableError('注入故障');
+      return new Uint8Array([1]);
+    });
+    return {
+      calls,
+      ai: {
+        image,
+        assetLock: new InMemoryAssetLock(),
+        imageTimeoutMs: 20_000,
+        userTypeLabel: 'REGISTERED',
+        budget: new AiImageBudget({
+          counters: new InMemoryCounterStore(),
+          userType: 'REGISTERED',
+          heroQuota: 2,
+        }),
+      },
+    };
+  }
+
+  /** 只含一个景点槽位的信封，便于把「库命中」与「走 AI」隔离开来验证 */
+  function photoOnlyEnvelope(): {
+    envelope: AssetRequirement;
+    entityName: string;
+  } {
+    const full = envelopeFor(1);
+    const photo = full.requirements.find((r) => r.slot_id === photoSpotSlotId(1, 0))!;
+    return {
+      envelope: { ...full, requirements: [photo] },
+      entityName: photo.subject?.entity_name ?? '',
+    };
+  }
+
+  it('素材库命中时不调用 AI（库里那张已审核过，且不花钱）', async () => {
+    const { envelope, entityName } = photoOnlyEnvelope();
+    const { repo } = fakeRepo({
+      candidates: [
+        row({
+          entityName,
+          aspectRatio: 16 / 9,
+          width: 1600,
+          height: 900,
+          cosine: 0.99,
+          qualityScore: 0.95,
+        }),
+      ],
+    });
+    const { ai, calls } = spyAi(true);
+
+    const { all } = await resolveAssets({ ...deps(repo), ai }, envelope);
+
+    expect(all[0]?.resolution.strategy).toBe('LOCAL_LIBRARY_MATCH');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('库未命中时才走 AI，且 ROUTE_MAP 不进 AI 层', async () => {
+    const envelope = envelopeFor(1);
+    const { repo } = fakeRepo();
+    const { ai, calls } = spyAi(false);
+
+    const { all, warnings } = await resolveAssets({ ...deps(repo), ai }, envelope);
+
+    /*
+     * 连续失败上限是 2（见 ai-budget.ts）：供应商挂掉时不该让每个槽位
+     * 都等满 20 秒 —— 那样 T2 目标（P95 < 110 秒）必然违约。
+     * 并发解析下同一批里可能已有几个在途，因此上界放到 SLOT_CONCURRENCY。
+     */
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.length).toBeLessThanOrEqual(SLOT_CONCURRENCY);
+    // 路线图仍然由程序渲染
+    const routeMap = all.find((r) => r.slot_id === routeMapSlotId(1));
+    expect(routeMap?.resolution.strategy).toBe('SVG_RENDER');
+    // AI 全部失败 → 告警里同时有库未命中与 AI 失败
+    expect(warnings).toContain('ASSET_LIBRARY_MISS');
+    expect(warnings).toContain('ASSET_AI_GENERATION_FAILED');
+  });
+
+  it('不装配 AI 层时降级链回到「库 → 占位」，且不报错', async () => {
+    const { repo } = fakeRepo();
+    const { response, warnings } = await resolveAssets(deps(repo), envelopeFor(1));
+
+    expect(response.status).toBe('COMPLETED');
+    expect(warnings).toContain('ASSET_LIBRARY_MISS');
+    expect(warnings).not.toContain('ASSET_AI_GENERATION_FAILED');
+  });
+
+  it('告警码去重：14 天的同一个原因只出现一次（TP-4-09）', async () => {
+    const { repo } = fakeRepo();
+    const { warnings } = await resolveAssets(deps(repo), envelopeFor(14));
+    expect(new Set(warnings).size).toBe(warnings.length);
   });
 });

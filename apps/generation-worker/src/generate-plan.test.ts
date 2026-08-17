@@ -101,6 +101,7 @@ function jobContext(overrides: Partial<JobContext> = {}): JobContext {
     requestId: 'request-1',
     planId: 'plan-1',
     userId: 'user-1',
+    userType: 'REGISTERED',
     status: 'QUEUED',
     progress: 0,
     normalizedRequest: makeValidContext().normalized,

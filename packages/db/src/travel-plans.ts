@@ -104,6 +104,15 @@ export interface JobContext {
   readonly requestId: string;
   readonly planId: string;
   readonly userId: string;
+  /**
+   * 身份类型（21.4）。
+   *
+   * Worker 需要它来定 AI Hero 额度（匿名为 0，TP-4-17），也用作
+   * `travel_ai_image_total` 的 `user_type` 标签（21.3 的 R-13 通用维度）。
+   * 从 `users` join 出来而不是塞进队列载荷：载荷只放标识符（见 @tps/queue），
+   * 而身份类型会变（匿名升级为注册），载荷里那份会过期。
+   */
+  readonly userType: 'ANONYMOUS' | 'REGISTERED';
   readonly status: JobStatusValue;
   readonly progress: number;
   /** `travel_requests.normalized_request`，由调用方用 schema 解析 */
@@ -477,14 +486,16 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
         request_id: string;
         plan_id: string | null;
         user_id: string;
+        user_type: string;
         status: string;
         progress: number;
         normalized_request: unknown;
       }>(
         `SELECT j.id, j.request_id, j.plan_id, j.user_id, j.status, j.progress,
-                r.normalized_request
+                u.user_type, r.normalized_request
            FROM generation_jobs j
            JOIN travel_requests r ON r.id = j.request_id
+           JOIN users u ON u.id = j.user_id
           WHERE j.id = $1`,
         [jobId],
       );
@@ -497,6 +508,7 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
         requestId: row.request_id,
         planId: row.plan_id,
         userId: row.user_id,
+        userType: row.user_type === 'REGISTERED' ? 'REGISTERED' : 'ANONYMOUS',
         status: row.status,
         progress: row.progress,
         normalizedRequest: row.normalized_request,

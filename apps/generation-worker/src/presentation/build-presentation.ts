@@ -9,7 +9,12 @@ import {
   EMPTY_ASSET_LOOKUP,
   type AssetLookup,
 } from '@tps/presentation';
-import type { PresentationValidation, ResolvedAsset, TravelPlan } from '@tps/schemas';
+import type {
+  AssetWarningCode,
+  PresentationValidation,
+  ResolvedAsset,
+  TravelPlan,
+} from '@tps/schemas';
 import type { Logger } from '@tps/shared';
 
 import { resolveAssets, toAssetLookup, type ResolveAssetsDeps } from '../assets/resolve-assets.js';
@@ -53,6 +58,8 @@ export interface BuildPresentationResult {
   /** 因 `content_limits` 被裁掉的条目总数（21.3 的打点用） */
   readonly omitted: number;
   readonly budgetMismatch: boolean;
+  /** 13.7 的素材告警码，去重。由调用方写入 `generation_jobs.warnings`（TP-4-09） */
+  readonly warnings: readonly AssetWarningCode[];
 }
 
 export async function buildAndSavePresentations(
@@ -142,6 +149,7 @@ export async function buildAndSavePresentations(
     bindings: resolution.bindings.length,
     omitted,
     budgetMismatch,
+    warnings: resolution.warnings,
   };
 }
 

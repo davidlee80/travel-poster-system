@@ -10,13 +10,14 @@ import {
   migrate,
   migrationsDirectory,
 } from '@tps/db';
-import { FakeLlmClient, LocalHashingEmbeddingClient } from '@tps/llm';
+import { FakeImageClient, FakeLlmClient, LocalHashingEmbeddingClient } from '@tps/llm';
 import { InMemoryObjectStorage } from '@tps/storage';
-import { TravelPosterViewModelSchema } from '@tps/schemas';
+import { GenerationMetadataSchema, TravelPosterViewModelSchema } from '@tps/schemas';
 import { parseRetrievalProjection, projectionToEmbeddingText } from '@tps/planning';
 import {
   BullMqPlanQueue,
   GenerationJobPayloadSchema,
+  InMemoryAssetLock,
   PLAN_QUEUE_NAME,
   RedisCounterStore,
   RedisIdempotencyLock,
@@ -27,16 +28,20 @@ import { TravelPlanSchema, findForbiddenProjectionKeys } from '@tps/schemas';
 import {
   COOKIE_NAMES,
   GracefulShutdown,
+  InMemoryCounterStore,
   QuotaGuard,
   createSilentLogger,
   loadQuotaConfig,
   type ServiceConfig,
+  type UserType,
 } from '@tps/shared';
 import { Queue } from 'bullmq';
 import type { Pool } from 'pg';
 import type { Redis } from 'ioredis';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { AiImageBudget, MAX_AI_IMAGES_PER_JOB } from './assets/ai-budget.js';
+import { renderFakeGeneratedImage } from './assets/fake-image.js';
 import { fixturePlanFor } from './fixture-plan.js';
 import { generatePlan } from './generate-plan.js';
 
@@ -247,6 +252,22 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
         storage,
         embedding,
       },
+      /*
+       * P4 的 AI 兜底层。图片客户端用 fake 渲染函数（渐变图），因此
+       * 「生成 → 11.2 后处理 → 上传 → 落库 → 缓存键复用」全链路是真的，
+       * 只有画面内容是占位 —— 与 LLM_MODE=fake 同一处理。
+       */
+      aiAssets: (userType: UserType) => ({
+        image: new FakeImageClient(renderFakeGeneratedImage),
+        assetLock: new InMemoryAssetLock(),
+        imageTimeoutMs: 20_000,
+        userTypeLabel: userType,
+        budget: new AiImageBudget({
+          counters: new InMemoryCounterStore(),
+          userType,
+          heroQuota: userType === 'ANONYMOUS' ? 0 : 2,
+        }),
+      }),
       storage,
     };
   }
@@ -419,18 +440,21 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     await generatePlan(workerDeps(), await takeQueuedPayload());
 
     /*
-     * 本地素材库是空的（没有灌种子素材，也没灌占位图），因此只有路线图
-     * 真正产出了素材，其余槽位是 SKIPPED。这正是「没有素材数据时链路
-     * 仍然完整」的证据 —— 也是 TP-3-06 那 2000 条种子素材属于数据工作、
-     * 不属于代码的直接体现。
+     * 本地素材库是空的（没有灌种子素材，也没灌占位图）。P3 时这意味着
+     * 只有路线图产出素材；P4 接入 AI 兜底后，景点与美食槽位也有产物 ——
+     * 而 21.4 的单任务上限（3 张）决定了它们不会全部有。
+     *
+     * 每一条绑定都要能回答「这张图从哪来」（二十章的可追溯性）。
      */
     const bindings = await pool.query<{
       role: string;
       resolution_strategy: string;
       source_type: string;
       representation_type: string;
+      generation_metadata: unknown;
     }>(
-      `SELECT b.role, b.resolution_strategy, a.source_type, a.representation_type
+      `SELECT b.role, b.resolution_strategy, a.source_type, a.representation_type,
+              a.generation_metadata
          FROM plan_asset_bindings b
          JOIN assets a ON a.id = b.asset_id
         WHERE b.plan_id = $1
@@ -438,15 +462,43 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
       [handles.plan_id],
     );
 
-    expect(bindings.rows).toHaveLength(5);
+    // 5 天的路线图 + 若干 AI 兜底图
+    expect(bindings.rows.length).toBeGreaterThan(5);
+
     for (const row of bindings.rows) {
-      expect(row.role).toBe('ROUTE_MAP');
-      expect(row.source_type).toBe('GENERATED_SVG');
-      // 示意图不是照片（9.4 的同一条原则）
+      if (row.role === 'ROUTE_MAP') {
+        expect(row.source_type).toBe('GENERATED_SVG');
+        // 示意图不是照片（9.4 的同一条原则）
+        expect(row.representation_type).toBe('ILLUSTRATIVE');
+        continue;
+      }
+      // 库是空的，因此非路线槽位只可能来自 AI（十八章第 1 级）
+      expect(row.source_type).toBe('AI_GENERATED');
+      // 11.3 第五条：AI 图不得标成真实照片
       expect(row.representation_type).toBe('ILLUSTRATIVE');
+      // 二十章：AI 生成物的 generation_metadata 必须非空且可解析
+      expect(GenerationMetadataSchema.safeParse(row.generation_metadata).success).toBe(true);
     }
 
-    // 素材未齐 → DEGRADED 而不是 VALID（十五章）
+    /*
+     * TP-4-17：匿名身份的 AI Hero 额度为 0。
+     *
+     * 这条用例走的是无身份提交（13.0 第 3.a 条现场建匿名号），因此
+     * **一张 Hero 都不该被生成**，而计划仍然可读、页面仍然可渲染
+     * （模板对 `hero_asset: null` 有渐变背景分支）。
+     */
+    expect(bindings.rows.some((row) => row.role === 'HERO_BACKGROUND')).toBe(false);
+
+    /*
+     * 21.4：单任务 AI 图上限 3 张。绑定数可以多于 3
+     * （19.5 的跨天复用让多个槽位指向同一张），但**素材行**不能。
+     */
+    const aiAssets = await pool.query<{ count: string }>(
+      `SELECT count(*) FROM assets WHERE source_type = 'AI_GENERATED'`,
+    );
+    expect(Number(aiAssets.rows[0]!.count)).toBeLessThanOrEqual(MAX_AI_IMAGES_PER_JOB);
+
+    // 仍有槽位未解析（占位图也没灌）→ DEGRADED 而不是 VALID（十五章）
     const presentation = await app.inject({
       method: 'GET',
       url: `/api/v1/travel-plans/${handles.plan_id}/presentations/1`,
@@ -522,12 +574,42 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     );
     expect(svgCount.rows[0]!.count).toBe('1');
 
-    const bindings = await pool.query<{ count: string }>(
-      'SELECT count(*) FROM plan_asset_bindings WHERE plan_id = $1',
+    /*
+     * AI 图的成本断言。这里要说清楚一件容易搞反的事：
+     *
+     * 第二次生成**不会重画第一次画过的那些键** —— 缓存键在版本之间相同，
+     * 那些槽位在 `findByCacheKey` 就命中了，压根走不到 AI 层。但第二次
+     * 仍然有自己的 3 张任务额度，于是它会把额度花在**第一次没排上的键**上
+     * （第一次的 3 张额度只够覆盖一部分槽位）。
+     *
+     * 因此库里的 AI 图会随重跑略有增长，但增长量由**每任务 3 张**封住，
+     * 与槽位数（14 天可达 84 个）无关 —— 这正是 21.4 那条上限的作用。
+     */
+    const aiAssets = await pool.query<{ count: string }>(
+      `SELECT count(*) FROM assets WHERE source_type = 'AI_GENERATED'`,
+    );
+    expect(Number(aiAssets.rows[0]!.count)).toBeLessThanOrEqual(2 * MAX_AI_IMAGES_PER_JOB);
+
+    /*
+     * 绑定是**按版本**记的（`UNIQUE(plan_version_id, template_id, slot_id)`），
+     * 因此两个版本各有一套。
+     *
+     * 两套的数量**不相等**，而且这正是 19.5 想要的结果：第二次生成时库里
+     * 已经有第一次画的那几张，于是更多槽位在缓存键上直接命中 ——
+     * 第二个版本因此比第一个更完整，而它没有多花任何 AI 调用。
+     * 断言写成「相等」会把这条优化判成缺陷。
+     */
+    const perVersionBindings = await pool.query<{ plan_version_id: string; count: string }>(
+      `SELECT plan_version_id, count(*) AS count
+         FROM plan_asset_bindings WHERE plan_id = $1
+        GROUP BY plan_version_id ORDER BY min(created_at)`,
       [handles.plan_id],
     );
-    // 两个版本各 5 条绑定，指向同一批素材
-    expect(bindings.rows[0]!.count).toBe('10');
+    expect(perVersionBindings.rows).toHaveLength(2);
+    const [firstCount, secondCount] = perVersionBindings.rows.map((row) => Number(row.count));
+    // 每个版本至少有 5 天的路线图
+    expect(firstCount).toBeGreaterThanOrEqual(5);
+    expect(secondCount).toBeGreaterThanOrEqual(firstCount!);
   });
 
   it('落库的版本带脱敏投影与向量，且能被同城的相似计划检索到（门禁 #26）', async () => {

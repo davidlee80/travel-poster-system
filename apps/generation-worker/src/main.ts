@@ -1,6 +1,8 @@
 import {
   checkDatabase,
+  createAssetsRepository,
   createPool,
+  createPresentationsRepository,
   createRetrievalRepository,
   createTravelPlansRepository,
   loadDbConfig,
@@ -8,20 +10,27 @@ import {
 import {
   FakeLlmClient,
   LocalHashingEmbeddingClient,
+  createImageClient,
   createLlmClient,
+  loadImageConfig,
   loadLlmConfig,
 } from '@tps/llm';
 import { metricsContentType, metricsText, registerDefaultMetrics } from '@tps/observability';
 import {
   GenerationJobPayloadSchema,
   PLAN_QUEUE_NAME,
+  RedisAssetLock,
+  RedisCounterStore,
   RedisJobLock,
   createQueueRedis,
   createRedis,
 } from '@tps/queue';
-import { requireString, runWorker } from '@tps/shared';
+import { S3ObjectStorage, loadAssetsStorageConfig } from '@tps/storage';
+import { loadQuotaConfig, optionalInt, quotaFor, requireString, runWorker } from '@tps/shared';
 import { Worker } from 'bullmq';
 
+import { AiImageBudget, DEFAULT_AI_IMAGE_DAILY_BUDGET } from './assets/ai-budget.js';
+import { renderFakeGeneratedImage } from './assets/fake-image.js';
 import { fixturePlanFor } from './fixture-plan.js';
 import { generatePlan, type LlmClientFactory } from './generate-plan.js';
 
@@ -29,12 +38,9 @@ import { generatePlan, type LlmClientFactory } from './generate-plan.js';
  * 生成 Worker。
  *
  * 职责范围（设计稿 3.2、3.3、3.2.4、22.2）：
- *   P2  标准化读回、历史检索、LLM 生成、校验、修复、持久化  ← 本增量
+ *   P2  标准化读回、历史检索、LLM 生成、校验、修复、持久化
  *   P3  展示编排、素材解析
- *   P4  AI 素材兜底、缓存、导出
- *
- * P2 的任务推进到 `SAVING_PLAN` 为止，不进入 `COMPLETED`
- * （理由见 generate-plan.ts 的文件头）。
+ *   P4  AI 素材兜底、并发去重、成本上限与熔断  ← 本增量
  */
 
 const SERVICE_NAME = 'tps-generation-worker';
@@ -48,7 +54,12 @@ const queueRedis = createQueueRedis(redisUrl);
 
 const plans = createTravelPlansRepository(dbPool);
 const retrievalRepository = createRetrievalRepository(dbPool);
+const assetsRepository = createAssetsRepository(dbPool);
+const presentationsRepository = createPresentationsRepository(dbPool);
 const jobLock = new RedisJobLock(redis);
+const assetLock = new RedisAssetLock(redis);
+const counters = new RedisCounterStore(redis);
+const storage = new S3ObjectStorage(loadAssetsStorageConfig());
 
 /*
  * `fake` 模式（默认）的录制输出按请求构造：天数、目的地、硬约束都要与
@@ -62,6 +73,15 @@ const llm: LlmClientFactory | ReturnType<typeof createLlmClient> =
     : createLlmClient(llmConfig);
 const embedding = new LocalHashingEmbeddingClient();
 
+/*
+ * 图片模型（P4）。`fake` 模式由本进程注入渲染函数 —— @tps/llm 不依赖 sharp
+ * （它被所有应用引用），因此渲染必须在这里（见 assets/fake-image.ts）。
+ */
+const imageConfig = loadImageConfig();
+const image = createImageClient(imageConfig, { renderer: renderFakeGeneratedImage });
+const quotaConfig = loadQuotaConfig();
+const aiDailyBudget = optionalInt('AI_IMAGE_DAILY_BUDGET', DEFAULT_AI_IMAGE_DAILY_BUDGET);
+
 await runWorker({
   serviceName: SERVICE_NAME,
   probePort: 3011,
@@ -69,7 +89,12 @@ await runWorker({
 
   start: (handle) => {
     handle.logger.info(
-      { llm_mode: llmConfig.mode, llm_model: llmConfig.model || '(fake)' },
+      {
+        llm_mode: llmConfig.mode,
+        llm_model: llmConfig.model || '(fake)',
+        image_mode: imageConfig.mode,
+        image_model: imageConfig.model || '(fake)',
+      },
       '生成 Worker 就绪，开始消费队列',
     );
 
@@ -96,6 +121,28 @@ await runWorker({
               embedding,
               logger: handle.logger,
               llmTimeoutMs: llmConfig.timeoutMs,
+              presentation: {
+                assets: assetsRepository,
+                presentations: presentationsRepository,
+                storage,
+                embedding,
+              },
+              /*
+               * 每任务一个预算实例（21.4 的 3 张图与 21.2 的 2 次 Hero 都是
+               * 单任务计数），额度上限按身份取（匿名的 AI Hero 为 0，TP-4-17）。
+               */
+              aiAssets: (userType) => ({
+                image,
+                assetLock,
+                imageTimeoutMs: imageConfig.timeoutMs,
+                userTypeLabel: userType,
+                budget: new AiImageBudget({
+                  counters,
+                  userType,
+                  heroQuota: quotaFor(quotaConfig, userType).aiHero,
+                  dailyBudget: aiDailyBudget,
+                }),
+              }),
             },
             payload,
           );

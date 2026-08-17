@@ -15,6 +15,13 @@
 export type { Redis } from 'ioredis';
 
 export {
+  ASSET_LOCK_TTL_SECONDS,
+  InMemoryAssetLock,
+  RedisAssetLock,
+  type AssetLock,
+} from './asset-lock.js';
+
+export {
   RedisCounterStore,
   RedisIdempotencyLock,
   RedisJobLock,

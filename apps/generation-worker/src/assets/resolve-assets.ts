@@ -6,20 +6,23 @@ import {
   themeBucket,
 } from '@tps/assets';
 import type { AssetsRepository, SaveBindingInput } from '@tps/db';
-import type { EmbeddingClient } from '@tps/llm';
+import type { EmbeddingClient, ImageClient } from '@tps/llm';
 import { sourceNote, type AssetLookup } from '@tps/presentation';
+import type { AssetLock } from '@tps/queue';
 import {
   SCHEMA_VERSIONS,
   type AssetRequirement,
   type AssetRequirementItem,
   type AssetResolveResponse,
+  type AssetWarningCode,
   type LicenseType,
   type RepresentationType,
   type ResolvedAsset,
 } from '@tps/schemas';
 import type { ObjectStorage } from '@tps/storage';
-import type { Logger } from '@tps/shared';
+import type { Logger, UserType } from '@tps/shared';
 
+import type { AiImageBudget } from './ai-budget.js';
 import { mapWithConcurrency } from './concurrency.js';
 import {
   assetBatchDuration,
@@ -27,6 +30,7 @@ import {
   assetResolutionDuration,
   assetResolutionTotal,
 } from './asset-metrics.js';
+import { resolveByAi } from './resolvers/ai-generator.js';
 import { resolveFallback } from './resolvers/fallback.js';
 import { resolveFromLocalLibrary } from './resolvers/local-library.js';
 import { resolveRouteMap } from './resolvers/svg-map.js';
@@ -43,10 +47,15 @@ import { resolveRouteMap } from './resolvers/svg-map.js';
  *
  * ```text
  * ROUTE_MAP           程序生成 SVG（9.2，不调用图片模型）
- * HERO_BACKGROUND     缓存键命中 → 素材库 → [AI，P4] → 默认占位（9.3）
- * DESTINATION_PHOTO   缓存键命中 → 素材库 → [授权源/AI，P4] → 默认占位（9.4）
- * FOOD_IMAGE          缓存键命中 → 素材库 → [授权源/AI，P4] → 默认占位（9.5）
+ * HERO_BACKGROUND     缓存键命中 → 素材库 → AI 生成 → 默认占位（9.3）
+ * DESTINATION_PHOTO   缓存键命中 → 素材库 → AI 生成 → 默认占位（9.4）
+ * FOOD_IMAGE          缓存键命中 → 素材库 → AI 生成 → 默认占位（9.5）
  * ```
+ *
+ * 「授权图片源」这一层（9.4/9.5 的第二层）V1 不接：它需要与具体图库签约，
+ * 而 `ASSET_LICENSED_SOURCE_UNAVAILABLE` 这个告警码已经为它留好位置。
+ * AI 与授权源同属 `fallback_level: 1`，不为空缺的那一层重编号 ——
+ * 等级会出现在 `plan_asset_bindings.resolution_strategy` 的历史数据里。
  *
  * ## 并发与预算
  *
@@ -66,6 +75,27 @@ export interface ResolveAssetsDeps {
   readonly embedding: EmbeddingClient;
   readonly logger: Logger;
   readonly now?: () => number;
+  /**
+   * AI 兜底（十八章的第 1 级，TP-4-02）。
+   *
+   * 可选：缺省时降级链是「缓存键 → 素材库 → 默认占位」，等级从 0 跳到 2
+   * （P3 的行为）。让它可缺省不是为了兼容旧代码，而是因为 21.4 的全局熔断
+   * 与「不配置图片供应商的部署」需要同一条无 AI 的路径 ——
+   * 而那条路径必须是**经过测试**的，不是应急时才第一次走。
+   */
+  readonly ai?: AiLayerDeps;
+}
+
+/**
+ * AI 层的依赖。`budget` 是**每任务一个实例**，因此由调用方按任务构造，
+ * 不放进长生命周期的依赖容器里。
+ */
+export interface AiLayerDeps {
+  readonly image: ImageClient;
+  readonly assetLock: AssetLock;
+  readonly budget: AiImageBudget;
+  readonly imageTimeoutMs: number;
+  readonly userTypeLabel: UserType;
 }
 
 /** 21.2 的并发度 */
@@ -78,6 +108,15 @@ export interface ResolveAssetsResult {
   readonly bindings: readonly SaveBindingInput[];
   /** 全部槽位的解析结果，按输入顺序 */
   readonly all: readonly ResolvedAsset[];
+  /**
+   * 13.7 的素材告警码，去重后按首次出现顺序（TP-4-09）。
+   *
+   * 去重是必要的：14 天的任务里同一个原因（比如熔断打开）会重复 40 次，
+   * 而 `generation_jobs.warnings` 是给人看的 —— 40 个相同的码只会让
+   * 真正独立的那两三个原因被埋掉。次数在指标里
+   * （`travel_ai_image_total{outcome="skipped"}`）。
+   */
+  readonly warnings: readonly AssetWarningCode[];
 }
 
 export async function resolveAssets(
@@ -106,8 +145,12 @@ export async function resolveAssets(
    * （同一个计划两次解析的响应应当逐字节可比）。
    */
   const bySlot = new Map<string, ResolvedAsset>();
+  const warnings = new Set<AssetWarningCode>();
   for (const dayResults of perDay) {
-    for (const result of dayResults) bySlot.set(result.slot_id, result);
+    for (const outcome of dayResults) {
+      bySlot.set(outcome.resolved.slot_id, outcome.resolved);
+      for (const code of outcome.warnings) warnings.add(code);
+    }
   }
   const all = envelope.requirements
     .map((item) => bySlot.get(item.slot_id))
@@ -157,7 +200,13 @@ export async function resolveAssets(
     response: { status, resolved, fallbacks, failed_optional: failedOptional },
     bindings,
     all,
+    warnings: [...warnings],
   };
+}
+
+interface SlotOutcome {
+  readonly resolved: ResolvedAsset;
+  readonly warnings: readonly AssetWarningCode[];
 }
 
 /** 单槽位解析，含 800 毫秒预算与异常兜底 */
@@ -165,15 +214,15 @@ async function resolveOne(
   deps: ResolveAssetsDeps,
   item: AssetRequirementItem,
   now: () => number,
-): Promise<ResolvedAsset> {
+): Promise<SlotOutcome> {
   const startedAt = now();
   // 预算按槽位独立计时（10.2 第 5 步）
   const deadline = startedAt + SELECTION_BUDGET_MS;
 
   try {
-    const resolved = await resolveByRole(deps, item, deadline);
-    record(item, resolved, (now() - startedAt) / 1000);
-    return resolved;
+    const outcome = await resolveByRole(deps, item, deadline);
+    record(item, outcome.resolved, (now() - startedAt) / 1000);
+    return outcome;
   } catch (error) {
     /*
      * 16.3：素材类错误不阻断任务。这里兜住一切异常 ——
@@ -186,7 +235,7 @@ async function resolveOne(
     );
     const fallback = await resolveFallback(deps, item).catch(() => skipped(item));
     record(item, fallback, (now() - startedAt) / 1000);
-    return fallback;
+    return { resolved: fallback, warnings: ['ASSET_LIBRARY_MISS'] };
   }
 }
 
@@ -194,10 +243,14 @@ async function resolveByRole(
   deps: ResolveAssetsDeps,
   item: AssetRequirementItem,
   deadline: number,
-): Promise<ResolvedAsset> {
+): Promise<SlotOutcome> {
   if (item.role === 'ROUTE_MAP') {
     const outcome = await resolveRouteMap(deps, item);
-    return outcome.resolved;
+    return {
+      resolved: outcome.resolved,
+      // 8.2 的文字路线是降级：地图渲染没成功（节点不足或缺 route_data）
+      warnings: outcome.kind === 'text_fallback' ? ['ASSET_MAP_RENDER_FAILED'] : [],
+    };
   }
 
   // ── 19.4：精确键命中，不重算评分 ──
@@ -211,50 +264,65 @@ async function resolveByRole(
       cached.mimeType !== null
     ) {
       return {
-        schema_version: SCHEMA_VERSIONS.resolvedAsset,
-        slot_id: item.slot_id,
-        status: 'RESOLVED',
-        asset: {
-          asset_id: cached.assetId,
-          asset_type: 'IMAGE',
-          source_type: cached.sourceType === 'AI_GENERATED' ? 'AI_GENERATED' : 'PLATFORM_LIBRARY',
-          representation_type: cached.representationType as RepresentationType,
-          mime_type: cached.mimeType,
-          urls: { original: cached.storageUrl, thumbnail: cached.thumbnailUrl },
-          width: cached.width,
-          height: cached.height,
-          aspect_ratio: cached.aspectRatio ?? cached.width / cached.height,
-          metadata: {
-            entity_name: cached.entityName,
-            destination: cached.destinationName,
-            style_tags: [...cached.styleTags],
+        warnings: [],
+        resolved: {
+          schema_version: SCHEMA_VERSIONS.resolvedAsset,
+          slot_id: item.slot_id,
+          status: 'RESOLVED',
+          asset: {
+            asset_id: cached.assetId,
+            asset_type: 'IMAGE',
+            source_type: cached.sourceType === 'AI_GENERATED' ? 'AI_GENERATED' : 'PLATFORM_LIBRARY',
+            representation_type: cached.representationType as RepresentationType,
+            mime_type: cached.mimeType,
+            urls: { original: cached.storageUrl, thumbnail: cached.thumbnailUrl },
+            width: cached.width,
+            height: cached.height,
+            aspect_ratio: cached.aspectRatio ?? cached.width / cached.height,
+            metadata: {
+              entity_name: cached.entityName,
+              destination: cached.destinationName,
+              style_tags: [...cached.styleTags],
+            },
+            license: {
+              type: cached.licenseType as LicenseType,
+              attribution_required:
+                cached.attributionText !== null && cached.attributionText.length > 0,
+              attribution_text: cached.attributionText,
+            },
           },
-          license: {
-            type: cached.licenseType as LicenseType,
-            attribution_required:
-              cached.attributionText !== null && cached.attributionText.length > 0,
-            attribution_text: cached.attributionText,
-          },
+          // 19.4：score 恒为 1.0，与 10.1 的相似度不是同一量纲
+          resolution: { strategy: 'CACHE_HIT', score: 1, fallback_level: 0 },
         },
-        // 19.4：score 恒为 1.0，与 10.1 的相似度不是同一量纲
-        resolution: { strategy: 'CACHE_HIT', score: 1, fallback_level: 0 },
       };
     }
   }
 
   // ── 平台已审核素材（9.4/9.5 的第一层，9.3 的第二层）──
   const library = await resolveFromLocalLibrary(deps, item, { deadline });
-  if (library.kind === 'hit') return library.resolved;
+  if (library.kind === 'hit') return { resolved: library.resolved, warnings: [] };
 
   /*
-   * 这里本该是「授权图片源 → AI 生成」两层（9.3～9.5），两者都在 P4
-   * （TP-4-01/02）。P3 直接落到默认占位，`fallback_level` 因此从 0 跳到 2。
+   * ── AI 生成（十八章的第 1 级，TP-4-02）──
+   *
+   * 只有在素材库确实未命中时才走到这里。顺序不能反：AI 生成要花钱、
+   * 要 20 秒，而库里那张已经审核过的照片对「景点图」而言本来就更好（9.4）。
    */
+  const ai = deps.ai;
+  const aiWarnings: AssetWarningCode[] = ['ASSET_LIBRARY_MISS'];
+  if (ai !== undefined) {
+    const generated = await resolveByAi({ ...deps, ...ai, budget: ai.budget }, item, cacheKey);
+    aiWarnings.push(...generated.warnings);
+    if (generated.resolved !== null) {
+      return { resolved: generated.resolved, warnings: generated.warnings };
+    }
+  }
+
   deps.logger.info(
     { role: item.role, strategy: 'none' },
-    `素材库未命中（${library.reason}），使用默认占位`,
+    `素材库未命中（${library.reason}）且无 AI 产物，使用默认占位`,
   );
-  return resolveFallback(deps, item);
+  return { resolved: await resolveFallback(deps, item), warnings: aiWarnings };
 }
 
 /** 19.2 的键格式。ROUTE_MAP 的键在 svg-map resolver 里算（它要先渲染） */

@@ -3,8 +3,10 @@ import type { Redis } from 'ioredis';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  ASSET_LOCK_TTL_SECONDS,
   BullMqPlanQueue,
   PLAN_QUEUE_NAME,
+  RedisAssetLock,
   RedisCounterStore,
   RedisIdempotencyLock,
 } from './index.js';
@@ -147,6 +149,43 @@ describeIntegration('Redis 基础设施（集成，需 Redis）', () => {
       } finally {
         await queue.close();
       }
+    });
+  });
+
+  describe('lock:asset（TP-4-06，13.8）', () => {
+    it('同键 10 并发只有 1 个拿到锁', async () => {
+      const lock = new RedisAssetLock(redis);
+      const key = 'hero:v1:cn_hangzhou:canal_culture:chinese_travel_editorial:16x6';
+      await redis.del(`lock:asset:${key}`);
+
+      const results = await Promise.all(Array.from({ length: 10 }, () => lock.acquire(key)));
+      expect(results.filter(Boolean)).toHaveLength(1);
+
+      /*
+       * 这一条只有真 Redis 能证明：`SET NX EX` 的原子性是**服务端**保证的。
+       * 进程内实现测的是我们自己写的 Set，而 14 天并发解析里同键重复生成的
+       * 成本正是 13.8 说的「对成本影响最大」的那一项。
+       */
+      await lock.release(key);
+      expect(await lock.acquire(key)).toBe(true);
+      await lock.release(key);
+    });
+
+    it('TTL 一次设定，不会留下永不过期的锁', async () => {
+      const lock = new RedisAssetLock(redis);
+      const key = 'food:v1:x:cn_hangzhou:realistic_food_photography';
+      await redis.del(`lock:asset:${key}`);
+
+      await lock.acquire(key);
+      const ttl = await redis.ttl(`lock:asset:${key}`);
+      expect(ttl).toBeGreaterThan(0);
+      expect(ttl).toBeLessThanOrEqual(ASSET_LOCK_TTL_SECONDS);
+      await lock.release(key);
+    });
+
+    it('TTL 比 AI 生成超时长 —— 短了等于这把锁没起作用', () => {
+      // 20 秒（21.2 措施二）+ 后处理与上传的余量
+      expect(ASSET_LOCK_TTL_SECONDS).toBeGreaterThan(20);
     });
   });
 });
