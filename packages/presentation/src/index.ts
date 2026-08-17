@@ -50,6 +50,27 @@ export { MODULE_ICON_PATHS, moduleIcons } from './icons.js';
 export { foodSlotId, heroSlotId, photoSpotSlotId, routeMapSlotId } from './slots.js';
 
 export {
+  DAILY_CONTENT_LIMITS,
+  FULL_PLAN_CONTENT_LIMITS,
+  applyLimit,
+  type ContentLimits,
+} from './content-limits.js';
+
+export {
+  assetRequirementEnvelope,
+  mergeRequirements,
+  requirementsForDay,
+  type DayRequirementsInput,
+  type MergeResult,
+} from './requirements.js';
+
+export {
+  buildPresentationPlans,
+  type BuildPresentationPlansInput,
+  type PresentationPlan,
+} from './presentation-plan.js';
+
+export {
   EMPTY_ASSET_LOOKUP,
   PresentationError,
   buildDailyPoster,

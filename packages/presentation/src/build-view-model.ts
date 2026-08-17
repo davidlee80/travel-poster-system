@@ -8,6 +8,7 @@ import {
   type ViewImage,
 } from '@tps/schemas';
 import { COMPACT_LIMITS, toCompact } from './compact.js';
+import { DAILY_CONTENT_LIMITS, applyLimit, type ContentLimits } from './content-limits.js';
 import {
   BOOKING_CATEGORY_LABEL,
   MEAL_LABEL,
@@ -56,6 +57,13 @@ export interface BuildDailyPosterInput {
   readonly dayNumber: number;
   readonly templateId?: TemplateId;
   readonly assets?: AssetLookup;
+  /**
+   * 3.3 的 `content_limits`。默认取每日海报的限额。
+   *
+   * 必须与 `requirementsForDay` 用同一份限额 —— 两处不一致时会解析出
+   * 页面上不显示的图（多花钱），或显示一个没有解析过的槽位（空占位）。
+   */
+  readonly limits?: ContentLimits;
 }
 
 export class PresentationError extends Error {
@@ -113,6 +121,15 @@ export interface BuildResult {
   readonly viewModel: TravelPosterViewModel;
   /** `daily_budget.total` 与 `breakdown` 之和不一致（V-20），调用方应记违规 */
   readonly budgetMismatch: boolean;
+  /**
+   * 因 `content_limits` 被裁掉的条目数，按模块。
+   *
+   * 上报而不是静默丢弃：裁剪是编排层的决定，而页面上看不出「本来还有一条」。
+   * 调用方据此打点（21.3），异常值说明限额与实际内容量长期不匹配。
+   */
+  readonly omitted: Readonly<
+    Record<'schedule' | 'food' | 'photoSpot' | 'ticket' | 'bookingTip', number>
+  >;
 }
 
 /** 构造单日信息图 ViewModel（page_type = DAILY_POSTER） */
@@ -122,10 +139,17 @@ export function buildDailyPoster(input: BuildDailyPosterInput): BuildResult {
     dayNumber,
     templateId = 'travel_infographic_v1',
     assets = EMPTY_ASSET_LOOKUP,
+    limits = DAILY_CONTENT_LIMITS,
   } = input;
 
   const day = findDay(plan, dayNumber);
   const { budget, budgetMismatch } = buildBudget(day);
+
+  const schedule = applyLimit(day.schedule, limits.schedule_max_items);
+  const foods = applyLimit(day.food_recommendations, limits.food_max_items);
+  const spots = applyLimit(day.photo_spots, limits.photo_spot_max_items);
+  const tickets = applyLimit(day.ticket_reminders, limits.ticket_max_items);
+  const bookingTips = applyLimit(day.booking_tips, limits.booking_tip_max_items);
 
   const heroSlot = assets(heroSlotId(dayNumber));
   const routeSlot = assets(routeMapSlotId(dayNumber));
@@ -143,13 +167,16 @@ export function buildDailyPoster(input: BuildDailyPosterInput): BuildResult {
       total_days: plan.total_days,
       day_label: dayLabel(dayNumber),
       title: day.theme,
-      title_compact: toCompact(day.theme, COMPACT_LIMITS.title),
+      title_compact: toCompact(day.theme, limits.title_max_chars ?? COMPACT_LIMITS.title),
       subtitle: day.subtitle,
-      subtitle_compact: toCompact(day.subtitle, COMPACT_LIMITS.subtitle),
+      subtitle_compact: toCompact(
+        day.subtitle,
+        limits.subtitle_max_chars ?? COMPACT_LIMITS.subtitle,
+      ),
       hero_asset: heroSlot?.hero ?? null,
     },
 
-    schedule: day.schedule.map((item) => ({
+    schedule: schedule.map((item) => ({
       period: PERIOD_LABEL[item.period],
       period_icon: periodIconName(item.period),
       title: item.title,
@@ -158,7 +185,7 @@ export function buildDailyPoster(input: BuildDailyPosterInput): BuildResult {
       duration_text: durationText(item.duration_minutes),
     })),
 
-    food_cards: day.food_recommendations.map((food) => ({
+    food_cards: foods.map((food) => ({
       meal: MEAL_LABEL[food.meal],
       name: food.name,
       description: food.description,
@@ -169,8 +196,12 @@ export function buildDailyPoster(input: BuildDailyPosterInput): BuildResult {
     route_map: {
       // svg_url 为 null 时模板渲染 nodes 文字列表（设计稿 8.2 text_fallback）
       svg_url: routeSlot?.svgUrl ?? null,
-      // nodes 始终提供 —— 它既是地图的节点来源，也是降级时的文字路线
-      nodes: day.schedule.map((s) => s.location.name),
+      /*
+       * nodes 始终提供 —— 它既是地图的节点来源，也是降级时的文字路线。
+       * 取裁剪后的 schedule：地图上的点必须与「今日行程」列出的点一致，
+       * 否则用户会在图里看到一个行程里没有的地方。
+       */
+      nodes: schedule.map((s) => s.location.name),
     },
 
     route_recommendations: day.route_recommendations.map((route) => ({
@@ -186,13 +217,13 @@ export function buildDailyPoster(input: BuildDailyPosterInput): BuildResult {
       icon: transportIconName(tip.mode),
     })),
 
-    photo_spots: day.photo_spots.map((spot, index) => ({
+    photo_spots: spots.map((spot, index) => ({
       name: spot.name,
       time_text: PREFERRED_TIME_LABEL[spot.preferred_time],
       image: assets(photoSpotSlotId(dayNumber, index))?.image ?? null,
     })),
 
-    ticket_reminders: day.ticket_reminders.map((reminder) => ({
+    ticket_reminders: tickets.map((reminder) => ({
       entity_name: reminder.entity_name,
       text: reminder.text,
       price_text: priceText(reminder.price),
@@ -201,7 +232,7 @@ export function buildDailyPoster(input: BuildDailyPosterInput): BuildResult {
 
     budget,
 
-    booking_tips: day.booking_tips.map((tip) => ({
+    booking_tips: bookingTips.map((tip) => ({
       text: tip.text,
       category_text: BOOKING_CATEGORY_LABEL[tip.category],
     })),
@@ -212,5 +243,15 @@ export function buildDailyPoster(input: BuildDailyPosterInput): BuildResult {
     icons: moduleIcons(),
   };
 
-  return { viewModel, budgetMismatch };
+  return {
+    viewModel,
+    budgetMismatch,
+    omitted: {
+      schedule: day.schedule.length - schedule.length,
+      food: day.food_recommendations.length - foods.length,
+      photoSpot: day.photo_spots.length - spots.length,
+      ticket: day.ticket_reminders.length - tickets.length,
+      bookingTip: day.booking_tips.length - bookingTips.length,
+    },
+  };
 }

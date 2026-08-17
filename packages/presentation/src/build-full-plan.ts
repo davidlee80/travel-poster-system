@@ -1,5 +1,6 @@
 import type { TemplateId, TravelPlan, TravelPosterViewModel } from '@tps/schemas';
 import { buildDailyPoster, EMPTY_ASSET_LOOKUP, type AssetLookup } from './build-view-model.js';
+import { FULL_PLAN_CONTENT_LIMITS } from './content-limits.js';
 
 /**
  * 完整计划页 ViewModel（TP-1-06，设计稿 3.3.1 的 FULL_PLAN）。
@@ -77,6 +78,15 @@ export function buildFullPlan(input: BuildFullPlanInput): BuildFullPlanResult {
       // 完整页只是把它们串起来
       templateId: 'travel_infographic_v1',
       assets,
+      /*
+       * 3.3.1：完整页不裁剪内容，因此 content_limits 全为 null。
+       *
+       * 副作用是完整页可能出现「有内容但没有图」的条目 —— 第 4 张美食图
+       * 没有对应槽位（槽位按每日限额生成，而 3.3.1 明确完整页
+       * **不新增素材槽位**）。模板对此有占位分支，是可接受的结果：
+       * 内容完整比配图完整重要，而多生成一张图要花真实的钱。
+       */
+      limits: FULL_PLAN_CONTENT_LIMITS,
     }),
   );
 

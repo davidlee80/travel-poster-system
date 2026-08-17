@@ -31,6 +31,17 @@ export {
   type RetrievalSource,
 } from './retrieval.js';
 export {
+  createPresentationsRepository,
+  type BindingRow,
+  type FindPresentationInput,
+  type PageTypeValue,
+  type PresentationDetail,
+  type PresentationsRepository,
+  type SaveBindingInput,
+  type SavePresentationInput,
+  type ValidationStatusValue,
+} from './presentations.js';
+export {
   createTravelPlansRepository,
   decodeCursor,
   encodeCursor,
