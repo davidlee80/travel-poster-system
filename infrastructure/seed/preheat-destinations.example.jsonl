@@ -1,0 +1,28 @@
+# 19.5 Hero 预热的目的地清单（TP-4-05）。每行一个 JSON 对象：
+#
+#   { "place_id": "...", "name": "..." }
+#
+# 用法：
+#   pnpm assets:preheat -- --manifest infrastructure/seed/preheat-destinations.jsonl --dry-run
+#
+# ── place_id 必须与客户端地理编码给出的 ID 完全一致 ──────────────
+#
+# 19.1 要求缓存键的目的地维度优先用 place_id，而这个 ID 由客户端的地理编码
+# 服务给出（V1 的标准化只是原样透传，见 @tps/planning 的 normalize.ts）。
+# 这里编一套自己的 ID，产出的键与真实请求的键**永远不会相同** ——
+# 600 张图全部躺在库里没人命中，而缓存命中率指标会如实显示 0，却看不出原因。
+#
+# 因此本文件是 **example**：下面 6 行的 place_id 只与本仓库的 fixture 对得上
+# （fixture 用 cn_hangzhou），可用于本地打通链路。上线前的那 50 个目的地
+# 必须从真实地理编码源导出，属于数据工作 —— 与 TP-3-06 的种子素材同一性质。
+#
+# 每个目的地会展开成 13 个主题桶（12 个具体桶 + general，见 preheat.ts），
+# 因此 50 个目的地 = 650 个键，略多于 19.5 的 600（general 是必须预热的那一个：
+# 主题短语没命中任何关键词时就落在它上面）。
+
+{ "place_id": "cn_hangzhou", "name": "杭州" }
+{ "place_id": "cn_suzhou", "name": "苏州" }
+{ "place_id": "cn_beijing", "name": "北京" }
+{ "place_id": "cn_xian", "name": "西安" }
+{ "place_id": "cn_chengdu", "name": "成都" }
+{ "place_id": "cn_xiamen", "name": "厦门" }

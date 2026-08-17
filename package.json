@@ -40,7 +40,9 @@
     "fonts:scan": "pnpm --filter @tps/fonts fonts:scan -- --strict",
     "visual:check": "node tools/visual-baseline.mjs check",
     "visual:update": "node tools/visual-baseline.mjs update",
-    "assets:ingest": "pnpm --filter \"@tps/generation-worker...\" run build && node apps/generation-worker/dist/assets/ingest-cli.js"
+    "assets:ingest": "pnpm --filter \"@tps/generation-worker...\" run build && node apps/generation-worker/dist/assets/ingest-cli.js",
+    "//assets:preheat": "19.5 Hero 预热（TP-4-05）。--dry-run 先看键与数量，不花钱。IMAGE_MODE=fake 时产物是渐变图，不可作为上线预热",
+    "assets:preheat": "pnpm --filter \"@tps/generation-worker...\" run build && node apps/generation-worker/dist/assets/preheat-cli.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

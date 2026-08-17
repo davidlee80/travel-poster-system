@@ -57,6 +57,11 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       dryRun = true;
       continue;
     }
+    /*
+     * `pnpm <script> -- --flag` 会把分隔符本身也传进来。忽略它而不是报错 ——
+     * 而 `--flag` 拼错时仍然报错（打错的参数静默不生效才是真问题）。
+     */
+    if (arg === '--') continue;
     if (arg !== undefined && arg.startsWith('--')) {
       throw new Error(`未知参数 ${arg}`);
     }
