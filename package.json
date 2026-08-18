@@ -43,6 +43,8 @@
     "assets:ingest": "pnpm --filter \"@tps/generation-worker...\" run build && node apps/generation-worker/dist/assets/ingest-cli.js",
     "//assets:preheat": "19.5 Hero 预热（TP-4-05）。--dry-run 先看键与数量，不花钱。IMAGE_MODE=fake 时产物是渐变图，不可作为上线预热",
     "assets:preheat": "pnpm --filter \"@tps/generation-worker...\" run build && node apps/generation-worker/dist/assets/preheat-cli.js",
+    "//gate": "TP-5-06：24.1 的 34 项验收门禁报告。--list 只列清单；--only 1,13 只跑指定项。仅 CI 与人工两类不计入退出码，理由逐项写在 tools/acceptance-gates.mjs",
+    "gate": "node tools/gate-report.mjs",
     "//test:acceptance": "TP-5-05 / 门禁 #1：20 个端到端用例（1/3/7/14 天 × 五种约束组合 × 匿名与注册）。需 DATABASE_URL 与 REDIS_URL",
     "test:acceptance": "pnpm --filter \"@tps/generation-worker...\" run build && pnpm --filter @tps/generation-worker exec vitest run acceptance.integration --no-file-parallelism",
     "//test:alerts": "TP-5-04 的门禁：告警规则与指标目录的一致性。拦「表达式引用了不存在的指标」—— 那种告警永远不触发，而 Prometheus 界面显示为正常",
