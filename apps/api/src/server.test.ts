@@ -98,3 +98,40 @@ describe('API 探针', () => {
     expect(res.headers['content-type']).toContain('text/plain');
   });
 });
+
+describe('21.3 的 request_id（TP-5-02）', () => {
+  it('透传 X-Request-Id 请求头', async () => {
+    app = buildServer({ config, logger: silentLogger, shutdown: makeShutdown() });
+
+    /*
+     * 网关或前端给的 ID 必须被沿用，否则同一次请求在网关日志与本服务日志里
+     * 是两个不同的 ID —— 而跨服务追一次请求正是这个字段的用途。
+     */
+    const res = await app.inject({
+      method: 'GET',
+      url: '/healthz',
+      headers: { 'x-request-id': 'gateway-abc-123' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-request-id']).toBe('gateway-abc-123');
+  });
+
+  it('没有请求头时生成的 ID 每次不同（不是递增序号）', async () => {
+    app = buildServer({ config, logger: silentLogger, shutdown: makeShutdown() });
+
+    const first = await app.inject({ method: 'GET', url: '/healthz' });
+    const second = await app.inject({ method: 'GET', url: '/healthz' });
+
+    const a = String(first.headers['x-request-id']);
+    const b = String(second.headers['x-request-id']);
+
+    expect(a).not.toBe(b);
+    /*
+     * 必须是 UUID 而不是 `req-1`：递增序号在多副本下必然重复，
+     * 三个实例各自从 req-1 开始，日志里同一个 request_id 会命中三条
+     * 毫不相关的请求。
+     */
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+});

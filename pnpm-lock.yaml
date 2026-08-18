@@ -463,6 +463,9 @@ importers:
       '@node-rs/argon2':
         specifier: ^2.0.2
         version: 2.0.2
+      '@opentelemetry/api':
+        specifier: ^1.9.0
+        version: 1.9.1
       pino:
         specifier: ^9.13.1
         version: 9.14.0

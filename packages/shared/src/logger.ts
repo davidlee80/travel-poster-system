@@ -1,3 +1,4 @@
+import { trace } from '@opentelemetry/api';
 import pino, { type Logger } from 'pino';
 
 /**
@@ -76,6 +77,35 @@ export interface LoggerOptions {
   readonly destination?: pino.DestinationStream;
 }
 
+/**
+ * 每条日志自动附加的 trace 关联字段（TP-5-02，21.3）。
+ *
+ * ## 为什么内置而不是让调用方传
+ *
+ * 21.3 要求「每条日志携带 trace_id」。让每个服务在建 logger 时自己接上，
+ * 等于把这条要求变成一份需要人记得的约定 —— 而漏掉的表现是「那条链路的
+ * 日志查不到」，只在出事时才会发现。
+ *
+ * `@opentelemetry/api` 在没有装配 SDK 时是零开销的 no-op：`getActiveSpan()`
+ * 返回 undefined，这个 mixin 返回空对象。因此本地开发与单测不受影响，
+ * 而生产一旦装上 SDK（TP-5-03）日志就自动带上关联字段，不用改任何代码。
+ *
+ * 只带 `trace_id` 与 `span_id`：`request_id` 由 Fastify 的请求级子 logger
+ * 提供（见 api 的 buildServer），`job_id` / `user_id` 由 Worker 的
+ * `logger.child()` 提供 —— 两者都有明确的作用域，而 trace 是唯一没有
+ * 天然宿主的那一个。
+ */
+function traceMixin(): Record<string, string> {
+  const span = trace.getActiveSpan();
+  if (span === undefined) return {};
+
+  const context = span.spanContext();
+  // 全零 trace id 表示无效上下文（no-op span），带上它只是噪声
+  if (context.traceId === '00000000000000000000000000000000') return {};
+
+  return { trace_id: context.traceId, span_id: context.spanId };
+}
+
 export function createLogger(options: LoggerOptions): Logger {
   const { service, level = process.env['LOG_LEVEL'] ?? 'info', pretty = false } = options;
 
@@ -84,6 +114,7 @@ export function createLogger(options: LoggerOptions): Logger {
     level,
     // 容器内 TZ=UTC（设计稿 22.3.1），时间戳统一 ISO 8601 UTC
     timestamp: pino.stdTimeFunctions.isoTime,
+    mixin: traceMixin,
     formatters: {
       level: (label) => ({ level: label }),
     },
@@ -111,6 +142,8 @@ export function createAuditLogger(service: string, destination?: pino.Destinatio
     name: `${service}-audit`,
     level: 'info',
     timestamp: pino.stdTimeFunctions.isoTime,
+    // 审计日志同样要能关联到 trace：安全事件的排查起点往往是一条请求链路
+    mixin: traceMixin,
     redact: {
       // 审计日志保留 IP，但凭据与 email 仍然剥离
       paths: REDACT_PATHS.filter((p) => !p.endsWith('created_ip') && !p.endsWith('createdIp')),

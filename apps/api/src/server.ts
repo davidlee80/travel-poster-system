@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { metricsContentType, metricsText } from '@tps/observability';
 import type { GracefulShutdown, Logger, ServiceConfig } from '@tps/shared';
@@ -89,6 +91,47 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     trustProxy: true,
     // 请求体上限：TravelRequestUI 很小，1MB 足够且能挡住误发的大载荷
     bodyLimit: 1_048_576,
+
+    /*
+     * 21.3 要求每条日志携带 `request_id`（TP-5-02）。
+     *
+     * Fastify 默认把它记成 `reqId`，字段名与 21.3 的清单不一致 ——
+     * 而排查时用的是 `grep request_id`，一个不同的名字等于这个字段不存在。
+     */
+    requestIdLogLabel: 'request_id',
+
+    /*
+     * 透传网关/前端给的 `X-Request-Id`。
+     *
+     * 这是跨服务追一次请求的常规手段，而且**它与 trace_id 不重复**：
+     * trace 由 OTel 装配后才有（TP-5-03），且采样率 < 100% 时会缺；
+     * request_id 恒存在，且用户能从错误响应里读到并报给客服。
+     */
+    requestIdHeader: 'x-request-id',
+
+    /*
+     * 没有请求头时生成 UUID，而不是用 Fastify 默认的 `req-1` 递增序号。
+     *
+     * 递增序号在多副本下必然重复：三个 api 实例各自从 req-1 开始，
+     * 日志里 `request_id=req-42` 会同时命中三条毫不相关的请求 ——
+     * 而这个字段的全部用途就是唯一标识一次请求。
+     */
+    genReqId: () => randomUUID(),
+  });
+
+  /*
+   * 把 request_id 回写到响应头（TP-5-02）。
+   *
+   * Fastify 只把它记进日志，不放进响应 —— 而它对用户的价值恰恰在响应里：
+   * 出错时用户能把这个 ID 报给客服，客服据此在日志里定位到那一条请求。
+   * 没有它的话，排查一次用户报障要靠「大概几点、什么目的地」去猜。
+   *
+   * 用 `onRequest` 而不是 `onSend`：错误路径（包括 Fastify 自己产生的
+   * 400/404/500）也要带上它，而 `onSend` 在某些早期错误里不会执行。
+   */
+  app.addHook('onRequest', (request, reply, done) => {
+    reply.header('x-request-id', request.id);
+    done();
   });
 
   /**

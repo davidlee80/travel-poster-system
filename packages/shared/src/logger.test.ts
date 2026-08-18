@@ -128,6 +128,34 @@ describe('二十章：禁记字段', () => {
   });
 });
 
+describe('21.3 的 trace 关联字段（TP-5-02）', () => {
+  it('没有活跃 span 时不产生噪声字段', () => {
+    /*
+     * `@opentelemetry/api` 在无 SDK 时是 no-op：`getActiveSpan()` 返回
+     * undefined。此时不该写 `trace_id: null` 或空串 —— 那会让
+     * `grep 'trace_id'` 匹配到每一条日志，而这个字段的用途正是筛出有链路的那些。
+     *
+     * 真实 span 下的行为需要装配 SDK，在 TP-5-03 的测试里验证。
+     */
+    const line = logOnce({ stage: 'NORMALIZING' });
+    const parsed: Record<string, unknown> = JSON.parse(line);
+
+    expect(parsed).not.toHaveProperty('trace_id');
+    expect(parsed).not.toHaveProperty('span_id');
+    expect(parsed['stage']).toBe('NORMALIZING');
+  });
+
+  it('mixin 不影响调用方显式给出的 trace_id', () => {
+    /*
+     * Worker 侧在没有 SDK 时可能自己带一个（例如从队列消息头读到的）。
+     * pino 的 mixin 优先级低于调用参数，因此显式值胜出 —— 这是我们要的：
+     * 「上游给了链路 ID」比「本进程没有活跃 span」更可信。
+     */
+    const line = logOnce({ trace_id: 'from-queue-header' });
+    expect(line).toContain('from-queue-header');
+  });
+});
+
 describe('安全审计日志（二十章的分流）', () => {
   it('审计通道保留 created_ip', () => {
     const { stream, lines } = capture();

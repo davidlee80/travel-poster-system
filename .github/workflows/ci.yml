@@ -109,6 +109,13 @@ jobs:
       - name: 验证护栏有效性
         run: pnpm verify:linux-guardrails
 
+      # TP-5-02：日志禁记字段。两层 ——
+      #   redact 层（字段名，logger 的单测读实际输出断言）
+      #   message 层（静态扫描，redact 看不见插值进字符串的载荷）
+      # 脚本自带 --self-test，因此这一步同时验证扫描器本身没有静默通过一切。
+      - name: 日志禁记字段（TP-5-02）
+        run: pnpm test:logs
+
   # ── L-09：迁移在真实 pgvector 镜像上执行 ───────────────────
   migrations:
     name: migrations (L-09 pgvector/pgvector:pg17)
