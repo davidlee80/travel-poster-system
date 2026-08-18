@@ -15,7 +15,12 @@
 #   L-07  /dev/shm 设 64MB 时降级路径不崩
 #   L-08  中文视觉基线比对在容器内通过（含门禁 #33 的反向测试）
 #
-# L-10（SIGTERM 优雅退出）依赖队列消费，在 TP-5-12/13 落地时加入本文件。
+#   L-10  SIGTERM 后 30 秒内优雅退出、无悬挂任务（TP-5-13，见 shutdown job）
+#
+# L-10 只能在 Linux 上验证：Windows 没有 POSIX 信号，Node 的
+# child.kill('SIGTERM') 在那里映射到 TerminateProcess —— 进程被强杀，
+# process.on('SIGTERM') 永远不会执行。因此那条测试在本机自动跳过
+# （见 apps/generation-worker/src/shutdown.integration.test.ts）。
 
 name: CI
 
@@ -209,6 +214,132 @@ jobs:
       # 真的会拒绝脏数据 —— 只靠应用层纪律保证鉴权行为是不可接受的。
       - name: 集成测试（数据库约束）
         run: pnpm test:integration
+
+  # ── 门禁 #33 的第二半：基线更新需显式审批（TP-5-07）────────
+  #
+  # CI 里已有的那条反向测试保证「基线必须在容器内生成」。这一条管的是另一件事：
+  # **基线是否该被更新**。
+  #
+  # 视觉回归的失效方式不是「基线错了」，而是「基线被顺手更新了」——
+  # 有人改动模板后看到 visual:check 变红，跑一次 visual:update 让它变绿，
+  # 于是那次真实的视觉回归就被写进了基线，此后永远不会再被发现。
+  #
+  # 因此基线目录的任何变更都要求 PR 上有 `visual-baseline-approved` 标签：
+  # 加标签这个动作让「我确认这次像素变化是有意的」成为一次显式的、留痕的决定。
+  visual-baseline:
+    name: visual baseline (门禁 #33 更新需审批)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # 需要基线分支才能比 diff
+          fetch-depth: 0
+
+      - name: 检查基线变更是否已获批
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'visual-baseline-approved') }}
+        run: |
+          changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- apps/render-worker/__visual__/baseline)
+
+          if [ -z "$changed" ]; then
+            echo '基线未变更，无需审批。'
+            exit 0
+          fi
+
+          echo "本 PR 修改了视觉基线："
+          for file in $changed; do echo "  $file"; done
+
+          if [ "$APPROVED" = 'true' ]; then
+            echo '已带 visual-baseline-approved 标签，放行。'
+            exit 0
+          fi
+
+          echo ''
+          echo '基线变更未获批（门禁 #33）。'
+          echo ''
+          echo '视觉回归的失效方式不是「基线错了」，而是「基线被顺手更新了」——'
+          echo '改动模板后看到 visual:check 变红、跑一次 visual:update 让它变绿，'
+          echo '那次真实的回归就被写进基线，此后永远不会再被发现。'
+          echo ''
+          echo '确认这次像素变化是有意的之后，给本 PR 加上标签：'
+          echo '  visual-baseline-approved'
+          echo ''
+          echo '并在 PR 描述里说明哪里变了、为什么。'
+          exit 1
+
+  # ── L-10 / 门禁 #34：优雅停机（TP-5-13）────────────────────
+  #
+  # 起一个**真实的** generation-worker 子进程、提交一个真实任务、发 SIGTERM，
+  # 断言：30 秒内以 0 退出，且任务不留悬挂状态（终态、或非终态但消息仍在
+  # 队列里可被重新消费）。
+  #
+  # 进程内构造一个 GracefulShutdown 并调用它验证的是那个类的逻辑，
+  # 而那已经有单测。这里要验证的是**装配**：信号监听有没有真的挂上、
+  # 关闭钩子的注册顺序对不对、BullMQ 的 close() 是否真的等在途任务结束 ——
+  # 三件事只有一个真的收到信号的真进程能回答。
+  shutdown:
+    name: shutdown (L-10 SIGTERM 无悬挂任务)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: tps
+          POSTGRES_PASSWORD: tps_ci
+          POSTGRES_DB: travel_poster_ci
+          TZ: UTC
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tps -d travel_poster_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://tps:tps_ci@localhost:5432/travel_poster_ci
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # 子进程跑的是 dist/main.js —— 必须先构建，否则测试会在
+      # 「Worker 启动即退出」上失败，而那个错误信息与停机毫无关系
+      - name: Build
+        run: pnpm --filter "@tps/generation-worker..." run build
+
+      - name: Migrate
+        run: pnpm db:migrate
+
+      - name: L-10 优雅停机（三条）
+        run: pnpm --filter @tps/generation-worker exec vitest run shutdown.integration
 
   # ── L-03：四个镜像在 linux/amd64 构建 ──────────────────────
   images:

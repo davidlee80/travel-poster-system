@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+
 import { trace } from '@opentelemetry/api';
 import pino, { type Logger } from 'pino';
 
@@ -106,6 +108,31 @@ function traceMixin(): Record<string, string> {
   return { trace_id: context.traceId, span_id: context.spanId };
 }
 
+/**
+ * `pino-pretty` 的传输配置，未安装时返回 undefined。
+ *
+ * ## 为什么要探测而不是直接配上
+ *
+ * `pretty: true` 是 `NODE_ENV` 未设时的默认（见各服务的入口），而
+ * `pino-pretty` 是 devDependency —— 生产镜像用 `--prod` 装依赖，那里没有它。
+ * pino 对缺失的 transport target 是**抛错**而不是降级，因此
+ * 「在生产容器里手工设一次 NODE_ENV=development 排查问题」会让进程直接崩，
+ * 而崩溃信息（`unable to determine transport target`）与日志毫无关联。
+ *
+ * 实测中这条路径此前从未工作过：`pino-pretty` 在整个仓库里没有被声明，
+ * 于是任何不设 `NODE_ENV` 的本机启动都会崩在建 logger 这一步。
+ *
+ * 降级到 JSON 输出是安全的选择：可读性变差，但日志仍然完整。
+ */
+function prettyTransport(): { target: string } | undefined {
+  try {
+    createRequire(import.meta.url).resolve('pino-pretty');
+    return { target: 'pino-pretty' };
+  } catch {
+    return undefined;
+  }
+}
+
 export function createLogger(options: LoggerOptions): Logger {
   const { service, level = process.env['LOG_LEVEL'] ?? 'info', pretty = false } = options;
 
@@ -124,7 +151,11 @@ export function createLogger(options: LoggerOptions): Logger {
       remove: false,
     },
     base: { service },
-    ...(pretty ? { transport: { target: 'pino-pretty' } } : {}),
+    ...(() => {
+      if (!pretty) return {};
+      const transport = prettyTransport();
+      return transport === undefined ? {} : { transport };
+    })(),
   };
 
   return options.destination === undefined ? pino(config) : pino(config, options.destination);

@@ -53,6 +53,8 @@
     "test:logs": "node tools/scan-log-payloads.mjs --self-test && node tools/scan-log-payloads.mjs && pnpm --filter @tps/shared exec vitest run logger",
     "//test:retention": "TP-4-21~25 的门禁：保留期清理与知识转存（需 DATABASE_URL）",
     "test:retention": "pnpm --filter @tps/db exec vitest run retention.integration --no-file-parallelism && pnpm --filter @tps/retention-worker exec vitest run purge",
+    "//test:shutdown": "TP-5-13 / L-10 / 门禁 #34：起真实 Worker 子进程发 SIGTERM。仅 Linux（Windows 没有 POSIX 信号，child.kill 映射到 TerminateProcess），其他平台自动跳过",
+    "test:shutdown": "pnpm --filter \"@tps/generation-worker...\" run build && pnpm --filter @tps/generation-worker exec vitest run shutdown.integration",
     "//test:state-machine": "TP-4-08 的门禁：状态机转移边、取消与重试分类",
     "test:state-machine": "pnpm --filter @tps/schemas exec vitest run job-status error-codes && pnpm --filter @tps/generation-worker exec vitest run generate-plan job-deadline retry-policy"
   },
@@ -62,6 +64,7 @@
     "eslint": "^9.39.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.11.0",
+    "pino-pretty": "^13.1.2",
     "pixelmatch": "^7.2.0",
     "pngjs": "^7.0.0",
     "prettier": "^3.6.2",

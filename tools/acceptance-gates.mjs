@@ -22,6 +22,13 @@
  *
  * `manual` 不是「做不到」的借口，而是**边界的声明**：把一项需要真实图片模型
  * 的命中率统计伪装成自动测试，只会让门禁报告说谎。
+ *
+ * ## 一处需要注意的「通过」
+ *
+ * #34（优雅停机）在本机报「通过」，但那条测试在 Windows / macOS 上是
+ * **跳过**的 —— vitest 对跳过的文件退出码为 0。真正执行它的是 CI 的
+ * shutdown job。这个不对称没法在这里消除（工具无法判断一个命令内部是否
+ * 跳过了测试），因此写在这里与那一项的 `why` 里。
  */
 
 /**
@@ -302,8 +309,9 @@ export const GATES = [
     title: '优雅停机（生成中任务收 SIGTERM 后不留悬挂状态）',
     ref: '24.1 #34、22.3.3',
     kind: 'command',
-    run: 'pnpm --filter @tps/shared exec vitest run shutdown && pnpm test:state-machine',
-    why: '关闭顺序与超时由 shutdown 单测覆盖；「重启后任务可被重新消费或明确失败」由状态机门禁覆盖（非终态任务会被重新消费，终态任务被 13.8 的检查挡住）。真实 SIGTERM 的端到端是 L-10，在 CI',
+    run: 'pnpm test:shutdown',
+    why: '端到端测试起真实 Worker 子进程并发 SIGTERM。**在 Windows / macOS 上自动跳过**（那里没有 POSIX 信号，child.kill 映射到 TerminateProcess），因此本机看到的是「通过」但实际跳过 —— 真正执行它的是 CI 的 shutdown job（L-10）',
+    needsDb: true,
   },
 ];
 
