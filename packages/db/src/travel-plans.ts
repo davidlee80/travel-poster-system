@@ -64,6 +64,22 @@ export interface JobDetail {
   readonly message: string | null;
   readonly errorCode: string | null;
   readonly warnings: unknown;
+  /**
+   * T1/T2 里程碑时刻（21.2 措施一）。
+   *
+   * ## 为什么要出现在读路径上
+   *
+   * 21.2 的原文是「客户端据此提前展示，而不是等 `status === 'COMPLETED'`」——
+   * 也就是说这两列的**目标消费者是客户端**。R-34 补了列、P5 接了指标，
+   * 但两者都在服务端：客户端读不到，那句「据此」就没有对象。
+   *
+   * 与 `status` 的分工：`status` 说「现在在哪个阶段」，里程碑说
+   * 「哪些东西已经可以看了」。前端可以只看 status（P2 就是这么做的），
+   * 但那要求它记住「`SAVING_PLAN` 及之后计划可读」这条映射 ——
+   * 而那条映射属于服务端的状态机，不该复制到客户端。
+   */
+  readonly t1At: Date | null;
+  readonly t2At: Date | null;
 }
 
 /** 13.9.5 列表项。**刻意不含 `retrieval_projection`**（二十章 L2、TP-2-30） */
@@ -474,8 +490,10 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
         message: string | null;
         error_code: string | null;
         warnings: unknown;
+        t1_at: Date | null;
+        t2_at: Date | null;
       }>(
-        `SELECT id, plan_id, status, progress, message, error_code, warnings
+        `SELECT id, plan_id, status, progress, message, error_code, warnings, t1_at, t2_at
            FROM generation_jobs
           WHERE id = $1 AND user_id = $2`,
         [jobId, userId],
@@ -492,6 +510,8 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
         message: row.message,
         errorCode: row.error_code,
         warnings: row.warnings,
+        t1At: row.t1_at,
+        t2At: row.t2_at,
       };
     },
 

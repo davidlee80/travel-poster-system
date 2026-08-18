@@ -224,6 +224,13 @@ class FakePlansRepository implements TravelPlansRepository {
       message: job.message,
       errorCode: job.errorCode,
       warnings: [],
+      /*
+       * 里程碑按状态推断（21.2）：真实实现里它们是两个由 Worker 写入的时刻，
+       * 而假仓储没有 Worker —— 用状态映射出等价的结果。
+       * `SAVING_PLAN` 及之后计划可读、`RESOLVING_ASSETS` 之后页面可看。
+       */
+      t1At: T1_REACHED.has(job.status) ? new Date('2026-04-01T10:00:30Z') : null,
+      t2At: T2_REACHED.has(job.status) ? new Date('2026-04-01T10:01:20Z') : null,
     });
   }
 
@@ -305,6 +312,19 @@ let harness: Harness | null = null;
  */
 const NOW = new Date('2026-04-01T10:00:00Z');
 const now = (): Date => NOW;
+
+/** T1 达成后的状态（21.2：`SAVING_PLAN` 完成即 13.3 可读） */
+const T1_REACHED = new Set([
+  'SAVING_PLAN',
+  'BUILDING_PRESENTATION',
+  'RESOLVING_ASSETS',
+  'GENERATING_ASSETS',
+  'RENDERING_HTML',
+  'COMPLETED',
+]);
+
+/** T2 达成后的状态（13.4 可读） */
+const T2_REACHED = new Set(['RENDERING_HTML', 'COMPLETED']);
 
 function build(
   lock: IdempotencyLock = new InMemoryIdempotencyLock(),
@@ -1384,5 +1404,68 @@ describe('TP-5-10 灰度开关', () => {
       payload: body(),
     });
     expect(response.statusCode).toBe(201);
+  });
+});
+
+describe('13.2 的里程碑字段（21.2 措施一）', () => {
+  /** 提交一个任务，返回 cookie 与 job_id */
+  async function submitted(): Promise<{ cookie: string; jobId: string }> {
+    const cookie = await anonymousCookie();
+    const created = await h().app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
+      payload: body(),
+    });
+    return { cookie, jobId: created.json<{ job_id: string }>().job_id };
+  }
+
+  function milestonesOf(response: { json: <T>() => T }): unknown {
+    return response.json<{ milestones: unknown }>().milestones;
+  }
+
+  it('T1 未达成时两个里程碑都是 false', async () => {
+    const { cookie, jobId } = await submitted();
+
+    const response = await h().app.inject({
+      method: 'GET',
+      url: `/api/v1/generation-jobs/${jobId}`,
+      headers: { cookie },
+    });
+
+    expect(milestonesOf(response)).toEqual({ plan_readable: false, page_viewable: false });
+  });
+
+  it('SAVING_PLAN 之后 plan_readable 为真（13.3 已可读）', async () => {
+    const { cookie, jobId } = await submitted();
+    const job = h().repository.jobs.get(jobId)!;
+    h().repository.jobs.set(jobId, { ...job, status: 'SAVING_PLAN', progress: 60 });
+
+    const response = await h().app.inject({
+      method: 'GET',
+      url: `/api/v1/generation-jobs/${jobId}`,
+      headers: { cookie },
+    });
+
+    /*
+     * 21.2 的原文是「客户端据此提前展示，而不是等 status === 'COMPLETED'」。
+     * 这两个布尔就是那个「据此」的对象 —— 在 P5 之前它们只存在于数据库与
+     * 指标里，客户端读不到，于是那句「据此」没有对象。
+     */
+    expect(milestonesOf(response)).toEqual({ plan_readable: true, page_viewable: false });
+  });
+
+  it('COMPLETED 时 page_viewable 也为真（13.4 已可读）', async () => {
+    const { cookie, jobId } = await submitted();
+    const job = h().repository.jobs.get(jobId)!;
+    h().repository.jobs.set(jobId, { ...job, status: 'COMPLETED', progress: 100 });
+
+    const response = await h().app.inject({
+      method: 'GET',
+      url: `/api/v1/generation-jobs/${jobId}`,
+      headers: { cookie },
+    });
+
+    expect(milestonesOf(response)).toEqual({ plan_readable: true, page_viewable: true });
   });
 });

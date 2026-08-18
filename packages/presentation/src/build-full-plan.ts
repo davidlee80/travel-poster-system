@@ -1,4 +1,4 @@
-import type { TemplateId, TravelPlan, TravelPosterViewModel } from '@tps/schemas';
+import type { FullPlanViewModelShape, TemplateId, TravelPlan } from '@tps/schemas';
 import { buildDailyPoster, EMPTY_ASSET_LOOKUP, type AssetLookup } from './build-view-model.js';
 import { FULL_PLAN_CONTENT_LIMITS } from './content-limits.js';
 
@@ -16,31 +16,18 @@ import { FULL_PLAN_CONTENT_LIMITS } from './content-limits.js';
  * 契约，不为完整页单独裁剪字段。
  */
 
-export interface FullPlanViewModel {
-  readonly schema_version: TravelPosterViewModel['schema_version'];
-  readonly template_id: TemplateId;
-  readonly page_type: 'FULL_PLAN';
-  readonly plan_id: string;
-  readonly plan_version_id: string;
-  /** FULL_PLAN 必须为 null（3.3.1，数据库同名约束） */
-  readonly day_number: null;
-
-  readonly overview: {
-    readonly title: string;
-    readonly summary: string;
-    readonly destination: string;
-    readonly total_days: number;
-    readonly date_range_text: string;
-    readonly traveler_text: string;
-    readonly total_budget_text: string;
-    readonly per_person_text: string;
-  };
-
-  /** 各日 ViewModel，按 day_number 升序 */
-  readonly days: readonly TravelPosterViewModel[];
-
-  readonly icons: TravelPosterViewModel['icons'];
-}
+/**
+ * 完整计划页的 ViewModel。
+ *
+ * 类型由 `FullPlanViewModelSchema` 推导（V1.6）—— 此前这里是一份手写的
+ * interface，而 13.4 的 `/presentations/full` 响应因此无法被校验：
+ * 服务端存进去什么、客户端就得信什么。而落库的 ViewModel 是历史数据，
+ * 模板契约改版后库里还留着旧结构。
+ *
+ * `readonly` 由 schema 侧的推导带不出来，因此这里再包一层 —— 编排阶段
+ * 构造它时不该有人往 `days` 里 push。
+ */
+export type FullPlanViewModel = FullPlanViewModelShape;
 
 export interface BuildFullPlanInput {
   readonly plan: TravelPlan;

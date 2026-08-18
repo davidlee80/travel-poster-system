@@ -155,6 +155,47 @@ export interface JobStatusResponse {
   readonly progress: number;
   readonly message: string;
   readonly error_code?: string;
+  /** 13.7 的非阻断告警码。任务仍会 COMPLETED，只是某些素材走了降级 */
+  readonly warnings?: readonly string[];
+  /**
+   * 21.2 措施一的两个里程碑。
+   *
+   * 可选是为了兼容老服务端（这两个字段在 P5 之后才有）——
+   * 缺失时前端退回按 `status` 判断，与 P2 的行为一致。
+   */
+  readonly milestones?: {
+    readonly plan_readable: boolean;
+    readonly page_viewable: boolean;
+  };
+}
+
+/** 13.5 / 13.6 的导出任务。字段名与 `ExportDetailSchema` 一致 */
+export interface ExportResponse {
+  readonly export_id: string;
+  readonly status: 'QUEUED' | 'RENDERING' | 'COMPLETED' | 'PARTIAL' | 'FAILED';
+  readonly format: 'PNG' | 'PDF';
+  readonly scope: 'ALL_DAYS' | 'SINGLE_DAY' | 'FULL_PLAN';
+  readonly progress: number;
+  readonly files: readonly {
+    readonly format: 'PNG' | 'PDF';
+    /** `ALL_DAYS` 的 PNG 每天一项；PDF 合并为一个文件，此处为 null */
+    readonly day_number: number | null;
+    readonly url: string;
+    readonly byte_size: number;
+    readonly expires_at: string;
+  }[];
+  readonly error: { readonly code: string; readonly message: string } | null;
+}
+
+/** 13.4 的展示数据。`view_model` 由调用方用 schema 解析 */
+export interface PresentationResponse {
+  readonly plan_id: string;
+  readonly plan_version_id: string;
+  readonly template_id: string;
+  readonly page_type: 'DAILY_POSTER' | 'FULL_PLAN';
+  readonly day_number: number | null;
+  readonly validation_status: 'VALID' | 'DEGRADED' | 'INVALID';
+  readonly view_model: unknown;
 }
 
 export interface PlanListItem {
@@ -203,6 +244,74 @@ export function getJobStatus(jobId: string): Promise<ApiResult<JobStatusResponse
  */
 export function getPlan(planId: string): Promise<ApiResult<unknown>> {
   return request<unknown>(`/api/v1/travel-plans/${encodeURIComponent(planId)}`, { method: 'GET' });
+}
+
+/**
+ * 13.4 获取带图的展示数据（完整页，一次返回全部天数）。
+ *
+ * ## 与 13.3 的分工
+ *
+ * 13.3 返回 `plan_json` —— 纯行程数据，**不含素材**。前端拿它只能现场
+ * 构建一个无图的 ViewModel（`buildFullPlan({ plan })` 的 assets 缺省为空）。
+ *
+ * 13.4 返回的是**落库的 ViewModel**：Hero 背景、景点与美食配图、路线图 SVG
+ * 都已经解析并绑定好（P3/P4 的产物）。这条才是设计稿 1.1「信息图」的数据源。
+ *
+ * 编排未完成时返回 404 —— 那是**正常的时序**（16.1 的 BUILDING_PRESENTATION
+ * 在 SAVING_PLAN 之后），调用方据此退回 13.3 的文字版并稍后重试。
+ */
+export function getFullPresentation(planId: string): Promise<ApiResult<PresentationResponse>> {
+  return request<PresentationResponse>(
+    `/api/v1/travel-plans/${encodeURIComponent(planId)}/presentations/full`,
+    { method: 'GET' },
+  );
+}
+
+/** 13.4 获取某一天的信息图展示数据 */
+export function getDayPresentation(
+  planId: string,
+  dayNumber: number,
+): Promise<ApiResult<PresentationResponse>> {
+  return request<PresentationResponse>(
+    `/api/v1/travel-plans/${encodeURIComponent(planId)}/presentations/${String(dayNumber)}`,
+    { method: 'GET' },
+  );
+}
+
+/**
+ * 13.5 发起导出。
+ *
+ * `plan_version_id` 显式传入是刻意的：用户在「查看计划」页面点导出，
+ * 而此刻计划刚好被重新生成时，他要的是**屏幕上那一版**。
+ * 不带这个字段的话服务端会取当前版本，用户拿到一份内容与他看到的不同的 PDF
+ * （13.7 的 `EXPORT_PLAN_VERSION_MISMATCH` 就是为这种情况准备的）。
+ */
+export function createExport(
+  planId: string,
+  body: {
+    readonly format: 'PNG' | 'PDF';
+    readonly template_id: string;
+    readonly scope: 'ALL_DAYS' | 'SINGLE_DAY' | 'FULL_PLAN';
+    readonly day_numbers: readonly number[] | null;
+    readonly plan_version_id?: string;
+  },
+): Promise<ApiResult<ExportResponse>> {
+  return request<ExportResponse>(`/api/v1/travel-plans/${encodeURIComponent(planId)}/exports`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * 13.6 查询导出状态。轮询用。
+ *
+ * 每次调用服务端都会**重新签名** URL（13.6）—— 因此拿到的链接总是新鲜的，
+ * 前端不需要自己判断 7 天有没有过期。
+ */
+export function getExport(exportId: string): Promise<ApiResult<ExportResponse>> {
+  return request<ExportResponse>(`/api/v1/exports/${encodeURIComponent(exportId)}`, {
+    method: 'GET',
+  });
 }
 
 /** 13.9.5 计划列表。 */

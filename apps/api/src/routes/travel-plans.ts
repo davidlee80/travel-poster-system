@@ -344,6 +344,20 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
          * 「部分配图使用了默认样式」，而不是让用户对着一张占位图困惑。
          */
         warnings: Array.isArray(job.warnings) ? job.warnings : [],
+        /*
+         * 21.2 措施一的两个里程碑（R-34 补的列，此前只被指标消费）。
+         *
+         * `milestones.plan_readable` 为真 ⇒ 13.3 已能读到完整文字版计划；
+         * `page_viewable` 为真 ⇒ 13.4 已能读到带图的展示数据。
+         *
+         * 用布尔而不是时刻：客户端要的是「现在能看什么」，
+         * 而时刻只对 SLA 统计有意义 —— 给它两个 ISO 字符串会让每个前端
+         * 各自写一遍「非 null 即达成」的判断，而那正是服务端该给的结论。
+         */
+        milestones: {
+          plan_readable: job.t1At !== null,
+          page_viewable: job.t2At !== null,
+        },
       });
     },
   );

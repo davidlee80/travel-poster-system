@@ -238,3 +238,55 @@ export const TravelPosterViewModelSchema = z
   });
 
 export type TravelPosterViewModel = z.infer<typeof TravelPosterViewModelSchema>;
+
+/**
+ * 完整计划页的 ViewModel（3.3.1 的 `FULL_PLAN`）。
+ *
+ * ## 为什么它需要自己的 schema
+ *
+ * `FULL_PLAN` 落库的不是 `TravelPosterViewModel` 而是「概览 + 各日 ViewModel
+ * 的集合」（见 @tps/presentation 的 `buildFullPlan`）。在 P5 之前它只有一个
+ * TypeScript interface —— 于是 13.4 的 `/presentations/full` 响应**无法被校验**：
+ * 服务端存进去什么、客户端就得信什么。
+ *
+ * 而客户端恰恰不能信：落库的 ViewModel 是**历史数据**，模板契约改版后库里
+ * 还留着旧结构。没有 schema 的话，那种不匹配会在渲染中途抛
+ * `undefined is not an object`，整页白屏，而离根因已经很远。
+ *
+ * 定义在 schemas 而不是 presentation：13.4 的响应契约属于 API 层，
+ * 而 presentation 是它的一个消费方（另一个是前端）。
+ */
+export const FullPlanViewModelSchema = z.object({
+  schema_version: z.literal(SCHEMA_VERSIONS.travelPosterViewModel),
+  template_id: TemplateIdSchema,
+  page_type: z.literal('FULL_PLAN'),
+  plan_id: NonEmptyStringSchema,
+  plan_version_id: NonEmptyStringSchema,
+  /** FULL_PLAN 恒为 null（3.3.1，数据库同名约束） */
+  day_number: z.null(),
+
+  overview: z.object({
+    title: NonEmptyStringSchema,
+    summary: z.string(),
+    destination: NonEmptyStringSchema,
+    total_days: z.number().int().positive(),
+    date_range_text: z.string(),
+    traveler_text: z.string(),
+    total_budget_text: z.string(),
+    per_person_text: z.string(),
+  }),
+
+  /**
+   * 各日 ViewModel，按 `day_number` 升序。
+   *
+   * 不校验「升序」与「天数与 overview.total_days 一致」：那两条由编排阶段
+   * 保证（`buildFullPlan` 按顺序构造），而在读路径上把它们做成硬失败会让
+   * 一份内容完好、只是某天缺失的历史计划完全无法显示 ——
+   * 而用户要的是看他的行程。
+   */
+  days: z.array(TravelPosterViewModelSchema),
+
+  icons: ModuleIconsSchema,
+});
+
+export type FullPlanViewModelShape = z.infer<typeof FullPlanViewModelSchema>;

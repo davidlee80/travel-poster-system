@@ -22,7 +22,11 @@ import {
   createQueueRedis,
   createRedis,
 } from '@tps/queue';
-import { TravelPlanSchema, findForbiddenProjectionKeys } from '@tps/schemas';
+import {
+  FullPlanViewModelSchema,
+  TravelPlanSchema,
+  findForbiddenProjectionKeys,
+} from '@tps/schemas';
 import {
   COOKIE_NAMES,
   GracefulShutdown,
@@ -433,6 +437,23 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     expect(fullBody.day_number).toBeNull();
     expect(fullBody.view_model.days).toHaveLength(5);
     expect(fullBody.view_model.overview.total_days).toBe(5);
+
+    /*
+     * 落库的 FULL_PLAN ViewModel 必须能被 `FullPlanViewModelSchema` 解析。
+     *
+     * 这是用户可见页面的**唯一**数据来源（V1.6 起 `/plans/{planId}` 优先读
+     * 13.4）。解析失败时那个页面会静默退回 13.3 的无图文字版 ——
+     * 用户看不到任何配图，而没有任何东西会报错：13.4 返回 200、
+     * 编排也确实跑完了，只是前端拿到的结构与它期望的不一致。
+     *
+     * 在 P5 之前 FULL_PLAN 根本没有 schema（只有一个 TS interface），
+     * 因此这条断言在那时无法写出来。
+     */
+    const fullViewModel = FullPlanViewModelSchema.safeParse(fullBody.view_model);
+    expect(
+      fullViewModel.success,
+      `FULL_PLAN 的 ViewModel 不满足契约：${JSON.stringify(fullViewModel.error?.issues.slice(0, 3))}`,
+    ).toBe(true);
 
     // 越界天号 404（13.0：不存在的页面与不属于你的页面同一个码）
     const outOfRange = await app.inject({

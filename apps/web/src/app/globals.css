@@ -405,3 +405,92 @@ body {
   font-size: 15px;
   color: #4a4a4a;
 }
+
+/*
+ * 页面级提示条（配图准备中、部分配图降级）。
+ *
+ * 放在信息图**上方**而不是浮在页面上：它要能被截图带走。用户把页面转给同伴
+ * 时，「部分配图使用了默认样式」这句说明应当跟着一起过去 ——
+ * 否则对方会以为是我们的产品质量问题。
+ */
+.plan-page__notice {
+  max-width: 1200px;
+  margin: 12px auto 0;
+  padding: 10px 16px;
+  border-radius: 6px;
+  background: #fff8e6;
+  border: 1px solid #f0d9a0;
+  color: #6b5320;
+  font-size: 14px;
+}
+
+/* ── 导出面板（13.5 / 13.6）───────────────────────────────── */
+
+.export-panel {
+  max-width: 1200px;
+  margin: 24px auto 64px;
+  padding: 20px 24px;
+  border-top: 1px solid #e5e5e5;
+}
+
+.export-panel__title {
+  margin: 0 0 12px;
+  font-size: 17px;
+  /* 只用已发布的字重（TP-1-04 发了 400 / 500 / 700）—— 600 会回退到合成加粗 */
+  font-weight: 500;
+}
+
+.export-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.export-panel__actions button {
+  padding: 8px 16px;
+  border: 1px solid #c8c8c8;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.export-panel__actions button:disabled {
+  /* 导出进行中：按钮变灰而不是消失 —— 消失会让布局跳动 */
+  opacity: 0.5;
+  cursor: default;
+}
+
+.export-panel__day {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+}
+
+.export-panel__status,
+.export-panel__error,
+.export-panel__result {
+  margin: 12px 0 0;
+  font-size: 14px;
+}
+
+.export-panel__error {
+  color: #8a2b1f;
+}
+
+.export-panel__result ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.export-panel__size {
+  color: #6a6a6a;
+}
+
+.export-panel__hint {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #6a6a6a;
+}
