@@ -42,7 +42,11 @@
     "visual:update": "node tools/visual-baseline.mjs update",
     "assets:ingest": "pnpm --filter \"@tps/generation-worker...\" run build && node apps/generation-worker/dist/assets/ingest-cli.js",
     "//assets:preheat": "19.5 Hero 预热（TP-4-05）。--dry-run 先看键与数量，不花钱。IMAGE_MODE=fake 时产物是渐变图，不可作为上线预热",
-    "assets:preheat": "pnpm --filter \"@tps/generation-worker...\" run build && node apps/generation-worker/dist/assets/preheat-cli.js"
+    "assets:preheat": "pnpm --filter \"@tps/generation-worker...\" run build && node apps/generation-worker/dist/assets/preheat-cli.js",
+    "//test:retention": "TP-4-21~25 的门禁：保留期清理与知识转存（需 DATABASE_URL）",
+    "test:retention": "pnpm --filter @tps/db exec vitest run retention.integration --no-file-parallelism && pnpm --filter @tps/retention-worker exec vitest run purge",
+    "//test:state-machine": "TP-4-08 的门禁：状态机转移边、取消与重试分类",
+    "test:state-machine": "pnpm --filter @tps/schemas exec vitest run job-status error-codes && pnpm --filter @tps/generation-worker exec vitest run generate-plan job-deadline retry-policy"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

@@ -31,6 +31,12 @@ export {
   type RetrievalSource,
 } from './retrieval.js';
 export {
+  createRetentionRepository,
+  type ExpiredAnonymousUser,
+  type PurgeUserResult,
+  type RetentionRepository,
+} from './retention.js';
+export {
   createExportsRepository,
   type CreateExportInput,
   type ExportRow,
