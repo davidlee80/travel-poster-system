@@ -5,13 +5,20 @@ import {
   createPresentationsRepository,
   loadDbConfig,
 } from '@tps/db';
-import { metricsContentType, metricsText, registerDefaultMetrics } from '@tps/observability';
+import {
+  metricsContentType,
+  metricsText,
+  registerDefaultMetrics,
+  loadTracingConfig,
+  startTracing,
+} from '@tps/observability';
 import {
   EXPORT_QUEUE_NAME,
   ExportJobPayloadSchema,
   RedisDeadLetterQueue,
   createQueueRedis,
   createRedis,
+  withRestoredTrace,
 } from '@tps/queue';
 import { optionalString, requireString, runWorker } from '@tps/shared';
 import { S3ExportStorage, loadExportsStorageConfig } from '@tps/storage';
@@ -67,6 +74,8 @@ await runWorker({
   serviceName: SERVICE_NAME,
   probePort: 3012,
   metrics: async () => ({ contentType: metricsContentType, body: await metricsText() }),
+  // TP-5-03：未配置 OTEL_EXPORTER_OTLP_ENDPOINT 时返回 null，全程 no-op
+  tracing: () => startTracing(loadTracingConfig(SERVICE_NAME)),
 
   start: async (handle) => {
     const { browser, devShm } = await launchBrowser();
@@ -79,66 +88,74 @@ await runWorker({
       EXPORT_QUEUE_NAME,
       async (job) => {
         const payload = ExportJobPayloadSchema.parse(job.data);
-        const startedAt = Date.now();
-        const outcome = await runExport(
-          {
-            exports: exportsRepository,
-            presentations,
-            storage,
-            browser,
-            baseUrl: renderBaseUrl,
-            signingKey,
-            logger: handle.logger,
-          },
-          payload.exportId,
-        );
 
         /*
-         * 21.3 要求 `travel_export_total` 带 format / scope（验收标准 10 要
-         * 按格式读成功率），R-13 再加身份维度。`skipped` 没有这些信息，
-         * 用 `none` 占位 —— 理由见 export-metrics.ts。
+         * 在 api 侧那次导出请求的 trace 里继续（TP-5-03，21.3）。
+         * 21.3 要求链路覆盖到 Playwright 与对象存储 —— 而这两段都在
+         * `runExport` 里面，因此包在它外层。
          */
-        exportTotal.inc(
-          outcome.kind === 'skipped'
-            ? {
-                format: EXPORT_LABEL_NONE,
-                scope: EXPORT_LABEL_NONE,
-                outcome: outcome.kind,
-                user_type: EXPORT_LABEL_NONE,
-              }
-            : {
-                format: outcome.format,
-                scope: outcome.scope,
-                outcome: outcome.kind,
-                user_type: outcome.userType,
-              },
-        );
-        /*
-         * 耗时只对真的跑过渲染的结局记录：`skipped` 的耗时是一次数据库查询，
-         * 混进直方图会把 P95 拉低到毫秒级，而 21.2 的目标是按「渲染了」算的。
-         */
-        if (outcome.kind !== 'skipped') {
-          exportDuration.observe(
-            { format: outcome.format, scope: outcome.scope, outcome: outcome.kind },
-            (Date.now() - startedAt) / 1000,
+        return withRestoredTrace(payload.traceContext, async () => {
+          const startedAt = Date.now();
+          const outcome = await runExport(
+            {
+              exports: exportsRepository,
+              presentations,
+              storage,
+              browser,
+              baseUrl: renderBaseUrl,
+              signingKey,
+              logger: handle.logger,
+            },
+            payload.exportId,
           );
-        }
 
-        /*
-         * 16.3：导出失败**非阻断**（重试 1 次后跳过，记 warnings）。
-         * 但队列层仍要知道这次失败了 —— 否则第一次失败就被当成成功，
-         * 那次重试机会白白浪费。`exports` 行此刻已经是 FAILED 且带错误码，
-         * 用户能看到明确结果；重试成功后状态会被推回 COMPLETED。
-         */
-        if (outcome.kind === 'failed') throw new Error(outcome.errorCode);
+          /*
+           * 21.3 要求 `travel_export_total` 带 format / scope（验收标准 10 要
+           * 按格式读成功率），R-13 再加身份维度。`skipped` 没有这些信息，
+           * 用 `none` 占位 —— 理由见 export-metrics.ts。
+           */
+          exportTotal.inc(
+            outcome.kind === 'skipped'
+              ? {
+                  format: EXPORT_LABEL_NONE,
+                  scope: EXPORT_LABEL_NONE,
+                  outcome: outcome.kind,
+                  user_type: EXPORT_LABEL_NONE,
+                }
+              : {
+                  format: outcome.format,
+                  scope: outcome.scope,
+                  outcome: outcome.kind,
+                  user_type: outcome.userType,
+                },
+          );
+          /*
+           * 耗时只对真的跑过渲染的结局记录：`skipped` 的耗时是一次数据库查询，
+           * 混进直方图会把 P95 拉低到毫秒级，而 21.2 的目标是按「渲染了」算的。
+           */
+          if (outcome.kind !== 'skipped') {
+            exportDuration.observe(
+              { format: outcome.format, scope: outcome.scope, outcome: outcome.kind },
+              (Date.now() - startedAt) / 1000,
+            );
+          }
 
-        /*
-         * `not_queued` 说明另一个消费者已经在处理（或已完成）。
-         * 用 UnrecoverableError 结束：重试只会再撞一次同样的状态检查。
-         */
-        if (outcome.kind === 'skipped' && outcome.reason === 'not_queued') {
-          throw new UnrecoverableError('EXPORT_ALREADY_PROCESSING');
-        }
+          /*
+           * 16.3：导出失败**非阻断**（重试 1 次后跳过，记 warnings）。
+           * 但队列层仍要知道这次失败了 —— 否则第一次失败就被当成成功，
+           * 那次重试机会白白浪费。`exports` 行此刻已经是 FAILED 且带错误码，
+           * 用户能看到明确结果；重试成功后状态会被推回 COMPLETED。
+           */
+          if (outcome.kind === 'failed') throw new Error(outcome.errorCode);
+
+          /*
+           * `not_queued` 说明另一个消费者已经在处理（或已完成）。
+           * 用 UnrecoverableError 结束：重试只会再撞一次同样的状态检查。
+           */
+          if (outcome.kind === 'skipped' && outcome.reason === 'not_queued') {
+            throw new UnrecoverableError('EXPORT_ALREADY_PROCESSING');
+          }
+        });
       },
       {
         connection: queueRedis,

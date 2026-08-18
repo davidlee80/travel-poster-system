@@ -1,4 +1,4 @@
-import type { PlanQueue } from '@tps/queue';
+import { captureTraceContext, type PlanQueue } from '@tps/queue';
 import { prepareTravelRequest } from '@tps/planning';
 import {
   IDEMPOTENCY_LOCK_TTL_SECONDS,
@@ -256,6 +256,20 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
       requestId: handles.requestId,
       planId: handles.planId,
       userId: resolved.identity.userId,
+      /*
+       * 21.3：trace context 随消息透传（TP-5-03）。
+       *
+       * 不带的话链路在这一行断开 —— 而用户等待的大头全在入队之后
+       * （排队 + 生成 + 素材 + 渲染）。api 侧的 span 只覆盖这几十毫秒，
+       * 排查「为什么等了两分钟」时看到的是「40 毫秒完成」。
+       *
+       * 未装配 OTel SDK 时 `captureTraceContext()` 返回 undefined，
+       * 该字段不出现在消息里。
+       */
+      ...(() => {
+        const traceContext = captureTraceContext();
+        return traceContext === undefined ? {} : { traceContext };
+      })(),
     });
 
     return reply.code(201).send({

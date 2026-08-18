@@ -34,3 +34,12 @@ export {
 } from './metrics.js';
 
 export { SpanStatusCode, currentTraceId, tracer, withSpan, type Span } from './tracing.js';
+
+export {
+  isTracingActive,
+  loadTracingConfig,
+  shutdownTracing,
+  startTracing,
+  type TracingConfig,
+  type TracingHandle,
+} from './otel-sdk.js';

@@ -2,6 +2,8 @@ import { Queue, type JobsOptions } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
 
+import { TraceCarrierSchema } from './trace-context.js';
+
 /**
  * 导出任务队列（TP-4-12，设计稿 13.5、22.1）。
  *
@@ -27,6 +29,8 @@ export const EXPORT_QUEUE_NAME = 'travel-plan-export';
 
 export const ExportJobPayloadSchema = z.object({
   exportId: z.string().min(1),
+  /** W3C Trace Context（TP-5-03）。理由同 plan-queue.ts */
+  traceContext: TraceCarrierSchema.optional(),
 });
 
 export type ExportJobPayload = z.infer<typeof ExportJobPayloadSchema>;

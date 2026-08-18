@@ -15,7 +15,13 @@ import {
   loadImageConfig,
   loadLlmConfig,
 } from '@tps/llm';
-import { metricsContentType, metricsText, registerDefaultMetrics } from '@tps/observability';
+import {
+  metricsContentType,
+  metricsText,
+  registerDefaultMetrics,
+  loadTracingConfig,
+  startTracing,
+} from '@tps/observability';
 import {
   DEFAULT_JOB_OPTIONS,
   GenerationJobPayloadSchema,
@@ -26,6 +32,7 @@ import {
   RedisJobLock,
   createQueueRedis,
   createRedis,
+  withRestoredTrace,
 } from '@tps/queue';
 import { S3ObjectStorage, loadAssetsStorageConfig } from '@tps/storage';
 import { loadQuotaConfig, optionalInt, quotaFor, requireString, runWorker } from '@tps/shared';
@@ -90,6 +97,8 @@ await runWorker({
   serviceName: SERVICE_NAME,
   probePort: 3011,
   metrics: async () => ({ contentType: metricsContentType, body: await metricsText() }),
+  // TP-5-03：未配置 OTEL_EXPORTER_OTLP_ENDPOINT 时返回 null，全程 no-op
+  tracing: () => startTracing(loadTracingConfig(SERVICE_NAME)),
 
   start: (handle) => {
     handle.logger.info(
@@ -108,72 +117,84 @@ await runWorker({
         const payload = GenerationJobPayloadSchema.parse(job.data);
 
         /*
-         * 13.8：同一 job_id 只允许一个消费者。抢不到锁说明另一个实例正在
-         * 处理 —— 直接返回而不是等待，等待会占住 BullMQ 的并发槽位。
+         * 在 api 侧那次请求的 trace 里继续（TP-5-03，21.3）。
+         *
+         * `withRestoredTrace` 之内产生的每个 span（数据库、Redis、模型调用）
+         * 都挂在同一个 trace 下，日志也自动带上同一个 `trace_id`
+         * （见 @tps/shared 的 logger mixin）。未装配 SDK 时它只是直接执行 fn。
+         *
+         * 包在最外层而不是只包 `generatePlan`：锁的获取与失败分类同样属于
+         * 这次消费，而「为什么这条消息被跳过了」是排查时的常见问题。
          */
-        if (!(await jobLock.acquire(payload.jobId))) {
-          handle.logger.warn({ job_id: payload.jobId }, '任务已被其他实例持有，跳过');
-          return;
-        }
+        return withRestoredTrace(payload.traceContext, async () => {
+          /*
+           * 13.8：同一 job_id 只允许一个消费者。抢不到锁说明另一个实例正在
+           * 处理 —— 直接返回而不是等待，等待会占住 BullMQ 的并发槽位。
+           */
+          if (!(await jobLock.acquire(payload.jobId))) {
+            handle.logger.warn({ job_id: payload.jobId }, '任务已被其他实例持有，跳过');
+            return;
+          }
 
-        try {
-          const outcome = await generatePlan(
-            {
-              plans,
-              retrieval: { repository: retrievalRepository, embedding },
-              llm,
-              embedding,
-              logger: handle.logger,
-              llmTimeoutMs: llmConfig.timeoutMs,
-              presentation: {
-                assets: assetsRepository,
-                presentations: presentationsRepository,
-                storage,
+          try {
+            const outcome = await generatePlan(
+              {
+                plans,
+                retrieval: { repository: retrievalRepository, embedding },
+                llm,
                 embedding,
-              },
-              /*
-               * 每任务一个预算实例（21.4 的 3 张图与 21.2 的 2 次 Hero 都是
-               * 单任务计数），额度上限按身份取（匿名的 AI Hero 为 0，TP-4-17）。
-               */
-              aiAssets: (userType) => ({
-                image,
-                assetLock,
-                imageTimeoutMs: imageConfig.timeoutMs,
-                userTypeLabel: userType,
-                budget: new AiImageBudget({
-                  counters,
-                  userType,
-                  heroQuota: quotaFor(quotaConfig, userType).aiHero,
-                  dailyBudget: aiDailyBudget,
+                logger: handle.logger,
+                llmTimeoutMs: llmConfig.timeoutMs,
+                presentation: {
+                  assets: assetsRepository,
+                  presentations: presentationsRepository,
+                  storage,
+                  embedding,
+                },
+                /*
+                 * 每任务一个预算实例（21.4 的 3 张图与 21.2 的 2 次 Hero 都是
+                 * 单任务计数），额度上限按身份取（匿名的 AI Hero 为 0，TP-4-17）。
+                 */
+                aiAssets: (userType) => ({
+                  image,
+                  assetLock,
+                  imageTimeoutMs: imageConfig.timeoutMs,
+                  userTypeLabel: userType,
+                  budget: new AiImageBudget({
+                    counters,
+                    userType,
+                    heroQuota: quotaFor(quotaConfig, userType).aiHero,
+                    dailyBudget: aiDailyBudget,
+                  }),
                 }),
-              }),
-            },
-            payload,
-          );
+              },
+              payload,
+            );
 
-          /*
-           * 13.7 第四层：不可重试的失败以 `UnrecoverableError` 结束消费 ——
-           * BullMQ 见到它就不再重试，`attempts` 不被消耗。
-           *
-           * 抛错而不是静默返回，是因为 BullMQ 只按「消费函数是否抛错」判定
-           * 成败：静默返回会让一个失败的任务在队列里显示为成功，
-           * 而排查时「任务失败了但队列说成功」是最难定位的一类不一致。
-           */
-          if (outcome.outcome === 'failed' && isUnrecoverable(outcome.errorCode)) {
-            throw new UnrecoverableError(outcome.errorCode);
-          }
+            /*
+             * 13.7 第四层：不可重试的失败以 `UnrecoverableError` 结束消费 ——
+             * BullMQ 见到它就不再重试，`attempts` 不被消耗。
+             *
+             * 抛错而不是静默返回，是因为 BullMQ 只按「消费函数是否抛错」判定
+             * 成败：静默返回会让一个失败的任务在队列里显示为成功，
+             * 而排查时「任务失败了但队列说成功」是最难定位的一类不一致。
+             */
+            if (outcome.outcome === 'failed' && isUnrecoverable(outcome.errorCode)) {
+              throw new UnrecoverableError(outcome.errorCode);
+            }
 
-          /*
-           * 可重试的失败照常抛错，交给队列退避重试（13.7 第三层）。
-           * 任务状态已经是 FAILED 且带错误码 —— 用户此刻能看到明确的失败，
-           * 而重试成功后状态会被推回去。
-           */
-          if (outcome.outcome === 'failed') {
-            throw new Error(outcome.errorCode);
+            /*
+             * 可重试的失败照常抛错，交给队列退避重试（13.7 第三层）。
+             * 任务状态已经是 FAILED 且带错误码 —— 用户此刻能看到明确的失败，
+             * 而重试成功后状态会被推回去。
+             */
+            if (outcome.outcome === 'failed') {
+              throw new Error(outcome.errorCode);
+            }
+          } finally {
+            await jobLock.release(payload.jobId);
           }
-        } finally {
-          await jobLock.release(payload.jobId);
-        }
+        });
       },
       {
         connection: queueRedis,

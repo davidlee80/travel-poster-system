@@ -1,5 +1,11 @@
 import { checkDatabase, createPool, createRetentionRepository, loadDbConfig } from '@tps/db';
-import { metricsContentType, metricsText, registerDefaultMetrics } from '@tps/observability';
+import {
+  metricsContentType,
+  metricsText,
+  registerDefaultMetrics,
+  loadTracingConfig,
+  startTracing,
+} from '@tps/observability';
 import { optionalInt, runWorker } from '@tps/shared';
 
 import { PURGE_BATCH_SIZE, PURGE_GRACE_DAYS, runPurgeRound } from './purge.js';
@@ -56,6 +62,8 @@ await runWorker({
   serviceName: SERVICE_NAME,
   probePort: 3013,
   metrics: async () => ({ contentType: metricsContentType, body: await metricsText() }),
+  // TP-5-03：未配置 OTEL_EXPORTER_OTLP_ENDPOINT 时返回 null，全程 no-op
+  tracing: () => startTracing(loadTracingConfig(SERVICE_NAME)),
 
   start: (handle) => {
     handle.logger.info(

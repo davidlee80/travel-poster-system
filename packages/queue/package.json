@@ -21,6 +21,7 @@
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
     "@tps/schemas": "workspace:*",
     "@tps/shared": "workspace:*",
     "bullmq": "^5.65.0",
@@ -28,6 +29,8 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@opentelemetry/sdk-trace-base": "^2.2.0",
+    "@opentelemetry/sdk-trace-node": "^2.2.0",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"

@@ -2,6 +2,8 @@ import { Queue, type JobsOptions } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
 
+import { TraceCarrierSchema } from './trace-context.js';
+
 /**
  * 生成任务队列（TP-2-09，设计稿 13.1、22.1）。
  *
@@ -22,6 +24,17 @@ export const GenerationJobPayloadSchema = z.object({
   requestId: z.string().min(1),
   planId: z.string().min(1),
   userId: z.string().min(1),
+  /**
+   * W3C Trace Context（TP-5-03，21.3）。
+   *
+   * 这是上面那条「只放标识符」原则的**唯一例外**，而它不触犯那三条理由中的
+   * 任何一条：55 字节的随机关联 ID，不含个人数据，也不是任何东西的快照。
+   * 而 BullMQ 没有别的通道 —— `job.data` 就是消息体本身。
+   *
+   * 可选：未装配 OTel SDK 时不产生这个字段（见 captureTraceContext）。
+   * 老消息（本字段引入之前入队的）也因此仍能被消费。
+   */
+  traceContext: TraceCarrierSchema.optional(),
 });
 
 export type GenerationJobPayload = z.infer<typeof GenerationJobPayloadSchema>;

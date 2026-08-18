@@ -35,6 +35,17 @@ export interface WorkerDefinition {
   readonly checkDependencies?: () => Promise<{ ok: boolean; detail: Record<string, boolean> }>;
   /** 指标文本提供者。由调用方注入以避免 shared 依赖 observability（会形成循环）。 */
   readonly metrics?: () => Promise<{ contentType: string; body: string }>;
+  /**
+   * Trace 装配（TP-5-03）。返回 null 表示未配置端点，全程 no-op。
+   *
+   * 与 `metrics` 同一处理：由调用方注入而不是本包直接 import
+   * `@tps/observability` —— 后者的 devDependencies 里有 `@tps/shared`，
+   * 直接依赖会形成循环。
+   *
+   * 在 `start` **之前**调用：instrumentation 挂钩的是模块调用，
+   * 而 `start` 里就会建数据库连接池与 Redis 连接。
+   */
+  readonly tracing?: () => { shutdown: () => Promise<void> } | null;
 }
 
 function startProbeServer(definition: WorkerDefinition, handle: WorkerHandle): Server {
@@ -92,6 +103,10 @@ function startProbeServer(definition: WorkerDefinition, handle: WorkerHandle): S
 }
 
 export async function runWorker(definition: WorkerDefinition): Promise<void> {
+  // 最先装配 trace，最后关闭它（hook 逆序执行）——
+  // 不 flush 会丢掉停机前那一批 span，而滚动更新期间的问题就出在那里
+  const tracing = definition.tracing?.() ?? null;
+
   const config = loadServiceConfig(definition.serviceName, definition.probePort);
   const logger = createLogger({
     service: definition.serviceName,
@@ -100,6 +115,10 @@ export async function runWorker(definition: WorkerDefinition): Promise<void> {
   });
 
   const shutdown = new GracefulShutdown({ logger, timeoutMs: config.shutdownTimeoutMs }).listen();
+
+  if (tracing !== null) {
+    shutdown.register('tracing', () => tracing.shutdown());
+  }
 
   const handle: WorkerHandle = {
     logger,

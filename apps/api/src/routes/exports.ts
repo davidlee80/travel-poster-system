@@ -6,7 +6,7 @@ import {
   type ExportsRepository,
   type TravelPlansRepository,
 } from '@tps/db';
-import type { ExportQueue } from '@tps/queue';
+import { captureTraceContext, type ExportQueue } from '@tps/queue';
 import {
   CreateExportRequestSchema,
   EXPORT_PROGRESS,
@@ -231,7 +231,12 @@ export function registerExportRoutes(app: FastifyInstance, deps: ExportRoutesDep
         return reply.code(200).send({ export_id: raced.exportId, status: raced.status });
       }
 
-      await queue.enqueue({ exportId: created.exportId });
+      const traceContext = captureTraceContext();
+      // TP-5-03：理由同 13.1 的入队点
+      await queue.enqueue({
+        exportId: created.exportId,
+        ...(traceContext === undefined ? {} : { traceContext }),
+      });
 
       return reply.code(201).send({ export_id: created.exportId, status: created.status });
     },

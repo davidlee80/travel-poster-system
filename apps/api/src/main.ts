@@ -9,7 +9,7 @@ import {
   optionalString,
   requireString,
 } from '@tps/shared';
-import { registerDefaultMetrics } from '@tps/observability';
+import { loadTracingConfig, registerDefaultMetrics, startTracing } from '@tps/observability';
 import {
   checkDatabase,
   createExportsRepository,
@@ -35,6 +35,16 @@ import { buildServer } from './server.js';
 const SERVICE_NAME = 'tps-api';
 
 async function main(): Promise<void> {
+  /*
+   * Trace 装配必须在**任何被 instrument 的模块被使用之前**（TP-5-03）。
+   *
+   * OTel 靠改写模块导出实现自动埋点，而 `pg` / `ioredis` / `http` 在这里
+   * 已经被 import（ESM 的 import 提升到模块顶部）—— 但 instrumentation 挂钩的是
+   * **调用**而不是 import，因此在建连接池之前 start 就足够。
+   * 未配置 OTEL_EXPORTER_OTLP_ENDPOINT 时返回 null，全程保持 no-op。
+   */
+  const tracing = startTracing(loadTracingConfig(SERVICE_NAME));
+
   const config = loadServiceConfig(SERVICE_NAME, 3001);
   const logger = createLogger({
     service: SERVICE_NAME,
@@ -52,6 +62,15 @@ async function main(): Promise<void> {
     logger,
     timeoutMs: config.shutdownTimeoutMs,
   }).listen();
+
+  /*
+   * 最先注册 ⇒ 最后关闭（hook 按逆序执行）。
+   * 不 flush 会丢掉最后一批 span —— 而那一批恰好是停机前那几个请求，
+   * 滚动更新期间的问题就出在那里。
+   */
+  if (tracing !== null) {
+    shutdown.register('tracing', () => tracing.shutdown());
+  }
 
   const pool = createPool(loadDbConfig());
   // 先注册基础设施：关闭时它会最后被停，保证上层组件仍能用连接收尾

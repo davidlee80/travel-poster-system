@@ -57,3 +57,12 @@ export {
   type GenerationJobPayload,
   type PlanQueue,
 } from './plan-queue.js';
+
+export {
+  TraceCarrierSchema,
+  captureTraceContext,
+  restoreTraceContext,
+  traceIdFromCarrier,
+  withRestoredTrace,
+  type TraceCarrier,
+} from './trace-context.js';
