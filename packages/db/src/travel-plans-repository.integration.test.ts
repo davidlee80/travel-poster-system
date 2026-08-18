@@ -280,6 +280,162 @@ describeIntegration('计划仓储（集成，需 PostgreSQL）', () => {
     });
   });
 
+  describe('markMilestone（21.2、R-41）', () => {
+    it('T1 ≤ T2 由 SQL 保证，即使数据库时钟被回拨', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('ms1')));
+
+      await repository.markMilestone(handles.jobId, 't1');
+      /*
+       * 把 t1_at 手工设到未来，模拟「写 T1 之后数据库时钟被 NTP 回拨」。
+       * 本机实测中容器时钟被拉回过 1.6 秒，而两个里程碑都用裸 `NOW()` 时，
+       * 结果就是 `t1_at > t2_at` —— SLA 统计里那个任务的 T2 成了负数。
+       */
+      await pool.query(
+        `UPDATE generation_jobs SET t1_at = NOW() + INTERVAL '5 seconds'
+                         WHERE id = $1`,
+        [handles.jobId],
+      );
+      await repository.markMilestone(handles.jobId, 't2');
+
+      const { rows } = await pool.query<{ t1_at: Date; t2_at: Date }>(
+        'SELECT t1_at, t2_at FROM generation_jobs WHERE id = $1',
+        [handles.jobId],
+      );
+      expect(rows[0]!.t1_at.getTime()).toBeLessThanOrEqual(rows[0]!.t2_at.getTime());
+    });
+
+    it('重复写入不覆盖首次时刻', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('ms2')));
+
+      await repository.markMilestone(handles.jobId, 't1');
+      const first = await pool.query<{ t1_at: Date }>(
+        'SELECT t1_at FROM generation_jobs WHERE id = $1',
+        [handles.jobId],
+      );
+      await repository.markMilestone(handles.jobId, 't1');
+      const second = await pool.query<{ t1_at: Date }>(
+        'SELECT t1_at FROM generation_jobs WHERE id = $1',
+        [handles.jobId],
+      );
+
+      /*
+       * 覆盖的后果是 SLA 统计里那个任务的 T1 变成「重试成功的时刻」，
+       * 而用户真正等到计划可读的时间是第一次。
+       */
+      expect(second.rows[0]!.t1_at.getTime()).toBe(first.rows[0]!.t1_at.getTime());
+    });
+
+    it('T1 从未写过时，T2 退化为 NOW()（GREATEST 忽略 NULL）', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('ms3')));
+
+      await repository.markMilestone(handles.jobId, 't2');
+
+      const { rows } = await pool.query<{ t1_at: Date | null; t2_at: Date | null }>(
+        'SELECT t1_at, t2_at FROM generation_jobs WHERE id = $1',
+        [handles.jobId],
+      );
+      expect(rows[0]!.t1_at).toBeNull();
+      expect(rows[0]!.t2_at).not.toBeNull();
+    });
+  });
+
+  describe('stage_timings（十五章、TP-5-01）', () => {
+    it('多次推进逐步累积各阶段耗时，同名键被后写的覆盖', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('timing1')));
+
+      await repository.updateJobState({
+        jobId: handles.jobId,
+        to: 'NORMALIZING',
+        progress: 5,
+        message: '正在解析你的需求',
+        stageTimings: { QUEUED: 120 },
+      });
+      await repository.updateJobState({
+        jobId: handles.jobId,
+        to: 'GENERATING_PLAN',
+        progress: 20,
+        message: '正在生成旅行计划',
+        stageTimings: { NORMALIZING: 340 },
+      });
+      // 回边会让同一阶段被写第二次（3.2.2 的修复循环）
+      await repository.updateJobState({
+        jobId: handles.jobId,
+        to: 'VALIDATING_PLAN',
+        progress: 45,
+        message: '正在校验计划',
+        stageTimings: { NORMALIZING: 999, GENERATING_PLAN: 8_100 },
+      });
+
+      const { rows } = await pool.query<{ stage_timings: Record<string, number> }>(
+        'SELECT stage_timings FROM generation_jobs WHERE id = $1',
+        [handles.jobId],
+      );
+      expect(rows[0]!.stage_timings).toEqual({
+        QUEUED: 120,
+        // 后写的覆盖先写的 —— 库里存最后一次，指标里每次都有观测
+        NORMALIZING: 999,
+        GENERATING_PLAN: 8_100,
+      });
+    });
+
+    it('不传 stageTimings 时已积累的耗时不被清空', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('timing2')));
+
+      await repository.updateJobState({
+        jobId: handles.jobId,
+        to: 'SAVING_PLAN',
+        progress: 60,
+        message: '正在保存计划',
+        stageTimings: { GENERATING_PLAN: 7_000 },
+      });
+      /*
+       * 关键：`jsonb || NULL` 的结果是 NULL。缺省值必须是 `'{}'` 而不是 null，
+       * 否则任何一次不带耗时的推进（取消、或 P2 时期的老路径）都会把
+       * 已积累的全部耗时清掉 —— 而那不会有任何症状，只是排查时那一列是空的。
+       */
+      await repository.updateJobState({
+        jobId: handles.jobId,
+        to: 'RESOLVING_ASSETS',
+        progress: 80,
+        message: '正在匹配图片素材',
+      });
+
+      const { rows } = await pool.query<{ stage_timings: Record<string, number> }>(
+        'SELECT stage_timings FROM generation_jobs WHERE id = $1',
+        [handles.jobId],
+      );
+      expect(rows[0]!.stage_timings).toEqual({ GENERATING_PLAN: 7_000 });
+    });
+
+    it('写入终态时仍能带上耗时（total 只有那一次机会落库）', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('timing3')));
+
+      await repository.updateJobState({
+        jobId: handles.jobId,
+        to: 'COMPLETED',
+        progress: 100,
+        message: '生成完成',
+        stageTimings: { RENDERING_HTML: 40, total: 61_200 },
+      });
+
+      const { rows } = await pool.query<{ stage_timings: Record<string, number> }>(
+        'SELECT stage_timings FROM generation_jobs WHERE id = $1',
+        [handles.jobId],
+      );
+      /*
+       * SQL 的非终态谓词判的是**当前**状态，因此写入终态本身是允许的 ——
+       * 这一点让 `total` 能搭最后一次 UPDATE 落库。之后就再也写不进去了。
+       */
+      expect(rows[0]!.stage_timings).toEqual({ RENDERING_HTML: 40, total: 61_200 });
+    });
+  });
+
   describe('cancelJob（16.1、TP-4-08）', () => {
     it('非终态任务转 CANCELLED，且 progress 保持当前值（16.2）', async () => {
       const userId = await anonymousUser();
@@ -439,19 +595,32 @@ describeIntegration('计划仓储（集成，需 PostgreSQL）', () => {
     });
   });
 
-  describe('findJobQueuedAt（16.3 队列超时）', () => {
-    it('返回 generation_jobs.created_at', async () => {
+  describe('findJobQueueTiming（16.3 队列超时、R-40）', () => {
+    it('返回入队时刻与由数据库算出的已排队时长', async () => {
       const userId = await anonymousUser();
       const handles = await repository.createGeneration(generationInput(userId, key('queued')));
 
-      const queuedAt = await repository.findJobQueuedAt(handles.jobId);
-      expect(queuedAt).toBeInstanceOf(Date);
+      const timing = await repository.findJobQueueTiming(handles.jobId);
+      expect(timing).not.toBeNull();
+      expect(timing!.createdAt).toBeInstanceOf(Date);
       // 入队与建行在同一事务，因此它就是入队时刻
-      expect(Date.now() - queuedAt!.getTime()).toBeLessThan(60_000);
+      expect(Date.now() - timing!.createdAt.getTime()).toBeLessThan(60_000);
+
+      /*
+       * 刚建的行，排队时长必然是个很小的非负数。
+       *
+       * **非负是关键**：这个值由数据库用自己的时钟算（`NOW() - created_at`），
+       * 因此不受宿主与数据库之间时钟偏差的影响。改回进程侧相减的话，
+       * 宿主时钟稍慢就会得到负数 —— 而那正是 R-40 修的问题。
+       */
+      expect(timing!.queuedForMs).toBeGreaterThanOrEqual(0);
+      expect(timing!.queuedForMs).toBeLessThan(60_000);
     });
 
     it('任务不存在时返回 null', async () => {
-      expect(await repository.findJobQueuedAt('00000000-0000-4000-8000-000000000000')).toBeNull();
+      expect(
+        await repository.findJobQueueTiming('00000000-0000-4000-8000-000000000000'),
+      ).toBeNull();
     });
   });
 

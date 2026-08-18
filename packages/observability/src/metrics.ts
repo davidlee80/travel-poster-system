@@ -79,10 +79,26 @@ interface MetricSpec<T extends readonly string[]> {
   readonly labelNames?: LabelNames<T>;
 }
 
+/**
+ * 本进程已注册的指标及其标签集。
+ *
+ * prom-client 的 `getMetricsAsJSON()` 只给出**已有样本**的标签值，
+ * 拿不到声明的 `labelNames` —— 而一个刚注册、还没 inc 过的 Counter 在那里
+ * 是一条空 values 的记录。因此「注册了哪些标签」必须由我们自己的工厂记下来，
+ * 否则 TP-5-01 的目录比对只能在指标有数据之后才生效，而那时漂移已经上线了。
+ */
+const registeredLabels = new Map<string, readonly string[]>();
+
 function validate(name: string, labelNames: readonly string[] | undefined): string[] {
   const labels = [...(labelNames ?? [])];
   assertAllowedLabels(name, labels);
+  registeredLabels.set(name, labels);
   return labels;
+}
+
+/** 本进程注册的指标清单，供 21.3 目录比对（见 catalog.ts 的 detectCatalogDrift） */
+export function registeredMetrics(): readonly { name: string; labels: readonly string[] }[] {
+  return [...registeredLabels].map(([name, labels]) => ({ name, labels }));
 }
 
 export function createCounter<const T extends readonly string[]>(

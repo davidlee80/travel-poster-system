@@ -31,6 +31,8 @@ export const ALLOWED_LABELS = [
   // LLM 与校验
   'model',
   'purpose',
+  // 输入 / 输出两个取值。两者单价不同，合成一个计数无法核算成本（21.4）
+  'direction',
   'rule_id',
   'severity',
 

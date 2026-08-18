@@ -59,19 +59,24 @@ describe('任务预算', () => {
 
 describe('队列等待', () => {
   it('600 秒以内放行', () => {
-    const createdAt = new Date('2026-08-17T10:00:00Z');
-    const now = createdAt.getTime() + 599_000;
-    expect(queueWaitExceeded(createdAt, now)).toBe(false);
+    expect(queueWaitExceeded(599_000)).toBe(false);
   });
 
   it('超过 600 秒判超时', () => {
-    const createdAt = new Date('2026-08-17T10:00:00Z');
-    const now = createdAt.getTime() + 601_000;
-    expect(queueWaitExceeded(createdAt, now)).toBe(true);
+    expect(queueWaitExceeded(601_000)).toBe(true);
   });
 
   it('恰好 600 秒不算超时（边界取「超过」）', () => {
-    const createdAt = new Date('2026-08-17T10:00:00Z');
-    expect(queueWaitExceeded(createdAt, createdAt.getTime() + QUEUE_TIMEOUT_MS)).toBe(false);
+    expect(queueWaitExceeded(QUEUE_TIMEOUT_MS)).toBe(false);
+  });
+
+  it('参数是已排队时长，不是入队时刻（R-40）', () => {
+    /*
+     * 这条断言钉住的是签名本身。改回「入队时刻 + 现在」的形式就意味着
+     * 又在拿数据库时钟减进程时钟 —— 而那个减法在 stage_timings 上
+     * 已经算出过负数。
+     */
+    expect(queueWaitExceeded(0)).toBe(false);
+    expect(queueWaitExceeded(Number.MAX_SAFE_INTEGER)).toBe(true);
   });
 });

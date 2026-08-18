@@ -37,6 +37,39 @@ export const jobMilestoneSeconds = createHistogram({
 });
 
 /**
+ * 21.3 的 `travel_job_duration_seconds`（TP-5-01）。
+ *
+ * 与 `generation_jobs.stage_timings` 同源 —— 同一个 `StageTimer` 既观测这里
+ * 又写库（见 stage-timer.ts）。`stage` 的取值是 `JobStatus` 全集加一个
+ * `total`（聚合项）。
+ *
+ * 与 `travel_job_milestone_seconds` 的分工：里程碑指标回答「用户等了多久
+ * 才看到东西」（T1/T2 两个用户可感知的点），这个指标回答「时间花在哪个
+ * 阶段」。前者用于 SLA 告警，后者用于优化时定位瓶颈 —— 合成一个指标的话，
+ * 任何一个用途都要靠猜。
+ */
+export const jobDurationSeconds = createHistogram({
+  name: 'travel_job_duration_seconds',
+  help: '生成任务各阶段耗时（stage=total 为整体）',
+  labelNames: ['stage', 'total_days_bucket', 'outcome'],
+  buckets: [...SLA_BUCKETS],
+});
+
+/**
+ * 21.3 的 `travel_job_total`：成功率与错误分布。
+ *
+ * `error_code` 在成功时取 `none` 而不是省略标签：Prometheus 没有「标签缺失」
+ * 的概念，省略会产出一条标签值为空串的序列，而空串在 PromQL 里既不等于
+ * 任何具体值也不好过滤（`error_code!=""` 才能排除，很容易写错）。
+ * 显式的 `none` 让「成功的任务」在查询里是一个可读的条件。
+ */
+export const jobTotal = createCounter({
+  name: 'travel_job_total',
+  help: '生成任务终局计数（按状态、错误码、身份类型）',
+  labelNames: ['status', 'error_code', 'user_type'],
+});
+
+/**
  * 天数分档。与 21.2 的两档目标一致（≤7 天 / 8～14 天）。
  *
  * 用字符串而不是数字：标签值必须是有界小集合（21.3），

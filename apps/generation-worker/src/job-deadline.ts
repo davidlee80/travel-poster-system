@@ -64,13 +64,15 @@ export function createJobDeadline(
  * 而生成它要花掉一次 LLM 调用的钱。先失败掉，让用户重新提交时拿到一个
  * 排在队首的新任务。
  *
- * `createdAt` 取 `generation_jobs.created_at`（入队与建行在同一事务，
- * 见 `createGeneration`），因此它就是入队时刻。
+ * ## 参数是「已排队多久」而不是「入队时刻」（R-40）
+ *
+ * 入队时刻来自数据库时钟（`generation_jobs.created_at`），而 Worker 只有
+ * 自己的 `Date.now()`。两者相减是跨时钟比较：偏差几秒时判定就会偏几秒，
+ * 而在 600 秒的阈值上这不致命 —— 致命的是同一个减法也被用来算
+ * `stage_timings.total` 与 T1/T2 里程碑，那里实测出现过**负数**。
+ *
+ * 因此排队时长统一由数据库算（`findJobQueueTiming`），这里只做比较。
  */
-export function queueWaitExceeded(
-  createdAt: Date,
-  now: number = Date.now(),
-  limitMs = QUEUE_TIMEOUT_MS,
-): boolean {
-  return now - createdAt.getTime() > limitMs;
+export function queueWaitExceeded(queuedForMs: number, limitMs = QUEUE_TIMEOUT_MS): boolean {
+  return queuedForMs > limitMs;
 }

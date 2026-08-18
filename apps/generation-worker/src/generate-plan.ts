@@ -42,9 +42,11 @@ import {
   queueWaitExceeded,
   type JobDeadline,
 } from './job-deadline.js';
+import { recordLlmCall } from './llm-metrics.js';
 import {
   createPlanValidationObserver,
   jobMilestoneSeconds,
+  jobTotal,
   totalDaysBucket,
 } from './plan-metrics.js';
 import {
@@ -52,6 +54,7 @@ import {
   type BuildPresentationDeps,
 } from './presentation/build-presentation.js';
 import { retrieveReferences, type RetrievalDeps } from './retrieval.js';
+import { StageTimer } from './stage-timer.js';
 
 /**
  * 生成任务的编排（TP-2-14，设计稿 3.2、16.1）。
@@ -163,7 +166,11 @@ async function advance(
   deps: GeneratePlanDeps,
   jobId: string,
   to: JobStatus,
-  extra: { readonly errorCode?: string; readonly planVersionId?: string } = {},
+  extra: {
+    readonly errorCode?: string;
+    readonly planVersionId?: string;
+    readonly stageTimings?: Readonly<Record<string, number>>;
+  } = {},
 ): Promise<boolean> {
   const display = JOB_STAGE_DISPLAY[to];
   return deps.plans.updateJobState({
@@ -179,10 +186,20 @@ async function advance(
   });
 }
 
+/**
+ * 写入 `FAILED` 并结算指标（TP-5-01）。
+ *
+ * `finalize` 由调用方给出（`StageTimer.finish` 的结果与身份维度）——
+ * 队列超时那一条分支发生在计时器建立之前，因此它是可选的。
+ */
 async function fail(
   deps: GeneratePlanDeps,
   jobId: string,
   errorCode: JobFailureCode,
+  finalize: {
+    readonly stageTimings?: Readonly<Record<string, number>>;
+    readonly userType: UserType;
+  },
   planVersionId?: string,
 ): Promise<GenerateOutcome> {
   await deps.plans.updateJobState({
@@ -193,7 +210,9 @@ async function fail(
     message: stageMessage('FAILED'),
     errorCode,
     ...(planVersionId === undefined ? {} : { planVersionId }),
+    ...(finalize.stageTimings === undefined ? {} : { stageTimings: finalize.stageTimings }),
   });
+  jobTotal.inc({ status: 'FAILED', error_code: errorCode, user_type: finalize.userType });
   return { outcome: 'failed', errorCode };
 }
 
@@ -220,13 +239,44 @@ async function callModel(
   const timeoutMs = deadline.remainingFor(deps.llmTimeoutMs);
   if (timeoutMs <= 0) throw new LlmTimeoutError(0);
 
-  const result = await llm.complete({
-    system: messages.system,
-    user: messages.user,
-    jsonSchema: { name: 'travel_plan', schema: travelPlanLlmOutputJsonSchema },
-    maxTokens,
+  /*
+   * 墙钟而不是 `deps.now`：后者在测试里是一个每次调用跳 400 秒的假时钟
+   * （用于验证 300 秒预算），拿它算耗时会把 `travel_llm_duration_seconds`
+   * 的样本全写成 400 秒。这个指标度量的是真实的外部调用延迟。
+   */
+  const startedAt = Date.now();
+  let result;
+  try {
+    result = await llm.complete({
+      system: messages.system,
+      user: messages.user,
+      jsonSchema: { name: 'travel_plan', schema: travelPlanLlmOutputJsonSchema },
+      maxTokens,
+      purpose,
+      timeoutMs,
+    });
+  } catch (error) {
+    recordLlmCall({
+      model: llm.model,
+      purpose,
+      outcome: error instanceof LlmTimeoutError ? 'timeout' : 'failed',
+      durationMs: Date.now() - startedAt,
+    });
+    throw error;
+  }
+
+  /*
+   * token 在 schema 校验**之前**记：那次调用的钱已经花了。
+   * 只在解析成功后计数会让「模型一直输出不合规内容」这类最烧钱的故障
+   * 在成本报表上完全不可见。
+   */
+  recordLlmCall({
+    model: llm.model,
     purpose,
-    timeoutMs,
+    outcome: 'succeeded',
+    durationMs: Date.now() - startedAt,
+    inputTokens: result.usage.inputTokens,
+    outputTokens: result.usage.outputTokens,
   });
 
   const parsed = TravelPlanLlmOutputSchema.safeParse(result.data);
@@ -317,47 +367,101 @@ export async function generatePlan(
   const now = deps.now ?? Date.now;
 
   /*
+   * 标准化结果在这里解析一次，供两处使用：`total_days` 分档（指标维度）与
+   * 下面 NORMALIZING 阶段的形状校验。解析两次没有坏处但也没有意义 ——
+   * 而分档必须在队列超时判定之前拿到，因为那条分支也要记 `travel_job_total`。
+   */
+  const normalizedParsed = NormalizedTravelRequestSchema.safeParse(context.normalizedRequest);
+  const daysBucket = normalizedParsed.success
+    ? totalDaysBucket(normalizedParsed.data.total_days)
+    : /*
+       * 库里的标准化结果形状不对时没有可信的天数。用 `unknown` 而不是猜一个
+       * 分档：把它算进 `1-7` 会污染那一档的 SLA 分位数，而这类任务本来就
+       * 不该出现在 SLA 统计里。
+       */
+      'unknown';
+
+  /*
    * 16.3：队列等待上限 600 秒。判定放在消费的第一件事 ——
    * 等了 11 分钟的任务，用户早已离开页面，而生成它仍要花掉一次模型调用的钱。
    */
-  const queuedAt = await deps.plans.findJobQueuedAt(context.jobId);
-  if (queuedAt !== null && queueWaitExceeded(queuedAt, now())) {
+  const queueTiming = await deps.plans.findJobQueueTiming(context.jobId);
+  if (queueTiming !== null && queueWaitExceeded(queueTiming.queuedForMs)) {
     log.warn(
       { stage: 'QUEUED', error_code: 'JOB_QUEUE_TIMEOUT' },
-      `任务排队超过上限（入队于 ${queuedAt.toISOString()}）`,
+      `任务排队超过上限（入队于 ${queueTiming.createdAt.toISOString()}，` +
+        `已等待 ${Math.round(queueTiming.queuedForMs / 1000)} 秒）`,
     );
-    return fail(deps, context.jobId, 'JOB_QUEUE_TIMEOUT');
+    return fail(deps, context.jobId, 'JOB_QUEUE_TIMEOUT', { userType: context.userType });
   }
 
   /*
    * 里程碑的计时起点是**入队时刻**而不是开始消费的时刻（21.2）。
    * T1 的定义是「提交 → SAVING_PLAN 完成」，用户从点下按钮就开始等 ——
    * 排队那段时间同样是他的等待。用消费起点算会让队列积压时 SLA 看起来完好。
+   *
+   * 排队那段的长度由**数据库**算（R-40）：`created_at` 是数据库时钟的值，
+   * 拿它跟进程的 `Date.now()` 相减是跨时钟比较 —— 实测中这让总耗时算出了
+   * 负数。因此这里只做加法：数据库给的排队时长 + 进程内经过的时长。
    */
-  const queuedAtMs = queuedAt?.getTime() ?? now();
+  const queuedForMs = queueTiming?.queuedForMs ?? 0;
+  const consumeStartedMs = now();
+  /** 从入队算起、到此刻为止的毫秒数（21.2 的里程碑口径） */
+  const sinceQueued = (): number => queuedForMs + (now() - consumeStartedMs);
 
   // 16.3：整个生成任务 300 秒。协作式检查，理由见 job-deadline.ts
   const deadline = createJobDeadline(now(), JOB_TIMEOUT_MS, now);
 
+  /*
+   * 阶段计时（TP-5-01）。起点是入队时刻，与里程碑一致 ——
+   * 理由见 stage-timer.ts。
+   */
+  const timer = new StageTimer(consumeStartedMs, now, daysBucket, queuedForMs);
+
+  /** 推进状态并把上一阶段的耗时挂在同一次写入上 */
+  const step = (
+    to: JobStatus,
+    extra: { readonly errorCode?: string; readonly planVersionId?: string } = {},
+  ): Promise<boolean> =>
+    advance(deps, context.jobId, to, { ...extra, stageTimings: timer.enter(to) });
+
+  const failJob = (code: JobFailureCode, planVersionId?: string): Promise<GenerateOutcome> =>
+    fail(
+      deps,
+      context.jobId,
+      code,
+      { stageTimings: timer.finish('failed'), userType: context.userType },
+      planVersionId,
+    );
+
   /**
    * 阶段边界的取消检查。`advance` 返回 false 说明任务已进入终态 ——
    * 在这条路径上只可能是用户取消（失败由本函数自己写入）。
+   *
+   * 取消时不再写 `stage_timings`：那次 UPDATE 一定改 0 行（`CANCELLED` 是终态，
+   * 而 SQL 带非终态谓词）。耗时因此少最后一段，这是可接受的 ——
+   * 被取消的任务不参与任何性能统计。
    */
   const cancelled = (stage: JobStatus): GenerateOutcome => {
+    timer.finish('cancelled');
+    jobTotal.inc({
+      status: 'CANCELLED',
+      error_code: 'JOB_CANCELLED',
+      user_type: context.userType,
+    });
     log.info({ stage }, '任务已被取消，停止后续处理');
     return { outcome: 'skipped', reason: 'cancelled' };
   };
 
   // ── NORMALIZING：标准化结果已在同步路径算好，这里只读回并校验形状 ──
-  if (!(await advance(deps, context.jobId, 'NORMALIZING'))) return cancelled('NORMALIZING');
-  const normalizedParsed = NormalizedTravelRequestSchema.safeParse(context.normalizedRequest);
+  if (!(await step('NORMALIZING'))) return cancelled('NORMALIZING');
   if (!normalizedParsed.success) {
     /*
      * 库里的 normalized_request 形状不对，只可能是标准化规则改版后
      * 老行被重放。它不是用户能修的问题，也不是重试能好的问题。
      */
     log.error({ stage: 'NORMALIZING' }, '标准化结果不满足当前契约');
-    return fail(deps, context.jobId, 'PLAN_SCHEMA_INVALID');
+    return failJob('PLAN_SCHEMA_INVALID');
   }
   const normalized = normalizedParsed.data;
   // fake 模式需要按请求构造录制输出；真实客户端与请求无关
@@ -369,12 +473,12 @@ export async function generatePlan(
    * 重跑会让「入队后到消费前跨过了午夜」的任务因 N-01（出发日期在过去）
    * 失败，而那不是用户的错。
    */
-  if (!(await advance(deps, context.jobId, 'VALIDATING_REQUEST'))) {
+  if (!(await step('VALIDATING_REQUEST'))) {
     return cancelled('VALIDATING_REQUEST');
   }
 
   // ── RETRIEVING_REFERENCES（3.2.4）──
-  if (!(await advance(deps, context.jobId, 'RETRIEVING_REFERENCES'))) {
+  if (!(await step('RETRIEVING_REFERENCES'))) {
     return cancelled('RETRIEVING_REFERENCES');
   }
   const retrieved = await retrieveReferences(deps.retrieval, {
@@ -393,7 +497,7 @@ export async function generatePlan(
   // ── GENERATING_PLAN（6.3）──
   if (deadline.expired()) {
     log.warn({ stage: 'GENERATING_PLAN', error_code: 'JOB_TIMEOUT' }, '任务超过 300 秒上限，中止');
-    return fail(deps, context.jobId, 'JOB_TIMEOUT');
+    return failJob('JOB_TIMEOUT');
   }
 
   /*
@@ -401,18 +505,18 @@ export async function generatePlan(
    * 白花钱」的边界。用户点取消的动机多数就是「我填错了」，
    * 而此刻停下来能省掉一次完整的生成成本。
    */
-  if (!(await advance(deps, context.jobId, 'GENERATING_PLAN'))) return cancelled('GENERATING_PLAN');
+  if (!(await step('GENERATING_PLAN'))) return cancelled('GENERATING_PLAN');
   let generated;
   try {
     generated = await generateContent(deps, llm, normalized, retrieved.references, deadline);
   } catch (error) {
     const code = errorCodeFor(error);
     log.error({ stage: 'GENERATING_PLAN', error_code: code }, '计划生成失败');
-    return fail(deps, context.jobId, code);
+    return failJob(code);
   }
 
   // ── VALIDATING_PLAN ⇄ REPAIRING_PLAN（3.2.1、3.2.2）──
-  await advance(deps, context.jobId, 'VALIDATING_PLAN');
+  await step('VALIDATING_PLAN');
 
   const injected: TravelPlanContent = {
     ...generated.output,
@@ -430,7 +534,7 @@ export async function generatePlan(
       regenerate: async ({ violations, plan, attempt }) => {
         if (!repairing) {
           repairing = true;
-          await advance(deps, context.jobId, 'REPAIRING_PLAN');
+          await step('REPAIRING_PLAN');
         }
         const messages = buildRepairPrompt({
           normalized,
@@ -480,7 +584,7 @@ export async function generatePlan(
    * 等待一起扔掉，而重试要从零开始再花一遍。超时的意义是「别再启动新的
    * 昂贵工作」，不是「把做好的东西扔掉」。
    */
-  await advance(deps, context.jobId, 'SAVING_PLAN');
+  await step('SAVING_PLAN');
 
   /*
    * 版本 ID 在这里生成，而不是交给数据库默认值：`plan_json` 里必须含
@@ -536,7 +640,7 @@ export async function generatePlan(
     });
   } catch (error) {
     log.error({ stage: 'SAVING_PLAN' }, `持久化失败：${String(error)}`);
-    return fail(deps, context.jobId, 'PLAN_PERSIST_FAILED');
+    return failJob('PLAN_PERSIST_FAILED');
   }
 
   if (finalStatus === 'REJECTED') {
@@ -547,7 +651,7 @@ export async function generatePlan(
      */
     const code = resolved.errorCode ?? 'PLAN_REPAIR_EXHAUSTED';
     log.warn({ stage: 'SAVING_PLAN', error_code: code }, '计划未通过校验，落库为 REJECTED');
-    await fail(deps, context.jobId, code, saved.versionId);
+    await failJob(code, saved.versionId);
     return { outcome: 'rejected', versionId: saved.versionId, errorCode: code };
   }
 
@@ -573,7 +677,7 @@ export async function generatePlan(
       total_days_bucket: totalDaysBucket(normalized.total_days),
       user_type: context.userType,
     },
-    (now() - queuedAtMs) / 1000,
+    sinceQueued() / 1000,
   );
 
   log.info(
@@ -603,7 +707,7 @@ export async function generatePlan(
   }
 
   try {
-    await advance(deps, context.jobId, 'BUILDING_PRESENTATION');
+    await step('BUILDING_PRESENTATION');
 
     const plan = {
       ...planContent,
@@ -612,7 +716,7 @@ export async function generatePlan(
       request_id: context.requestId,
     };
 
-    await advance(deps, context.jobId, 'RESOLVING_ASSETS');
+    await step('RESOLVING_ASSETS');
     const ai = deps.aiAssets?.(context.userType);
     const result = await buildAndSavePresentations(
       { ...presentation, logger: log, ...(ai === undefined ? {} : { ai }) },
@@ -658,7 +762,7 @@ export async function generatePlan(
         total_days_bucket: totalDaysBucket(normalized.total_days),
         user_type: context.userType,
       },
-      (now() - queuedAtMs) / 1000,
+      sinceQueued() / 1000,
     );
 
     /*
@@ -702,16 +806,22 @@ export async function generatePlan(
         { stage: 'RENDERING_HTML', error_code: 'RENDER_CORE_ASSET_MISSING' },
         '必需素材的降级链未兜住，页面核心结构无法生成',
       );
-      await fail(deps, context.jobId, 'PLAN_PERSIST_FAILED', saved.versionId);
+      await failJob('PLAN_PERSIST_FAILED', saved.versionId);
       return { outcome: 'saved', versionId: saved.versionId, status: finalStatus };
     }
 
-    if (!(await advance(deps, context.jobId, 'RENDERING_HTML'))) {
+    if (!(await step('RENDERING_HTML'))) {
       return cancelled('RENDERING_HTML');
     }
-    if (!(await advance(deps, context.jobId, 'COMPLETED'))) {
+    /*
+     * 终态用 `finish` 而不是 `enter`：`total` 那一项必须搭这最后一次 UPDATE
+     * 落库。之后再写就写不进去了 —— `updateJobState` 带非终态谓词，
+     * 而这一行此刻已经是 `COMPLETED`。
+     */
+    if (!(await advance(deps, context.jobId, 'COMPLETED', { stageTimings: timer.finish('ok') }))) {
       return cancelled('COMPLETED');
     }
+    jobTotal.inc({ status: 'COMPLETED', error_code: 'none', user_type: context.userType });
 
     return {
       outcome: 'saved',

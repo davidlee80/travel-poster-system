@@ -12,9 +12,19 @@ import { createCounter, createHistogram } from '@tps/observability';
  */
 export const exportTotal = createCounter({
   name: 'travel_export_total',
-  help: '导出任务结局',
-  labelNames: ['outcome'],
+  help: '导出任务结局（按格式、范围、结局、身份类型）',
+  labelNames: ['format', 'scope', 'outcome', 'user_type'],
 });
+
+/**
+ * `skipped` 结局的 format/scope 占位值（TP-5-01）。
+ *
+ * 跳过发生在读到那一行**之前**（任务不存在）或读到之后立刻退出
+ * （已被别的消费者接手），前者根本没有格式与范围可言。
+ * 用 `none` 而不是省略标签：省略会让这条序列的标签值是空串，
+ * 而 `format="PNG"` 的求和会因此漏掉分母（Prometheus 不会把空串当通配）。
+ */
+export const EXPORT_LABEL_NONE = 'none';
 
 /**
  * 21.2 的导出耗时目标：单页 PNG < 8 秒、单页 PDF < 10 秒、

@@ -11,6 +11,7 @@ import {
   migrationsDirectory,
 } from '@tps/db';
 import { FakeImageClient, FakeLlmClient, LocalHashingEmbeddingClient } from '@tps/llm';
+import { metricsText } from '@tps/observability';
 import { InMemoryObjectStorage } from '@tps/storage';
 import { GenerationMetadataSchema, TravelPosterViewModelSchema } from '@tps/schemas';
 import { parseRetrievalProjection, projectionToEmbeddingText } from '@tps/planning';
@@ -340,6 +341,46 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     expect(milestones.rows[0]!.t1_at!.getTime()).toBeLessThanOrEqual(
       milestones.rows[0]!.t2_at!.getTime(),
     );
+
+    /*
+     * `stage_timings` 逐阶段落库，且含 `total`（TP-5-01）。
+     *
+     * 十五章说这一列是「二十一章性能目标的唯一度量来源」，而它在 P4 结束时
+     * 从未被写入过 —— 空的 `{}` 与「任务很快」在库里看起来一样。
+     * `total` 只有随最后一次 UPDATE 才能写进去（之后行已是终态），
+     * 因此它的存在同时证明了那条路径是通的。
+     */
+    const timings = await pool.query<{ stage_timings: Record<string, number> }>(
+      'SELECT stage_timings FROM generation_jobs WHERE id = $1',
+      [handles.job_id],
+    );
+    const recorded = timings.rows[0]!.stage_timings;
+    expect(Object.keys(recorded)).toEqual(
+      expect.arrayContaining([
+        'NORMALIZING',
+        'GENERATING_PLAN',
+        'SAVING_PLAN',
+        'RESOLVING_ASSETS',
+        'RENDERING_HTML',
+        'total',
+      ]),
+    );
+    // total 不小于任何单个阶段 —— 它是从入队时刻算的
+    const stages = Object.entries(recorded).filter(([key]) => key !== 'total');
+    for (const [stage, ms] of stages) {
+      expect(ms, `${stage} 的耗时应不超过总耗时`).toBeLessThanOrEqual(recorded['total']!);
+    }
+
+    /*
+     * 21.3 的三个新指标真的有样本（TP-5-01 的验证方式：「/metrics 全部指标
+     * 有数据」）。断言样本行而不是仅断言指标名 —— prom-client 对已注册但
+     * 从未 inc 的带标签指标只输出 HELP/TYPE 两行，而那正是 P5 之前
+     * `travel_llm_tokens_total` 的状态（连注册都没有）。
+     */
+    const scraped = await metricsText();
+    expect(scraped).toMatch(/travel_job_total\{[^}]*status="COMPLETED"/);
+    expect(scraped).toMatch(/travel_job_duration_seconds_bucket\{[^}]*stage="total"/);
+    expect(scraped).toMatch(/travel_llm_duration_seconds_bucket\{[^}]*purpose="plan"/);
 
     // 6. 计划可读，且是一份合法的 TravelPlan
     const plan = await app.inject({

@@ -17,6 +17,21 @@ export async function waitForReady(page: Page): Promise<void> {
   await page.waitForSelector(READY_SELECTOR, { timeout: READY_TIMEOUT_MS, state: 'attached' });
 }
 
+/**
+ * 数出页面上未能解析的图标引用（TP-5-01，验收标准 5）。
+ *
+ * `data-icon-missing` 由 web 的 `Icon` 组件在图标名不在清单内时渲染 ——
+ * 它是「图标加载失败」在这个系统里唯一可能的形态（9.1 把图标内联进构建
+ * 产物，运行期没有网络请求可失败）。因此这个计数为 0 等价于
+ * 「19 个图标键的映射完整」。
+ *
+ * 不抛错：缺一个图标不该让整份导出作废（页面其余部分完好），
+ * 而 21.3 的图标回归告警会在计数 > 0 时立刻触发。
+ */
+export async function countMissingIcons(page: Page): Promise<number> {
+  return page.evaluate(() => document.querySelectorAll('[data-icon-missing]').length);
+}
+
 // ── TP-1-11：中文字形断言 ──────────────────────────────────────────
 
 export interface LoadedFace {

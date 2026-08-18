@@ -1,5 +1,6 @@
 import {
   UniqueViolationError,
+  type ExportJobRow,
   type ExportRow,
   type ExportsRepository,
   type TravelPlansRepository,
@@ -80,8 +81,14 @@ class FakeExports implements ExportsRepository {
     return Promise.resolve(row !== undefined && row.userId === userId ? row : null);
   }
 
-  findById(exportId: string): Promise<ExportRow | null> {
-    return Promise.resolve(this.rows.get(exportId) ?? null);
+  /*
+   * Worker 侧的读取（带 `userType`）。api 的两个端点都不调它 ——
+   * 13.5/13.6 一律走带 `user_id` 谓词的 `findForUser`（13.0）。
+   * 这里只为满足接口形状。
+   */
+  findById(exportId: string): Promise<ExportJobRow | null> {
+    const row = this.rows.get(exportId);
+    return Promise.resolve(row === undefined ? null : { ...row, userType: 'REGISTERED' });
   }
 
   markRendering(): Promise<boolean> {

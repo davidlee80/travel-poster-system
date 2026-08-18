@@ -193,9 +193,22 @@ describeIntegration('users 表约束（集成，需 PostgreSQL）', () => {
     });
 
     it('过期令牌查不到（过期判断在 SQL 中，用数据库时钟）', async () => {
+      /*
+       * 过期时刻往前推一小时，不是一秒。
+       *
+       * 过期判定用的是**数据库**时钟（`expires_at > NOW()`），而这个夹具用的是
+       * **进程**时钟。两者之间有偏差：容器宿主休眠/恢复后，Docker Desktop 的
+       * 时钟同步会抖动几百毫秒（本机实测在 ±400 毫秒之间来回）。
+       * 一秒的余量因此会偶发地不够 —— 症状是这条用例在全量跑时随机变红，
+       * 而单独跑总是通过。
+       *
+       * 一小时的余量与本用例要验证的行为无关（「已过期就查不到」对
+       * 过期 1 秒和过期 1 小时同样成立），但它让结论不再取决于时钟精度。
+       * 同一类跨时钟比较的问题在 R-40 里有更彻底的处理（让数据库自己算时长）。
+       */
       await repo.createAnonymous({
         ...anonInput(),
-        expiresAt: new Date(Date.now() - 1000),
+        expiresAt: new Date(Date.now() - 3_600_000),
       });
       expect(await repo.findActiveByAnonTokenHash('a'.repeat(64))).toBeNull();
     });

@@ -50,6 +50,15 @@ class FakePlans implements TravelPlansRepository {
   savePlanVersionError: Error | null = null;
   /** 16.3 的队列等待判定输入。null 表示「查不到入队时刻」 */
   queuedAt: Date | null = null;
+  /**
+   * 由数据库算出的已排队毫秒数（R-40）。
+   *
+   * 单独一个字段而不是从 `queuedAt` 推算：真实实现里这个值来自
+   * SQL 的 `NOW() - created_at`，与进程时钟无关。测试要能独立设定它 ——
+   * 否则「入队时刻很久以前但排队时长为 0」这种组合无法构造，
+   * 而那恰好是验证「两者是不同来源」所需的组合。
+   */
+  queuedForMs = 0;
 
   constructor(context: JobContext | null) {
     this.context = context;
@@ -112,8 +121,9 @@ class FakePlans implements TravelPlansRepository {
     return Promise.resolve();
   }
 
-  findJobQueuedAt(): Promise<Date | null> {
-    return Promise.resolve(this.queuedAt);
+  findJobQueueTiming(): Promise<{ createdAt: Date; queuedForMs: number } | null> {
+    if (this.queuedAt === null) return Promise.resolve(null);
+    return Promise.resolve({ createdAt: this.queuedAt, queuedForMs: this.queuedForMs });
   }
 
   savePlanVersion(input: SavePlanVersionInput): Promise<SavedPlanVersion> {
@@ -585,11 +595,10 @@ describe('16.3 超时（TP-4-10）', () => {
   it('队列等待超过 600 秒 → FAILED + JOB_QUEUE_TIMEOUT，不调用模型', async () => {
     const { deps, plans, llm } = harness();
     plans.queuedAt = new Date('2026-08-17T10:00:00Z');
+    // 排队时长由数据库给出（R-40），不再由进程时钟与入队时刻相减得到
+    plans.queuedForMs = 601_000;
 
-    const result = await generatePlan(
-      { ...deps, now: () => plans.queuedAt!.getTime() + 601_000 },
-      payload,
-    );
+    const result = await generatePlan(deps, payload);
 
     expect(result).toEqual({ outcome: 'failed', errorCode: 'JOB_QUEUE_TIMEOUT' });
     /*
@@ -613,10 +622,12 @@ describe('16.3 超时（TP-4-10）', () => {
      * now() 被调用几次**，预算创建之后的第一次检查就已经超时。
      * 按调用序号排布返回值的写法会随实现里多一次读时钟而失效（试过一次）。
      *
-     * 入队时刻设为 epoch 但队列判定用的是 `now - createdAt`，
-     * 第一次读到的 400 秒仍在 600 秒的队列上限内，因此不会走成队列超时。
+     * 排队时长显式设为 0：队列超时（600 秒）与任务预算（300 秒）是两层
+     * 独立的判定（16.3），这条用例只验证后者。排队时长跟着入队时刻走的话，
+     * 一个「很久以前入队」的夹具会先撞上队列超时，错误码就变成另一个。
      */
     plans.queuedAt = new Date(0);
+    plans.queuedForMs = 0;
     let clock = 0;
     const result = await generatePlan(
       {
@@ -694,7 +705,8 @@ describe('16.1 推进到 COMPLETED 与 T1/T2 里程碑（TP-4-08/14）', () => {
      * 用消费起点算会让队列积压时 SLA 看起来完好 —— 而用户从点下按钮
      * 就开始等，排队那段同样是他的等待。
      * 这里只断言里程碑被记录：具体秒数进的是直方图（不便断言），
-     * 而「起点取哪个」由实现里的 queuedAtMs 表达。
+     * 而「起点取哪个」由实现里的 `sinceQueued()` 表达 ——
+     * 它是「数据库给的排队时长 + 进程内经过的时长」（R-40）。
      */
     await generatePlan(deps, payload);
     expect(plans.milestones).toContain('t1');

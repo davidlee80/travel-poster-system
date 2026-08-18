@@ -7,6 +7,16 @@ export {
 } from './labels.js';
 
 export {
+  METRICS_CATALOG,
+  catalogFor,
+  detectCatalogDrift,
+  type CatalogDrift,
+  type CatalogEntry,
+  type MetricKind,
+  type MetricOwner,
+} from './catalog.js';
+
+export {
   FAST_BUCKETS,
   SLA_BUCKETS,
   createCounter,
@@ -15,6 +25,7 @@ export {
   metricsContentType,
   metricsText,
   registerDefaultMetrics,
+  registeredMetrics,
   registry,
   type CounterMetric,
   type GaugeMetric,

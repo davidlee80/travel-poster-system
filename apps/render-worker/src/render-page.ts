@@ -3,6 +3,7 @@ import type { BrowserContext, Page } from 'playwright-core';
 
 import { CJK_FONT_UNAVAILABLE, RENDER_ERROR_CODES, RenderError } from './errors.js';
 import {
+  countMissingIcons,
   detectOverflow,
   probeCjkGlyphs,
   waitForReady,
@@ -56,6 +57,14 @@ export interface RenderPageResult {
   /** 四轮后仍有溢出 → true，调用方据此标记 DEGRADED */
   readonly degraded: boolean;
   readonly elapsedMs: number;
+  /**
+   * 清单外的图标引用数（TP-5-01，验收标准 5 期望恒为 0）。
+   *
+   * 只在第 1 轮测量：图标是否在清单内与降级版式无关，每轮重测只是白花
+   * 20 秒预算里的时间。首轮之前就抛错的路径拿不到这个数，
+   * 那种情况下页面根本没渲染出来。
+   */
+  readonly missingIcons: number;
 }
 
 /**
@@ -78,6 +87,7 @@ export async function renderPage(request: RenderPageRequest): Promise<RenderPage
 
   try {
     let last: { readonly variant: RenderVariant; readonly overflow: OverflowReport } | null = null;
+    let missingIcons = 0;
 
     for (const [index, variant] of RENDER_ROUNDS.entries()) {
       const remaining = TOTAL_RENDER_BUDGET_MS - (now() - startedAt);
@@ -99,7 +109,10 @@ export async function renderPage(request: RenderPageRequest): Promise<RenderPage
        * 而它必须在**第一次成功加载后立刻**做：后面的截图与 PDF 都建立在
        * 「页面文字是正确字形」这个前提上，晚一步就等于产出了废品再检查。
        */
-      if (index === 0) await assertCjkGlyphs(page);
+      if (index === 0) {
+        await assertCjkGlyphs(page);
+        missingIcons = await countMissingIcons(page);
+      }
 
       const overflow = await detectOverflow(page);
       last = { variant, overflow };
@@ -124,6 +137,7 @@ export async function renderPage(request: RenderPageRequest): Promise<RenderPage
           overflow,
           degraded: false,
           elapsedMs: now() - startedAt,
+          missingIcons,
         };
       }
     }
@@ -144,6 +158,7 @@ export async function renderPage(request: RenderPageRequest): Promise<RenderPage
       overflow: last.overflow,
       degraded: true,
       elapsedMs: now() - startedAt,
+      missingIcons,
     };
   } catch (error) {
     // 失败路径必须关 page，否则 browser 会攒着永不释放的渲染进程

@@ -54,6 +54,16 @@ export interface ExportRow {
   readonly finishedAt: Date | null;
 }
 
+/**
+ * Worker 侧读到的导出行：多一个 `userType`（TP-5-01）。
+ *
+ * 单独一个类型而不是加进 `ExportRow`：`create` 的 `RETURNING` 拿不到
+ * `users` 的列，让 `ExportRow` 带上这个字段会迫使那里编一个值。
+ */
+export interface ExportJobRow extends ExportRow {
+  readonly userType: 'ANONYMOUS' | 'REGISTERED';
+}
+
 export interface FinishExportInput {
   readonly exportId: string;
   readonly status: 'COMPLETED' | 'PARTIAL' | 'FAILED';
@@ -70,7 +80,7 @@ export interface ExportsRepository {
   /** 13.6：**必须带 `user_id` 谓词**（13.0） */
   findForUser(exportId: string, userId: string): Promise<ExportRow | null>;
   /** Worker 侧：无 `user_id`（消费自己入队的任务，与 `findJobContext` 同一例外） */
-  findById(exportId: string): Promise<ExportRow | null>;
+  findById(exportId: string): Promise<ExportJobRow | null>;
   markRendering(exportId: string): Promise<boolean>;
   finish(input: FinishExportInput): Promise<void>;
   /** 13.6 重签名：只换 `files` 里的 URL 与过期时刻，不动状态 */
@@ -98,6 +108,11 @@ interface Row {
 
 const COLUMNS = `id, user_id, plan_id, plan_version_id, template_id, format, scope,
                  day_numbers, status, progress, files, error_code, created_at, finished_at`;
+
+/** 同一组列，带 `e.` 前缀，用于需要 join users 的查询 */
+const COLUMNS_PREFIXED = COLUMNS.split(',')
+  .map((column) => `e.${column.trim()}`)
+  .join(', ');
 
 function toRow(row: Row): ExportRow {
   return {
@@ -171,10 +186,28 @@ export function createExportsRepository(pool: Pool): ExportsRepository {
     },
 
     async findById(exportId) {
-      const { rows } = await pool.query<Row>(`SELECT ${COLUMNS} FROM exports WHERE id = $1`, [
-        exportId,
-      ]);
-      return rows[0] === undefined ? null : toRow(rows[0]);
+      /*
+       * join users 只为拿 `user_type`（TP-5-01）：21.3 的 R-13 要求
+       * `travel_export_total` 带身份维度，而门禁 #20 的「匿名导出次数上限
+       * 3 次」也只能按身份分开看。
+       *
+       * 为什么不放进队列载荷：export-queue.ts 的「载荷只放 export_id」是
+       * 刻意的（避免快照与库里的行分歧）。而这次 join 是单行主键查询，
+       * 与本来就要做的 `findById` 合并成一条语句，没有额外往返。
+       */
+      const { rows } = await pool.query<Row & { user_type: string }>(
+        `SELECT ${COLUMNS_PREFIXED}, u.user_type
+           FROM exports e
+           JOIN users u ON u.id = e.user_id
+          WHERE e.id = $1`,
+        [exportId],
+      );
+      const row = rows[0];
+      if (row === undefined) return null;
+      return {
+        ...toRow(row),
+        userType: row.user_type === 'REGISTERED' ? 'REGISTERED' : 'ANONYMOUS',
+      };
     },
 
     async markRendering(exportId) {

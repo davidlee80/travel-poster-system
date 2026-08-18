@@ -9,6 +9,7 @@ import type { Browser, BrowserContext } from 'playwright-core';
 import { createRenderContext } from './browser.js';
 import { capturePdf, mergePdfs } from './pdf.js';
 import { capturePng } from './png.js';
+import { recordRenderQuality } from './render-metrics.js';
 import { renderPage } from './render-page.js';
 
 /**
@@ -54,10 +55,14 @@ export interface RunExportDeps {
   readonly logger: Logger;
 }
 
-/** 结局带上 format/scope，供 21.2 的分环节耗时指标按目标分组 */
+/**
+ * 结局带上 format/scope/userType，供 21.3 的两个导出指标分组
+ * （21.2 的分环节耗时目标按 format+scope，R-13 的身份维度按 userType）。
+ */
 interface ExportShape {
   readonly format: 'PNG' | 'PDF';
   readonly scope: 'ALL_DAYS' | 'SINGLE_DAY' | 'FULL_PLAN';
+  readonly userType: 'ANONYMOUS' | 'REGISTERED';
 }
 
 export type RunExportOutcome =
@@ -138,7 +143,13 @@ export async function runExport(deps: RunExportDeps, exportId: string): Promise<
       errorCode,
       errorDetail: { failed_days: failedDays },
     });
-    return { kind: 'failed', errorCode, format: row.format, scope: row.scope };
+    return {
+      kind: 'failed',
+      errorCode,
+      format: row.format,
+      scope: row.scope,
+      userType: row.userType,
+    };
   }
 
   const artifacts = await upload(deps, row.exportId, row.format, row.scope, captured);
@@ -152,7 +163,7 @@ export async function runExport(deps: RunExportDeps, exportId: string): Promise<
     ...(partial ? { errorDetail: { failed_days: failedDays } } : {}),
   });
 
-  const shape = { format: row.format, scope: row.scope };
+  const shape = { format: row.format, scope: row.scope, userType: row.userType };
   return partial
     ? { kind: 'partial', files: artifacts.length, failed: failedDays, ...shape }
     : { kind: 'completed', files: artifacts.length, ...shape };
@@ -214,6 +225,18 @@ async function capture(
       { planVersionId, pageKey: target.pageKey, jti: randomUUID() },
       deps.signingKey,
     ),
+  });
+
+  /*
+   * 渲染质量观测（TP-5-01）：轮次分布、降级计数与图标缺失。
+   * 放在抓取**之前**：即使 PNG/PDF 生成失败，这一页的渲染质量数据仍然有效
+   * —— 而那种情况下它恰恰更有用（排查「为什么这一页导不出来」）。
+   */
+  recordRenderQuality({
+    pageType: target.dayNumber === null ? 'full' : 'day',
+    round: rendered.round,
+    degraded: rendered.degraded,
+    missingIcons: rendered.missingIcons,
   });
 
   try {

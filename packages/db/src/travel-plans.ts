@@ -138,6 +138,28 @@ export interface UpdateJobStateInput {
   readonly from?: JobStatusValue;
   readonly errorCode?: string;
   readonly planVersionId?: string;
+  /**
+   * 已结束阶段的耗时毫秒数增量（十五章的 `stage_timings`，TP-5-01）。
+   *
+   * 挂在状态推进上而不是单独一次 UPDATE：状态与 progress 本来就要在同一事务里
+   * 写（16.1），顺带写这一列是零额外往返。分开写的代价不只是性能 ——
+   * 两条语句之间进程被杀，库里就会出现「状态已推进但耗时缺一段」的行。
+   *
+   * SQL 侧用 `stage_timings || $n::jsonb` 合并，因此传增量即可，同名键覆盖。
+   */
+  readonly stageTimings?: Readonly<Record<string, number>>;
+}
+
+/**
+ * 入队时刻与已排队时长（R-40）。
+ *
+ * 两个字段都由**数据库时钟**给出。`queuedForMs` 是「到读取这一刻为止
+ * 排了多久」，进程侧据此推算任意后续时刻的「从入队算起」耗时：
+ * `queuedForMs + (t - 读取时刻)`。
+ */
+export interface JobQueueTiming {
+  readonly createdAt: Date;
+  readonly queuedForMs: number;
 }
 
 export interface SavePlanVersionInput {
@@ -206,6 +228,8 @@ export interface TravelPlansRepository {
    * 只写一次：`COALESCE(t1_at, NOW())` —— 重试导致的第二次到达不该覆盖
    * 首次时刻。覆盖的后果是 SLA 统计里那个任务的 T1 变成「重试成功的时刻」，
    * 而用户真正等到计划可读的时间是第一次。
+   *
+   * T2 另取 `GREATEST(NOW(), t1_at)` 以保证 T1 ≤ T2（R-41，见实现）。
    */
   markMilestone(jobId: string, milestone: 't1' | 't2'): Promise<void>;
 
@@ -229,12 +253,22 @@ export interface TravelPlansRepository {
   appendJobWarnings(jobId: string, codes: readonly string[]): Promise<void>;
 
   /**
-   * 16.3 的队列等待上限判定所需：任务创建时刻。
+   * 16.3 的队列等待上限判定所需：入队时刻**与已排队时长**。
    *
    * 单独一个方法而不是塞进 `findJobContext`：队列超时的判定发生在
    * **消费的第一件事**，而那时还没必要读回标准化请求（它可能有几十 KB）。
+   *
+   * ## 为什么排队时长由数据库算（R-40）
+   *
+   * `created_at` 来自数据库时钟，而 Worker 只有自己的 `Date.now()`。
+   * 两者相减就是跨时钟比较 —— 生产上 Worker 与数据库在不同机器上，
+   * NTP 偏差几十毫秒是常态，容器宿主休眠后偏差能到几秒。
+   * 实测中这让 `stage_timings.total` 出现了**负数**。
+   *
+   * 让数据库同时给出 `NOW() - created_at`，两个时刻就来自同一个时钟。
+   * 之后进程侧只做「排队时长 + 进程内经过的时长」的加法，不再有跨时钟相减。
    */
-  findJobQueuedAt(jobId: string): Promise<Date | null>;
+  findJobQueueTiming(jobId: string): Promise<JobQueueTiming | null>;
 
   /** TP-2-14：写版本 + 提升 `current_version_id`，同一事务 */
   savePlanVersion(input: SavePlanVersionInput): Promise<SavedPlanVersion>;
@@ -582,6 +616,7 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
                 plan_version_id = COALESCE($6::uuid, plan_version_id),
                 started_at = COALESCE(started_at, NOW()),
                 finished_at = CASE WHEN $7::boolean THEN NOW() ELSE finished_at END,
+                stage_timings = stage_timings || $10::jsonb,
                 updated_at = NOW()
           WHERE id = $1
             AND ($8::text IS NULL OR status = $8::text)
@@ -596,6 +631,12 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
           isTerminal,
           input.from ?? null,
           terminal,
+          /*
+           * 空对象而不是 null：`jsonb || NULL` 的结果是 NULL，会把已积累的
+           * 耗时全部清掉。而 `jsonb || '{}'` 是恒等操作，因此不传耗时的调用方
+           * （例如取消、或 P2 时期的老代码路径）不受影响。
+           */
+          JSON.stringify(input.stageTimings ?? {}),
         ],
       );
 
@@ -603,11 +644,25 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
     },
 
     async markMilestone(jobId, milestone) {
-      const column = milestone === 't1' ? 't1_at' : 't2_at';
+      /*
+       * R-41：T2 取 `GREATEST(NOW(), t1_at)`，不是裸的 `NOW()`。
+       *
+       * 「T1 先于 T2」是业务不变量（文字版计划必然先于带图页面可读），
+       * 但用两次 `NOW()` 表达它，等于假设数据库时钟单调递增 ——
+       * 而那个假设会被 NTP 回拨打破。本机实测中容器时钟被拉回过 1.6 秒，
+       * 结果 `t1_at > t2_at`，SLA 统计里那个任务的 T2 成了负数。
+       *
+       * 与 `progress` 用 `GREATEST` 保证单调不减是同一手法、同一理由：
+       * 顺序不变量放进 SQL，而不是依赖调用顺序加时钟精度。
+       *
+       * `GREATEST` 忽略 NULL，因此 T1 未写过时（异常路径）它退化为 `NOW()`。
+       */
+      const assignment =
+        milestone === 't1'
+          ? 't1_at = COALESCE(t1_at, NOW())'
+          : 't2_at = COALESCE(t2_at, GREATEST(NOW(), t1_at))';
       await pool.query(
-        `UPDATE generation_jobs
-            SET ${column} = COALESCE(${column}, NOW()), updated_at = NOW()
-          WHERE id = $1`,
+        `UPDATE generation_jobs SET ${assignment}, updated_at = NOW() WHERE id = $1`,
         [jobId],
       );
     },
@@ -667,12 +722,26 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
       );
     },
 
-    async findJobQueuedAt(jobId) {
-      const { rows } = await pool.query<{ created_at: Date }>(
-        'SELECT created_at FROM generation_jobs WHERE id = $1',
+    async findJobQueueTiming(jobId) {
+      const { rows } = await pool.query<{ created_at: Date; queued_for_ms: string }>(
+        `SELECT created_at,
+                -- 毫秒取整：stage_timings 存的是整数毫秒（十五章）
+                round(EXTRACT(EPOCH FROM (NOW() - created_at)) * 1000)::text AS queued_for_ms
+           FROM generation_jobs
+          WHERE id = $1`,
         [jobId],
       );
-      return rows[0]?.created_at ?? null;
+      const row = rows[0];
+      if (row === undefined) return null;
+      return {
+        createdAt: row.created_at,
+        /*
+         * 钳到非负：`NOW()` 一定不早于 `created_at`（同一个时钟、
+         * 且行已提交），但重放老数据或手工改过 `created_at` 的行不该
+         * 让下游算出负耗时。
+         */
+        queuedForMs: Math.max(0, Number(row.queued_for_ms)),
+      };
     },
 
     async savePlanVersion(input) {

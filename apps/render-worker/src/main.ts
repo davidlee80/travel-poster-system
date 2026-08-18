@@ -18,7 +18,7 @@ import { S3ExportStorage, loadExportsStorageConfig } from '@tps/storage';
 import { UnrecoverableError, Worker } from 'bullmq';
 
 import { launchBrowser } from './browser.js';
-import { exportDuration, exportTotal } from './export-metrics.js';
+import { EXPORT_LABEL_NONE, exportDuration, exportTotal } from './export-metrics.js';
 import { runExport } from './run-export.js';
 
 /**
@@ -93,7 +93,26 @@ await runWorker({
           payload.exportId,
         );
 
-        exportTotal.inc({ outcome: outcome.kind });
+        /*
+         * 21.3 要求 `travel_export_total` 带 format / scope（验收标准 10 要
+         * 按格式读成功率），R-13 再加身份维度。`skipped` 没有这些信息，
+         * 用 `none` 占位 —— 理由见 export-metrics.ts。
+         */
+        exportTotal.inc(
+          outcome.kind === 'skipped'
+            ? {
+                format: EXPORT_LABEL_NONE,
+                scope: EXPORT_LABEL_NONE,
+                outcome: outcome.kind,
+                user_type: EXPORT_LABEL_NONE,
+              }
+            : {
+                format: outcome.format,
+                scope: outcome.scope,
+                outcome: outcome.kind,
+                user_type: outcome.userType,
+              },
+        );
         /*
          * 耗时只对真的跑过渲染的结局记录：`skipped` 的耗时是一次数据库查询，
          * 混进直方图会把 P95 拉低到毫秒级，而 21.2 的目标是按「渲染了」算的。
