@@ -47,6 +47,8 @@
     "gate": "node tools/gate-report.mjs",
     "//test:acceptance": "TP-5-05 / 门禁 #1：20 个端到端用例（1/3/7/14 天 × 五种约束组合 × 匿名与注册）。需 DATABASE_URL 与 REDIS_URL",
     "test:acceptance": "pnpm --filter \"@tps/generation-worker...\" run build && pnpm --filter @tps/generation-worker exec vitest run acceptance.integration --no-file-parallelism",
+    "//test:docs": "TP-5-11 / TP-5-14 的门禁：告警的 runbook 锚点必须在运维手册里存在（失效链接等于半夜被叫起来的人没有起点），隐私政策与界面提示条的保留期必须是同一个数字",
+    "test:docs": "pnpm --filter @tps/observability exec vitest run runbook",
     "//test:alerts": "TP-5-04 的门禁：告警规则与指标目录的一致性。拦「表达式引用了不存在的指标」—— 那种告警永远不触发，而 Prometheus 界面显示为正常",
     "test:alerts": "pnpm --filter @tps/observability exec vitest run alert-rules catalog",
     "//test:logs": "TP-5-02 的门禁：日志禁记字段（redact 层 + message 插值的静态扫描）。--self-test 验证扫描器本身有效",

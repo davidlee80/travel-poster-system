@@ -139,6 +139,14 @@ jobs:
       # 不锁镜像版本是有意的：`check rules` 的语法是稳定的，而锁一个具体版本
       # 要有人定期升；反过来，如果新版 promtool 报出了新的警告，
       # 那通常正是我们该知道的事。
+      # TP-5-11 / TP-5-14：文档与代码的一致性。
+      # 告警注解指向 docs/运维手册.md 的某个标题，而改标题的人不会想到有六个
+      # YAML 文件在引用它 —— 失效的 runbook 链接让半夜被叫起来的人没有起点。
+      # 隐私政策与界面提示条的保留期数字同理：它是一份对用户的承诺，
+      # 两个数字里必然有一个是假的。
+      - name: 文档一致性（TP-5-11 / TP-5-14）
+        run: pnpm test:docs
+
       - name: promtool check rules（TP-5-04）
         run: |
           docker run --rm -v "$PWD/deploy/prometheus/rules:/rules:ro" \
