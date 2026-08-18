@@ -41,11 +41,24 @@ describe('21.3 指标目录', () => {
   });
 
   it('检测缺失、未登记与标签不一致三类漂移', () => {
+    /*
+     * 从目录本身派生「已注册」清单，而不是手写几项。
+     *
+     * 手写的话，每次给 api 加一个指标这条测试就会因为 `missing` 非空而变红 ——
+     * 而它要验证的是 `detectCatalogDrift` 的三条判定，与 api 有几个指标无关。
+     * 用派生清单后只有「漂移检测本身坏了」才会红。
+     */
+    const registered = catalogFor('api').map((entry) => ({
+      name: entry.name,
+      labels: entry.labels,
+    }));
+    const mismatched = registered[0]!;
+
     const drift = detectCatalogDrift(
       [
-        // 标签少了 user_type
-        { name: 'travel_identity_total', labels: ['event', 'outcome'] },
-        { name: 'travel_identity_by_type_total', labels: ['user_type', 'outcome'] },
+        // 第一项故意多一个标签
+        { name: mismatched.name, labels: [...mismatched.labels, 'outcome'] },
+        ...registered.slice(1),
         // 没登记过的指标
         { name: 'travel_something_new', labels: [] },
         // 非本项目前缀的指标不该被管
@@ -57,9 +70,9 @@ describe('21.3 指标目录', () => {
     expect(drift.unregistered).toEqual(['travel_something_new']);
     expect(drift.labelMismatch).toEqual([
       {
-        name: 'travel_identity_by_type_total',
-        expected: ['user_type'],
-        actual: ['outcome', 'user_type'],
+        name: mismatched.name,
+        expected: [...mismatched.labels].sort(),
+        actual: [...mismatched.labels, 'outcome'].sort(),
       },
     ]);
     expect(drift.missing).toEqual([]);

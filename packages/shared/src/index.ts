@@ -31,3 +31,13 @@ export {
   type NodeEnv,
   type ServiceConfig,
 } from './config.js';
+
+export {
+  bucketOf,
+  decideFeature,
+  isInRollout,
+  loadFeatureFlags,
+  type FeatureDecision,
+  type FeatureFlags,
+  type FeatureName,
+} from './feature-flags.js';

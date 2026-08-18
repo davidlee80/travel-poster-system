@@ -16,7 +16,12 @@ import {
   type ExportDetail,
   type ExportStatus,
 } from '@tps/schemas';
-import { computeExportIdempotencyKey, type QuotaGuard } from '@tps/shared';
+import {
+  computeExportIdempotencyKey,
+  decideFeature,
+  type FeatureFlags,
+  type QuotaGuard,
+} from '@tps/shared';
 import type { ExportStorage } from '@tps/storage';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -27,6 +32,7 @@ import {
   messageForCode,
   type ErrorCode,
 } from '../errors/codes.js';
+import { ALL_FEATURES_ON, featureGateTotal } from '../feature-gate.js';
 import { resolveIdentity, type IdentityContextDeps } from './identity-context.js';
 
 /**
@@ -66,6 +72,8 @@ export interface ExportRoutesDeps extends IdentityContextDeps {
    * 只读密钥（R-32 的同一条顾虑：面向公网的进程不该拿到写凭据）。
    */
   readonly storage: Pick<ExportStorage, 'presign'>;
+  /** 灰度开关（TP-5-10）。缺省视为全开，理由见 feature-gate.ts */
+  readonly featureFlags?: FeatureFlags;
 }
 
 function fail(
@@ -153,6 +161,25 @@ export function registerExportRoutes(app: FastifyInstance, deps: ExportRoutesDep
         allowAnonymousCreation: false,
       });
       if (resolved === null) return reply;
+
+      /*
+       * 灰度开关（TP-5-10）。导出与生成分开关：两者的成本量级差三个数量级
+       * （导出是几秒 Chromium CPU，生成是模型调用的钱），因此紧急降成本时
+       * 先关生成、保留导出 —— 用户至少还能把已有的计划导出带走。
+       *
+       * 导出**不做百分比放量**：它没有新旧两套实现可以对比，
+       * 开关的用途只是紧急止血。
+       */
+      const gate = decideFeature(
+        deps.featureFlags ?? ALL_FEATURES_ON,
+        'export',
+        resolved.identity.userId,
+      );
+      if (!gate.allowed) {
+        request.log.info({ reason_code: gate.reason ?? 'disabled' }, '导出功能当前不可用');
+        featureGateTotal.inc({ event: 'export', reason_code: gate.reason ?? 'disabled' });
+        return fail(request, reply, 'SYS_FEATURE_DISABLED');
+      }
 
       const parsed = CreateExportRequestSchema.safeParse(request.body);
       if (!parsed.success) {

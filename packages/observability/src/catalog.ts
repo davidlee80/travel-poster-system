@@ -222,6 +222,14 @@ export const METRICS_CATALOG: readonly CatalogEntry[] = [
     source: 'design-21.3',
   },
   {
+    name: 'travel_feature_gate_total',
+    kind: 'counter',
+    labels: ['event', 'reason_code'],
+    owner: 'api',
+    source: 'supplementary',
+    note: 'TP-5-10：放量期间唯一能回答「有多少用户被挡住了」的指标。reason_code 区分 disabled（运维动作）与 not_in_rollout（预期行为）',
+  },
+  {
     name: 'travel_identity_by_type_total',
     kind: 'counter',
     labels: ['user_type'],

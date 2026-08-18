@@ -3,6 +3,8 @@ import { prepareTravelRequest } from '@tps/planning';
 import {
   IDEMPOTENCY_LOCK_TTL_SECONDS,
   computeIdempotencyKey,
+  decideFeature,
+  type FeatureFlags,
   type IdempotencyLock,
   type QuotaDecision,
   type QuotaGuard,
@@ -28,6 +30,7 @@ import {
   messageForCode,
   type ErrorCode,
 } from '../errors/codes.js';
+import { ALL_FEATURES_ON, featureGateTotal } from '../feature-gate.js';
 import { resolveIdentity, type IdentityContextDeps } from './identity-context.js';
 
 /**
@@ -68,6 +71,11 @@ export interface TravelPlanRoutesDeps extends IdentityContextDeps {
   readonly quota: QuotaGuard;
   readonly queue: PlanQueue;
   readonly idempotencyLock: IdempotencyLock;
+  /**
+   * 灰度开关（TP-5-10）。缺省视为全开 —— 未装配开关的部署
+   * （本地开发、P2～P4 时期的测试）不该因此拒绝服务。
+   */
+  readonly featureFlags?: FeatureFlags;
   /** 注入以便测试可控时间 */
   readonly now: () => Date;
 }
@@ -147,6 +155,31 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
       allowAnonymousCreation: true,
     });
     if (resolved === null) return reply;
+
+    /*
+     * ── 灰度判定（TP-5-10）──
+     *
+     * 放在身份解析**之后**、校验之前。之后是因为放量按 user_id 分桶，
+     * 需要先有身份；之前是因为一个被关闭的功能不该继续做任何工作 ——
+     * 校验一份注定不会被生成的请求只是浪费 CPU，而在紧急关停时那点 CPU
+     * 乘上全部流量并不小。
+     *
+     * 现场建号已经发生了（上面那一步），这是有意的：用户下次放量命中时
+     * 身份还在，历史也在。
+     */
+    const gate = decideFeature(
+      deps.featureFlags ?? ALL_FEATURES_ON,
+      'generation',
+      resolved.identity.userId,
+    );
+    if (!gate.allowed) {
+      request.log.info(
+        { stage: 'QUEUED', reason_code: gate.reason ?? 'disabled' },
+        '生成功能当前不可用（灰度开关）',
+      );
+      featureGateTotal.inc({ event: 'generation', reason_code: gate.reason ?? 'disabled' });
+      return fail(request, reply, 'SYS_FEATURE_DISABLED');
+    }
 
     const parsed = TravelRequestUISchema.safeParse(request.body);
     if (!parsed.success) {

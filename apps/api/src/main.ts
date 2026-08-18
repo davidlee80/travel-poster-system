@@ -2,6 +2,7 @@ import {
   GracefulShutdown,
   QuotaGuard,
   createLogger,
+  loadFeatureFlags,
   loadQuotaConfig,
   loadServiceConfig,
   nodeEnv,
@@ -57,6 +58,21 @@ async function main(): Promise<void> {
   // 配额配置在启动时校验不变式，不合法直接拒绝启动（21.4）——
   // 带着错误配额上线的表现是「部分用户莫名被限流」，极难从工单定位
   const quotaConfig = loadQuotaConfig();
+
+  /*
+   * 灰度开关（TP-5-10）。放量比例越界同样是拒绝启动 ——
+   * 把 1000 误当千分比写进 values 的人会得到「全量放量」，那是一次静默的
+   * 全量上线（见 loadFeatureFlags）。
+   */
+  const featureFlags = loadFeatureFlags();
+  logger.info(
+    {
+      generation_enabled: featureFlags.generationEnabled,
+      export_enabled: featureFlags.exportEnabled,
+      rollout_percent: featureFlags.generationRolloutPercent,
+    },
+    '灰度开关已加载',
+  );
 
   const shutdown = new GracefulShutdown({
     logger,
@@ -137,6 +153,7 @@ async function main(): Promise<void> {
       plans: createTravelPlansRepository(pool),
       presentations: createPresentationsRepository(pool),
       idempotencyLock: new RedisIdempotencyLock(redis),
+      featureFlags,
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
       now: () => new Date(),
     },
@@ -154,6 +171,7 @@ async function main(): Promise<void> {
       exports: createExportsRepository(pool),
       queue: new BullMqExportQueue(queueRedis),
       storage: new S3ExportStorage(loadExportsStorageConfig()),
+      featureFlags,
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
     },
     /*

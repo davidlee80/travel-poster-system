@@ -282,6 +282,26 @@ export const JOB_ERRORS = {
     retryable: true,
     message: '依赖服务暂时不可用，请稍后重试。',
   },
+  /**
+   * 功能开关关闭或未在放量范围内（R-44 新增，TP-5-10）。
+   *
+   * ## 为什么不复用 SYS_DEPENDENCY_UNAVAILABLE
+   *
+   * 两者的 HTTP 状态相同，但语义相反：那一个是**故障**（依赖挂了，我们在修），
+   * 这一个是**有意的**（功能被关掉了，或者你不在这一批放量里）。
+   *
+   * 混用的代价落在两处：
+   *   告警    「503 突增」在灰度放量时会误报 —— 而那正是最需要看清指标的时刻
+   *   工单    用户报「服务坏了」，而实际是我们主动关的，客服无法区分
+   *
+   * `retryable: true`：放量范围扩大或开关重开后重试会成功。客户端据此
+   * 保留用户填的表单而不是清空它。
+   */
+  SYS_FEATURE_DISABLED: {
+    httpStatus: 503,
+    retryable: true,
+    message: '该功能正在维护中，请稍后再试。',
+  },
 } as const satisfies Record<string, ErrorDefinition>;
 
 /** REQ / PLAN / RENDER / JOB 四域合并。AUTH 域由 apps/api 合入 */

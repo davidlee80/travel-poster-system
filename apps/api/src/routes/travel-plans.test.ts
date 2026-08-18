@@ -14,6 +14,7 @@ import {
   QuotaGuard,
   createLogger,
   createSilentLogger,
+  type FeatureFlags,
   type IdempotencyLock,
   type QuotaConfig,
   type ServiceConfig,
@@ -305,7 +306,10 @@ let harness: Harness | null = null;
 const NOW = new Date('2026-04-01T10:00:00Z');
 const now = (): Date => NOW;
 
-function build(lock: IdempotencyLock = new InMemoryIdempotencyLock()): Harness {
+function build(
+  lock: IdempotencyLock = new InMemoryIdempotencyLock(),
+  featureFlags?: FeatureFlags,
+): Harness {
   const users = new FakeUsersRepository(now);
   const sessions = new InMemorySessionStore();
   const quota = new QuotaGuard({
@@ -338,6 +342,7 @@ function build(lock: IdempotencyLock = new InMemoryIdempotencyLock()): Harness {
       plans: repository,
       presentations,
       idempotencyLock: lock,
+      ...(featureFlags === undefined ? {} : { featureFlags }),
       secureCookies: false,
       // N-01 需要「今天」；请求 fixture 的出发日期是 2026-04-10
       now,
@@ -1303,5 +1308,81 @@ describe('13.4 获取展示数据', () => {
     });
 
     expect(response.statusCode).toBe(400);
+  });
+});
+
+describe('TP-5-10 灰度开关', () => {
+  it('生成关闭时返回 503 SYS_FEATURE_DISABLED，且不入队', async () => {
+    const harness = build(new InMemoryIdempotencyLock(), {
+      generationEnabled: false,
+      exportEnabled: true,
+      generationRolloutPercent: 100,
+    });
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      payload: body(),
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json<{ error: { code: string; retryable: boolean } }>().error).toMatchObject({
+      code: 'SYS_FEATURE_DISABLED',
+      // 放量扩大或开关重开后重试会成功，客户端据此保留用户填的表单
+      retryable: true,
+    });
+
+    /*
+     * 一个字都没入队。这是这条开关的意义所在 —— 紧急关停要立刻停掉成本，
+     * 而入队之后再拒绝的话，那些消息迟早会被消费掉（也就是钱照花）。
+     */
+    expect(harness.queue.enqueued).toHaveLength(0);
+  });
+
+  it('放量 0% 时同样拦下，但原因不同（进指标，不进响应）', async () => {
+    const harness = build(new InMemoryIdempotencyLock(), {
+      generationEnabled: true,
+      exportEnabled: true,
+      generationRolloutPercent: 0,
+    });
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      payload: body(),
+    });
+
+    /*
+     * 用户看到的是同一个码与同一句文案 —— 他不需要知道自己「不在这批放量里」，
+     * 那是我们的运维状态而不是他的问题。区分只在指标的 reason_code 上。
+     */
+    expect(response.statusCode).toBe(503);
+    expect(response.json<{ error: { code: string } }>().error.code).toBe('SYS_FEATURE_DISABLED');
+  });
+
+  it('放量 100% 时照常放行', async () => {
+    const harness = build(new InMemoryIdempotencyLock(), {
+      generationEnabled: true,
+      exportEnabled: true,
+      generationRolloutPercent: 100,
+    });
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      payload: body(),
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(harness.queue.enqueued).toHaveLength(1);
+  });
+
+  it('未装配开关时视为全开（不因为漏配而拒绝服务）', async () => {
+    const response = await build().app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      payload: body(),
+    });
+    expect(response.statusCode).toBe(201);
   });
 });
