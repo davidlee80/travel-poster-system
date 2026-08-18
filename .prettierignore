@@ -11,3 +11,9 @@ pnpm-lock.yaml
 **/src/generated/
 *.min.js
 *.min.css
+
+# Helm 模板不是合法 YAML（`{{ }}` 在 YAML 解析器眼里是流式映射的开头），
+# Prettier 会在它们上面报 SyntaxError。语法由 CI 的 `helm lint` 校验，
+# 渲染产物由 `kubectl apply --dry-run` 校验 —— 两者都比格式化更能说明问题。
+# values.yaml 与 Chart.yaml 是纯 YAML，仍然纳入格式化。
+deploy/helm/*/templates/

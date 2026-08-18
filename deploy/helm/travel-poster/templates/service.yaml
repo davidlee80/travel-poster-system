@@ -1,0 +1,30 @@
+{{/*
+只有 web 与 api 有 Service（TP-5-09）。
+
+三个 Worker 不需要：它们从队列取任务，没有任何入站流量。给它们建 Service
+只会在集群 DNS 里多三条永远没人解析的记录 —— 而探针由 kubelet 直连 Pod IP。
+*/}}
+{{- range $key, $svc := .Values.services }}
+{{- if and $svc.service $svc.service.enabled }}
+{{- $name := include "tps.kebab" $key }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tps.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "tps.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ $svc.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: {{ include "tps.name" $ }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    app.kubernetes.io/component: {{ $name }}
+{{- end }}
+{{- end }}

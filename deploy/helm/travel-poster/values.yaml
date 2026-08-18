@@ -1,0 +1,148 @@
+# 旅行计划信息图系统 V1 的部署值（TP-5-09，设计稿 22.3）
+#
+# ## 这个文件里没有任何密钥
+#
+# 数据库口令、S3 凭据、模型 API Key、会话签名密钥都从一个**外部创建的**
+# Secret 引用（`existingSecret`）。把它们写进 values 的后果是它们会进 Git、
+# 进 CI 日志、进 `helm get values` 的输出 —— 而后者对任何有集群读权限的人可见。
+#
+# 需要哪些键见 `secretKeys` 一节的注释。
+
+global:
+  # 镜像仓库前缀。CI 推送后由 --set 覆盖
+  imageRegistry: ghcr.io/travel-poster-system
+  imageTag: '0.1.0'
+  imagePullPolicy: IfNotPresent
+
+  # 全部服务共享的非敏感配置，渲染成一个 ConfigMap
+  env:
+    NODE_ENV: production
+    TZ: UTC
+    LANG: C.UTF-8
+    LOG_LEVEL: info
+
+    # 21.4 的配额（全部是配置项，调整不改代码）
+    QUOTA_ANON_PER_MINUTE: '1'
+    QUOTA_REGISTERED_PER_MINUTE: '3'
+    QUOTA_ANON_DAILY_PLANS: '5'
+    QUOTA_REGISTERED_DAILY_PLANS: '5'
+    QUOTA_ANON_MONTHLY_PLANS: '10'
+    QUOTA_REGISTERED_MONTHLY_PLANS: '20'
+    QUOTA_ANON_EXPORTS_PER_PLAN: '3'
+    QUOTA_REGISTERED_EXPORTS_PER_PLAN: '10'
+    QUOTA_ANON_AI_HERO: '0'
+    QUOTA_REGISTERED_AI_HERO: '2'
+    # 必须 ≥ 2 × QUOTA_ANON_DAILY_PLANS，否则 IP 维度会先撞墙、
+    # 账号维度配额成为摆设（21.4）。启动时校验该不变式，不满足则拒绝启动
+    QUOTA_IP_PLANS_PER_DAY: '10'
+    QUOTA_IP_ANON_CREATE_PER_HOUR: '5'
+    QUOTA_IP_ANON_CREATE_PER_DAY: '20'
+
+    # 15.1 的保留期
+    ANON_RETENTION_DAYS: '30'
+    ANON_RETENTION_GRACE_DAYS: '30'
+
+    # TP-5-03：留空表示不装配 OTel SDK（全程 no-op）
+    OTEL_EXPORTER_OTLP_ENDPOINT: ''
+    OTEL_TRACES_SAMPLER_ARG: '1'
+
+# 外部 Secret 的名字。**必须在安装前手工创建**（或由外部密钥管理器同步）
+existingSecret: travel-poster-secrets
+
+# Secret 里必须存在的键。仅作文档 —— 模板用 envFrom 整体注入，
+# 因此少一个键的表现是「服务启动时 requireString 抛错并拒绝启动」（fail fast）：
+#   DATABASE_URL  REDIS_URL
+#   SESSION_SIGNING_KEY  INTERNAL_API_KEY  RENDER_SIGNING_KEY
+#   S3_ENDPOINT  S3_ACCESS_KEY_ID  S3_SECRET_ACCESS_KEY
+#   S3_BUCKET_ASSETS  S3_BUCKET_EXPORTS  S3_PUBLIC_BASE_URL
+#   LLM_API_KEY  IMAGE_API_KEY
+
+# 灰度开关（TP-5-10）。一次放量只改这一节，不改镜像
+featureFlags:
+  # 关闭时 13.1 返回维护提示（503 + SYS_MAINTENANCE），不入队
+  generationEnabled: true
+  # 关闭时 13.5 返回维护提示。导出比生成便宜得多，因此可以分别放量
+  exportEnabled: true
+  # 0～100。按 user_id 的稳定哈希分桶 —— 同一个用户每次得到同一个结果，
+  # 否则用户会看到「刚才能用现在不能用」
+  generationRolloutPercent: 100
+
+services:
+  web:
+    replicas: 2
+    # web 只做 SSR 与渲染路由，CPU 密集度低
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: '1', memory: 512Mi }
+    service:
+      enabled: true
+      port: 3000
+
+  api:
+    replicas: 2
+    resources:
+      requests: { cpu: 200m, memory: 384Mi }
+      limits: { cpu: '1', memory: 768Mi }
+    service:
+      enabled: true
+      port: 3001
+
+  generationWorker:
+    replicas: 2
+    # 瓶颈是等模型返回而不是本地 CPU（单实例并发 2，见 main.ts）
+    resources:
+      requests: { cpu: 200m, memory: 512Mi }
+      limits: { cpu: '1', memory: 1Gi }
+    probePort: 3011
+
+  renderWorker:
+    replicas: 1
+    # 22.3.2：内存 ≥ 2Gi（一个 browser + 3 个 page）。低于它 Chromium 会被
+    # OOMKilled，而症状是 "Target closed" —— 与共享内存不足的表现一样，
+    # 两者都会让人先去查 /dev/shm
+    resources:
+      requests: { cpu: 500m, memory: 2Gi }
+      limits: { cpu: '2', memory: 3Gi }
+    probePort: 3012
+    # 22.3.2：/dev/shm 默认 64MB，Chromium 会崩。用 emptyDir: Memory 挂 1Gi
+    devShmSizeLimit: 1Gi
+
+  retentionWorker:
+    # **必须是 1**。清理任务在进程内按固定间隔跑，多副本会让同一批到期用户
+    # 被并发清理（见 apps/retention-worker/src/main.ts）
+    replicas: 1
+    resources:
+      requests: { cpu: 50m, memory: 192Mi }
+      limits: { cpu: 500m, memory: 384Mi }
+    probePort: 3013
+
+# 22.3.3：必须大于应用侧的停机预算（GracefulShutdown 默认 25 秒、
+# L-10 的验收线 30 秒）。小于它会被 SIGKILL 打断收尾，任务留下悬挂状态
+terminationGracePeriodSeconds: 45
+
+serviceAccount:
+  create: true
+  name: ''
+
+podSecurityContext:
+  # 22.3.1：数值型非 root UID/GID —— 用名字（node）在某些 K8s 的
+  # runAsUser 校验下不生效
+  runAsUser: 10001
+  runAsGroup: 10001
+  runAsNonRoot: true
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  # 不设 readOnlyRootFilesystem：sharp 的临时文件与 Chromium 的用户数据目录
+  # 都要写盘，而给它们各挂一个 emptyDir 只是把同一件事换个写法
+  capabilities:
+    drop: ['ALL']
+
+# Prometheus 抓取（21.3）。用注解而不是 ServiceMonitor：后者要求集群装了
+# prometheus-operator 的 CRD，而注解在两种部署形态下都有效
+metrics:
+  annotations: true
+  path: /metrics

@@ -1,0 +1,38 @@
+{{ .Chart.Name }} {{ .Chart.AppVersion }} 已部署为 {{ .Release.Name }}。
+
+安装前必须存在的 Secret：{{ .Values.existingSecret }}
+  kubectl create secret generic {{ .Values.existingSecret }} \
+    --from-literal=DATABASE_URL=... \
+    --from-literal=REDIS_URL=... \
+    --from-literal=SESSION_SIGNING_KEY=... \
+    --from-literal=INTERNAL_API_KEY=... \
+    --from-literal=RENDER_SIGNING_KEY=... \
+    --from-literal=S3_ENDPOINT=... \
+    --from-literal=S3_ACCESS_KEY_ID=... \
+    --from-literal=S3_SECRET_ACCESS_KEY=... \
+    --from-literal=S3_BUCKET_ASSETS=... \
+    --from-literal=S3_BUCKET_EXPORTS=... \
+    --from-literal=S3_PUBLIC_BASE_URL=... \
+    --from-literal=LLM_API_KEY=... \
+    --from-literal=IMAGE_API_KEY=...
+
+少一个键的表现是那个服务启动即退出（requireString 抛错）。这是有意的
+fail fast —— 带着缺失配置上线的表现是「部分功能在某些路径上莫名失败」。
+
+数据库迁移**不由 chart 执行**。执行顺序是：先 pnpm db:migrate，再 helm upgrade。
+放进 Helm hook 的话，一次失败的迁移会让 release 卡在 pending-upgrade，
+而那时既不能回滚也不能重试（设计稿 15.1 的迁移策略）。
+
+当前灰度状态（TP-5-10）：
+  生成    {{ if .Values.featureFlags.generationEnabled }}开启，放量 {{ .Values.featureFlags.generationRolloutPercent }}%{{ else }}**已关闭**（13.1 返回维护提示）{{ end }}
+  导出    {{ if .Values.featureFlags.exportEnabled }}开启{{ else }}**已关闭**（13.5 返回维护提示）{{ end }}
+
+一键回滚：
+  helm rollback {{ .Release.Name }}
+
+只关功能不回滚版本（更快，且不动镜像）：
+  helm upgrade {{ .Release.Name }} . --reuse-values --set featureFlags.generationEnabled=false
+
+渲染 Worker 的两项硬约束（22.3.2）已在本 chart 中固化：
+  内存 {{ .Values.services.renderWorker.resources.requests.memory }}（≥ 2Gi）
+  /dev/shm {{ .Values.services.renderWorker.devShmSizeLimit }}（emptyDir: Memory）

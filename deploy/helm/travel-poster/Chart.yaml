@@ -1,0 +1,18 @@
+apiVersion: v2
+name: travel-poster
+description: 旅行计划信息图系统 V1（设计稿 22.3、实施计划 TP-5-09）
+type: application
+
+# chart 版本与应用版本分开：前者随部署配置演进，后者跟着镜像标签。
+# 合成一个的话，「只改了资源上限」也要发一次应用版本，
+# 而回滚时无法区分「回滚配置」与「回滚代码」。
+version: 0.1.0
+appVersion: '0.1.0'
+
+kubeVersion: '>=1.28.0-0'
+
+keywords:
+  - travel
+  - infographic
+maintainers:
+  - name: travel-poster-system

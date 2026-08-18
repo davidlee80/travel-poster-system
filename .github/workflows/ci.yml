@@ -215,6 +215,57 @@ jobs:
       - name: 集成测试（数据库约束）
         run: pnpm test:integration
 
+  # ── Helm chart 的语法与渲染（TP-5-09）─────────────────────
+  #
+  # 两层，缺一不可：
+  #   helm lint      模板语法与 values 的结构
+  #   helm template  真的渲染一遍，再交给 kubectl --dry-run 做 schema 校验
+  #
+  # 只跑 lint 不够：它不会发现「渲染出的 Deployment 少了 selector」这类
+  # **合法模板产出非法资源**的问题，而那要到 apply 时才报错 ——
+  # 那时 release 已经卡在 pending-install。
+  #
+  # chart 的不变量（runAsUser、/dev/shm、宽限期、单副本）由
+  # packages/observability/src/helm-chart.test.ts 在 verify job 里断言。
+  # 那些是 lint 拦不住的：删掉 securityContext 的模板依然「语法正确」。
+  helm:
+    name: helm (TP-5-09 chart 校验)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: helm lint
+        run: helm lint deploy/helm/travel-poster
+
+      - name: helm template（默认 values）
+        run: helm template tps deploy/helm/travel-poster > /tmp/rendered.yaml
+
+      - name: 渲染产物必须是合法的 Kubernetes 资源
+        run: kubectl apply --dry-run=client -f /tmp/rendered.yaml
+
+      # 灰度关闭的那条路径也要能渲染 —— 一次紧急回滚时才发现
+      # 「关掉开关后 chart 渲染不出来」是最糟的时机
+      - name: helm template（灰度全关）
+        run: |
+          helm template tps deploy/helm/travel-poster             --set featureFlags.generationEnabled=false             --set featureFlags.exportEnabled=false             --set featureFlags.generationRolloutPercent=0             > /tmp/rendered-off.yaml
+          kubectl apply --dry-run=client -f /tmp/rendered-off.yaml
+
+      # 22.3.2 的两项硬约束在渲染产物里的最终形态。
+      # values 层由单测断言，这里断言的是「模板真的把它们用上了」
+      - name: 渲染产物含 /dev/shm 与非 root
+        run: |
+          grep -q 'medium: Memory' /tmp/rendered.yaml             || { echo 'render-worker 的 /dev/shm 未挂载为 tmpfs（22.3.2）'; exit 1; }
+          grep -q 'sizeLimit: 1Gi' /tmp/rendered.yaml             || { echo '/dev/shm 大小不是 1Gi'; exit 1; }
+          count=$(grep -c 'runAsUser: 10001' /tmp/rendered.yaml)
+          test "$count" = '5'             || { echo "只有 $count 个 Deployment 设了 runAsUser: 10001，应为 5"; exit 1; }
+          echo '渲染产物的安全与资源约束正确'
+
   # ── 门禁 #33 的第二半：基线更新需显式审批（TP-5-07）────────
   #
   # CI 里已有的那条反向测试保证「基线必须在容器内生成」。这一条管的是另一件事：

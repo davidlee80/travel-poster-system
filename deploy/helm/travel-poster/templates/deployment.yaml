@@ -1,0 +1,163 @@
+{{/*
+五个服务的 Deployment（TP-5-09，设计稿 22.3）。
+
+## 为什么是一个带 range 的模板而不是五个文件
+
+五个服务在安全上下文、探针、停机宽限、Secret 注入上**必须一致** ——
+而那正是最容易出现「改了四个忘了第五个」的地方。安全上下文漏一个服务的后果
+是那个 Pod 以 root 跑，而没有任何东西会报错。
+
+差异（内存、副本数、/dev/shm、是否有 Service）都在 values 里，
+因此「render-worker 要 2Gi」这类决定看得见、可 review、可 diff。
+*/}}
+{{- range $key, $svc := .Values.services }}
+{{- $name := include "tps.kebab" $key }}
+{{- $isWorker := hasPrefix "generation" $key | or (hasPrefix "render" $key) | or (hasPrefix "retention" $key) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tps.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "tps.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  replicas: {{ $svc.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "tps.name" $ }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: {{ $name }}
+  strategy:
+    {{- if eq $key "retentionWorker" }}
+    {{/*
+      保留期清理必须**单副本**（见 apps/retention-worker/src/main.ts）。
+      RollingUpdate 会在新 Pod 就绪前保留旧 Pod，那一瞬间有两个实例在跑 ——
+      而它们会并发清理同一批到期用户。Recreate 保证任何时刻最多一个。
+    */}}
+    type: Recreate
+    {{- else }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "tps.labels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $name }}
+      annotations:
+        {{/*
+          配置变更触发滚动更新。不加这个哈希的话，改完 ConfigMap 后
+          `helm upgrade` 什么都不做 —— Pod 还在用旧配置，而 `helm diff`
+          显示「已更新」。
+        */}}
+        checksum/config: {{ toYaml $.Values.global.env | sha256sum }}
+        {{- if $.Values.metrics.annotations }}
+        prometheus.io/scrape: 'true'
+        prometheus.io/path: {{ $.Values.metrics.path | quote }}
+        prometheus.io/port: {{ (ternary (get $svc "probePort") (get ($svc.service | default dict) "port") $isWorker) | quote }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "tps.serviceAccountName" $ }}
+      {{/*
+        22.3.3：必须大于应用侧的停机预算。小于它会被 SIGKILL 打断收尾，
+        任务留下悬挂状态 —— 而那正是 L-10 与门禁 #34 要防的事。
+      */}}
+      terminationGracePeriodSeconds: {{ $.Values.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: '{{ $.Values.global.imageRegistry }}/{{ $name }}:{{ $.Values.global.imageTag }}'
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          securityContext:
+            {{- toYaml $.Values.containerSecurityContext | nindent 12 }}
+          {{/*
+            Chromium 会产生僵尸子进程，没有 init 会累积到 PID 耗尽（22.3.1）。
+            镜像里已用 tini 作 ENTRYPOINT，这里再开 shareProcessNamespace
+            没有意义 —— 因此不设，只在 render-worker 依赖镜像的 tini。
+          */}}
+          ports:
+            {{- if and $svc.service $svc.service.enabled }}
+            - name: http
+              containerPort: {{ $svc.service.port }}
+            {{- else }}
+            - name: probe
+              containerPort: {{ $svc.probePort }}
+            {{- end }}
+          env:
+            - name: PORT
+              value: {{ (ternary $svc.probePort (get ($svc.service | default dict) "port") $isWorker) | quote }}
+            - name: PROBE_PORT
+              value: {{ (ternary $svc.probePort (get ($svc.service | default dict) "port") $isWorker) | quote }}
+            - name: SERVICE_VERSION
+              value: {{ $.Chart.AppVersion | quote }}
+            {{/* 灰度开关（TP-5-10）。只有 api 读它们，但统一注入避免漏配 */}}
+            - name: FEATURE_GENERATION_ENABLED
+              value: {{ $.Values.featureFlags.generationEnabled | quote }}
+            - name: FEATURE_EXPORT_ENABLED
+              value: {{ $.Values.featureFlags.exportEnabled | quote }}
+            - name: FEATURE_GENERATION_ROLLOUT_PERCENT
+              value: {{ $.Values.featureFlags.generationRolloutPercent | quote }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "tps.fullname" $ }}-config
+            {{/*
+              整体注入而不是逐键 valueFrom：少一个键的表现是服务启动时
+              `requireString` 抛错并拒绝启动（fail fast），
+              而逐键写的话漏掉一个要等到运行时那条路径被走到才发现。
+            */}}
+            - secretRef:
+                name: {{ $.Values.existingSecret }}
+          {{/*
+            探针：存活看进程、就绪看依赖与排空状态。
+            两者的路径不同是刻意的 —— 排空期间 /healthz 仍返回 200，
+            否则 K8s 会在优雅停机中途 SIGKILL 掉本实例（22.3.3）。
+          */}}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ (ternary $svc.probePort (get ($svc.service | default dict) "port") $isWorker) }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ (ternary $svc.probePort (get ($svc.service | default dict) "port") $isWorker) }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            {{/*
+              就绪探针失败一次就摘除。它的语义是「现在能不能接流量」，
+              而排空的第一件事就是让它返回 503 —— 容忍三次会让 LB 在
+              15 秒内继续往一个正在关闭的实例转发请求。
+            */}}
+            failureThreshold: 1
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          {{- if $svc.devShmSizeLimit }}
+          volumeMounts:
+            - name: dev-shm
+              mountPath: /dev/shm
+          {{- end }}
+      {{- if $svc.devShmSizeLimit }}
+      volumes:
+        {{/*
+          22.3.2：容器的 /dev/shm 默认只有 64MB，Chromium 会崩。
+          `medium: Memory` 让它变成 tmpfs（走 Pod 的内存配额，因此
+          resources.limits.memory 必须留出这 1Gi —— render-worker 给了 3Gi）。
+
+          代码侧还有一层兜底：探测到 /dev/shm < 256MB 时加
+          `--disable-dev-shm-usage`（更慢，L-07 验证它有效）。
+          两层都要有：这里漏配时兜底能撑住，而兜底失效时这里能撑住。
+        */}}
+        - name: dev-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ $svc.devShmSizeLimit }}
+      {{- end }}
+{{- end }}

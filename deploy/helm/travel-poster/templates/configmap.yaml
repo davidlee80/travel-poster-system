@@ -1,0 +1,23 @@
+{{/*
+非敏感配置（TP-5-09）。
+
+与 Secret 的分野不是「重要程度」而是**可见性**：这里的每个值都会出现在
+`kubectl get configmap -o yaml` 里，任何有集群读权限的人可见。
+因此凡是泄漏后需要轮换的东西都不在这里 —— 见 values.yaml 的 secretKeys 注释。
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tps.fullname" . }}-config
+  labels:
+    {{- include "tps.labels" . | nindent 4 }}
+data:
+  {{- range $k, $v := .Values.global.env }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+
+  # 服务间地址由 chart 自己算出来，不让运维填 —— 填错的表现是
+  # 渲染路由对全部请求返回 404（中间件 fail closed，17.1），
+  # 而那看起来像「模板坏了」
+  INTERNAL_API_BASE: 'http://{{ include "tps.fullname" . }}-api:{{ .Values.services.api.service.port }}'
+  RENDER_BASE_URL: 'http://{{ include "tps.fullname" . }}-web:{{ .Values.services.web.service.port }}'
