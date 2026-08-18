@@ -1,0 +1,147 @@
+# Prometheus 记录规则与告警规则（TP-5-04，设计稿 21.3）
+#
+# ## 为什么规则文件必须进仓库
+#
+# 21.3 的六条告警是「验收标准的执行方式」：门禁 #5 说
+# `travel_icon_load_failure_total` 恒为 0，而让它恒为 0 的不是那句话，
+# 是这里的告警。规则留在某个人的 Grafana 里，等于验收标准没有执行者。
+#
+# ## 这个文件由测试校验
+#
+# packages/observability/src/alert-rules.test.ts 断言：
+#   - 每条规则引用的指标都在 21.3 的指标目录里（catalog.ts）；
+#   - 六条告警一条不少；
+#   - 每条告警都有 `for`（除了两条「任意一次即告警」的）与 runbook 链接。
+#
+# 拦的是告警最常见、也最难发现的失效方式：**表达式引用了一个不存在的指标**。
+# PromQL 对不存在的指标返回空集，于是那条告警永远不触发 —— 而 Prometheus
+# 的界面上它显示为「正常」。指标改名、打错字、或者应用侧那个指标从未被注册
+# （P5 之前六个 21.3 指标就是这个状态），症状完全一样。
+#
+# 注解用 `runbook` 而不是 Alertmanager 惯例的 `runbook_url`：值是仓库内的
+# 文档路径，不是 URL。叫 `_url` 却放一个相对路径只会让点它的人得到 404。
+# 等有了公网 runbook 站点再改名并换成完整链接。
+
+groups:
+  # ── 记录规则（R-31）──────────────────────────────────────
+  #
+  # `travel_asset_cache_hit_ratio` 在 21.3 原表里是 Gauge。R-31 改成记录规则：
+  # Gauge 是单进程状态，多副本部署时每个 Worker 各报一个自己的命中率，
+  # 「平均命中率」不能由它们简单平均得出（各副本处理的槽位数不同），
+  # 进程重启还会让它归零。记录规则天然跨副本聚合，且不受重启影响。
+  - name: travel-poster-recording
+    interval: 1m
+    rules:
+      - record: travel_asset_cache_hit_ratio
+        expr: |
+          sum by (role) (rate(travel_asset_resolution_total{strategy="cache_hit"}[30m]))
+            /
+          sum by (role) (rate(travel_asset_resolution_total[30m]))
+
+  # ── 告警（21.3 的六条）───────────────────────────────────
+  - name: travel-poster-alerts
+    rules:
+      # 1. SLA 违约（21.2 的 T1 < 75 秒）
+      #
+      # 只看 ≤7 天那一档：8～14 天的目标不同（要分段调两次模型），
+      # 混在一起会让一个全是 14 天请求的时段看起来在违约，
+      # 而它其实符合那一档的目标。
+      - alert: TravelJobT1SlaBreach
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(travel_job_milestone_seconds_bucket{milestone="t1",total_days_bucket="1-7"}[15m])
+            )
+          ) > 75
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'T1（计划可读）P95 超过 75 秒'
+          description: '设计稿 21.2 的分段 SLA 违约。先看 travel_job_duration_seconds 按 stage 分解，定位是排队、模型还是校验。'
+          runbook: 'docs/运维手册.md#t1-sla-违约'
+
+      # 2. 缓存失效（21.2 措施二的前提）
+      #
+      # Hero 缓存命中率是「20 秒 AI 生成不进入首屏路径」这套设计的前提：
+      # 命中率掉下来意味着大量请求要现场等 AI，T2 随之崩掉。
+      # 因此这条告警在 T2 违约**之前**就会响。
+      - alert: TravelHeroCacheHitRatioLow
+        expr: travel_asset_cache_hit_ratio{role="HERO_BACKGROUND"} < 0.7
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Hero 缓存命中率低于 0.7'
+          description: '19.5 的预热库可能未覆盖当前热门目的地。检查 travel_asset_resolution_total 的 strategy 分布。'
+          runbook: 'docs/运维手册.md#hero-缓存命中率下降'
+
+      # 3. 图标回归（验收标准 5，期望恒为 0）
+      #
+      # 没有 `for`：一次就是缺陷。图标是内联进构建产物的（9.1），
+      # 运行期没有网络请求可失败 —— 计数大于 0 只有一种原因：
+      # ViewModel 里出现了清单外的图标引用，即契约漂移。
+      - alert: TravelIconLoadFailure
+        expr: increase(travel_icon_load_failure_total[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: '渲染页面出现无法解析的图标引用'
+          description: '验收标准 5 要求恒为 0。多半是新增了图标键但漏配 @tps/icon-library 的映射。'
+          runbook: 'docs/运维手册.md#图标加载失败'
+
+      # 4. 修复异常（规则集可能过严）
+      #
+      # P95 贴到 3 轮意味着规则集把大量正常输出判成了违规 ——
+      # 那是**我们的**问题而不是模型的，而它的代价是每个任务多花两次
+      # 定向重生成的钱。
+      - alert: TravelPlanRepairIterationsHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(travel_plan_repair_iterations_bucket[1h]))
+          ) >= 3
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: '程序化修复轮次 P95 达到 3'
+          description: '按 travel_validation_violations_total 的 rule_id 排序，找最常触发的那几条规则，确认它们是否过严。'
+          runbook: 'docs/运维手册.md#修复轮次异常'
+
+      # 5. 降级异常（降级产物占比 > 10%）
+      #
+      # 分母用 travel_job_total 而不是渲染次数：21.3 原文写的是
+      # `travel_render_degraded_total / travel_job_total`，
+      # 它回答的是「多少比例的用户拿到了降级产物」。
+      - alert: TravelRenderDegradedRatioHigh
+        expr: |
+          sum(rate(travel_render_degraded_total[30m]))
+            /
+          sum(rate(travel_job_total[30m])) > 0.1
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: '降级产物占比超过 10%'
+          description: '17.3 的四轮重渲染兜不住。看 travel_render_overflow_rounds 的分布与 template_id，多半是模板默认版式对真实内容偏紧。'
+          runbook: 'docs/运维手册.md#降级产物占比升高'
+
+      # 6. 字体故障（17.5，任意一次即告警）
+      #
+      # R-42：21.3 原文的条件是「日志出现 CJK_FONT_UNAVAILABLE」，而
+      # Prometheus 不看日志 —— 照原文写就是一条永远不会触发的告警。
+      # 改判在 travel_render_failure_total 上（render-worker 把
+      # RenderError.detail 计成 reason_code）。
+      #
+      # 没有 `for`：字形缺失会让页面变成豆腐块，而那种产物对用户毫无价值。
+      # 17.5 明确「不允许降级输出」，因此第一次出现就必须有人看。
+      - alert: TravelCjkFontUnavailable
+        expr: increase(travel_render_failure_total{reason_code="CJK_FONT_UNAVAILABLE"}[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: '渲染容器内中文字体不可用'
+          description: '17.5 的字形断言失败，页面会是豆腐块。检查渲染镜像的 /usr/share/fonts 与 web 服务的 /fonts/ 静态资源。'
+          runbook: 'docs/运维手册.md#中文字体故障'

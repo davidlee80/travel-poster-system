@@ -43,6 +43,8 @@
     "assets:ingest": "pnpm --filter \"@tps/generation-worker...\" run build && node apps/generation-worker/dist/assets/ingest-cli.js",
     "//assets:preheat": "19.5 Hero 预热（TP-4-05）。--dry-run 先看键与数量，不花钱。IMAGE_MODE=fake 时产物是渐变图，不可作为上线预热",
     "assets:preheat": "pnpm --filter \"@tps/generation-worker...\" run build && node apps/generation-worker/dist/assets/preheat-cli.js",
+    "//test:alerts": "TP-5-04 的门禁：告警规则与指标目录的一致性。拦「表达式引用了不存在的指标」—— 那种告警永远不触发，而 Prometheus 界面显示为正常",
+    "test:alerts": "pnpm --filter @tps/observability exec vitest run alert-rules catalog",
     "//test:logs": "TP-5-02 的门禁：日志禁记字段（redact 层 + message 插值的静态扫描）。--self-test 验证扫描器本身有效",
     "test:logs": "node tools/scan-log-payloads.mjs --self-test && node tools/scan-log-payloads.mjs && pnpm --filter @tps/shared exec vitest run logger",
     "//test:retention": "TP-4-21~25 的门禁：保留期清理与知识转存（需 DATABASE_URL）",

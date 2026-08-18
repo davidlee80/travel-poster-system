@@ -2,6 +2,8 @@ import { createCounter, createHistogram } from '@tps/observability';
 import { RENDER_ROUNDS } from '@tps/presentation';
 import type { TemplateId } from '@tps/schemas';
 
+import { RenderError } from './errors.js';
+
 /**
  * 渲染质量指标（TP-5-01，设计稿 21.3）。
  *
@@ -64,6 +66,45 @@ export const iconLoadFailureTotal = createCounter({
   name: 'travel_icon_load_failure_total',
   help: '渲染页面中未能解析的图标引用数（验收标准 5，期望恒为 0）',
 });
+
+/**
+ * 渲染失败计数（TP-5-04，R-42）。
+ *
+ * ## 为什么要这一项
+ *
+ * 21.3 的六条告警里有一条是「字体故障：**日志出现** `CJK_FONT_UNAVAILABLE`」。
+ * 但告警规则文件是 Prometheus 的，而 Prometheus 不看日志 —— 对日志告警需要
+ * Loki ruler 或 ELK watcher，V1 没有部署那一套。照原文写就是一条**永远不会
+ * 触发**的告警：规则文件里放一个 Prometheus 读不懂的条件，看起来告警配好了。
+ *
+ * 而字体故障本来就有一个明确的标识（`RenderError.detail`，其注释从 P1 起就
+ * 写着「用于日志与指标细分」，只是从未有指标用它）。把它计成指标，
+ * 那条告警就落在 Prometheus 能判定的东西上。
+ *
+ * 不复用 `travel_render_degraded_total`：那一项是 21.3 用来算「降级产物占比」
+ * 的分子，混进失败会让那个比率失真 —— 降级产物是**交付了的**，失败没有。
+ *
+ * `reason_code` 取 `detail ?? code`：前者更具体
+ * （`CJK_FONT_UNAVAILABLE` / `CANVAS_OVERFLOW_X` / `READY_NOT_REACHED` /
+ * `BODY_FONT_NOT_SUBSET` / `BUDGET_EXHAUSTED_BEFORE_START`），
+ * 全部是编译期已知的常量，取值有界。
+ */
+export const renderFailureTotal = createCounter({
+  name: 'travel_render_failure_total',
+  help: '渲染失败计数（按 13.7 错误码或更具体的原因标识）',
+  labelNames: ['reason_code'],
+});
+
+/** 非 RenderError 的失败归到这一个值，避免把异常消息当标签（基数不可控） */
+export const UNKNOWN_RENDER_REASON = 'UNKNOWN';
+
+export function recordRenderFailure(error: unknown): void {
+  const reason =
+    error instanceof RenderError
+      ? (error.detail ?? error.code)
+      : /* c8 ignore next */ UNKNOWN_RENDER_REASON;
+  renderFailureTotal.inc({ reason_code: reason });
+}
 
 /** 一次页面渲染的质量观测 */
 export function recordRenderQuality(input: {

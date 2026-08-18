@@ -116,6 +116,30 @@ jobs:
       - name: 日志禁记字段（TP-5-02）
         run: pnpm test:logs
 
+      # TP-5-04：告警规则与指标目录的一致性（语义层）。
+      # 拦「表达式引用了不存在的指标」—— 那种告警永远不触发，
+      # 而 Prometheus 界面上它显示为正常。
+      - name: 告警规则一致性（TP-5-04）
+        run: pnpm test:alerts
+
+      # 语法层由 promtool 校验。上一步查的是「指标存在吗」，
+      # 这一步查的是「PromQL 写对了吗」—— 两者都不能替代对方：
+      # 一个语法错误的规则文件会让 Prometheus **拒绝加载整个文件**，
+      # 于是六条告警一起消失（而部署时不会有人注意到那行日志）。
+      #
+      # 用官方镜像里的 promtool 而不是下载 release tarball：后者要在这里写死
+      # 一个版本号，而那个号一旦不存在（写错、或该版本被撤下）这一步就 404，
+      # 表现为「CI 挂了」而不是「规则有问题」。
+      #
+      # 不锁镜像版本是有意的：`check rules` 的语法是稳定的，而锁一个具体版本
+      # 要有人定期升；反过来，如果新版 promtool 报出了新的警告，
+      # 那通常正是我们该知道的事。
+      - name: promtool check rules（TP-5-04）
+        run: |
+          docker run --rm -v "$PWD/deploy/prometheus/rules:/rules:ro" \
+            --entrypoint /bin/promtool prom/prometheus:latest \
+            check rules /rules/travel-poster.rules.yml
+
   # ── L-09：迁移在真实 pgvector 镜像上执行 ───────────────────
   migrations:
     name: migrations (L-09 pgvector/pgvector:pg17)

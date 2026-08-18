@@ -189,6 +189,14 @@ export const METRICS_CATALOG: readonly CatalogEntry[] = [
     note: '采集点是渲染页面里的 [data-icon-missing]：那是「图标加载失败」唯一可观测的形态（验收标准 5）',
   },
   {
+    name: 'travel_render_failure_total',
+    kind: 'counter',
+    labels: ['reason_code'],
+    owner: 'render-worker',
+    source: 'supplementary',
+    note: 'R-42：21.3 的字体故障告警条件写的是「日志出现 CJK_FONT_UNAVAILABLE」，而 Prometheus 不看日志。把渲染失败原因计成指标，那条告警才有可判定的对象',
+  },
+  {
     name: 'travel_export_total',
     kind: 'counter',
     labels: ['format', 'scope', 'outcome', 'user_type'],

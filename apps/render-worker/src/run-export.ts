@@ -9,7 +9,7 @@ import type { Browser, BrowserContext } from 'playwright-core';
 import { createRenderContext } from './browser.js';
 import { capturePdf, mergePdfs } from './pdf.js';
 import { capturePng } from './png.js';
-import { recordRenderQuality } from './render-metrics.js';
+import { recordRenderFailure, recordRenderQuality } from './render-metrics.js';
 import { renderPage } from './render-page.js';
 
 /**
@@ -124,6 +124,8 @@ export async function runExport(deps: RunExportDeps, exportId: string): Promise<
          * 而前两天已经渲染完的成本白花。
          */
         failedDays.push(page.dayNumber ?? 0);
+        // R-42：失败原因进指标，21.3 的字体故障告警据此判定
+        recordRenderFailure(error);
         deps.logger.warn(
           { format: row.format, page_type: page.dayNumber === null ? 'full' : 'day' },
           `第 ${page.dayNumber ?? 0} 页导出失败：${String(error)}`,
