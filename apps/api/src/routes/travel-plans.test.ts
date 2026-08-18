@@ -105,6 +105,11 @@ class FakePresentationsRepository implements PresentationsRepository {
     throw new Error('API 端点不应调用 findPresentationByVersion（那是渲染路由的入口）');
   }
 
+  listDayNumbers(): Promise<never[]> {
+    // 13.4 端点不会调用它 —— 它是导出链路（TP-4-12）用来枚举要渲染的天号的
+    return Promise.resolve([]);
+  }
+
   saveBindings(): Promise<void> {
     return Promise.resolve();
   }
@@ -239,6 +244,9 @@ class FakePlansRepository implements TravelPlansRepository {
     return Promise.resolve('cancelled');
   }
 
+  markMilestone(): never {
+    throw new Error('API 端点不应调用 markMilestone（里程碑由 Worker 写入）');
+  }
   appendJobWarnings(): never {
     throw new Error('API 端点不应调用 appendJobWarnings（告警由 Worker 写入）');
   }

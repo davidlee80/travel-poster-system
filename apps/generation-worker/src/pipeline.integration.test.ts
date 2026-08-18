@@ -312,14 +312,34 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     const outcome = await generatePlan(workerDeps(), payload);
     expect(outcome).toMatchObject({ outcome: 'saved' });
 
-    // 5. 任务状态推进到 RESOLVING_ASSETS（P3 的边界，见 generate-plan.ts）
+    /*
+     * 5. 任务推进到 COMPLETED（16.1，TP-4-08）。
+     *
+     * P4 起 RENDERING_HTML → COMPLETED 也走完了：渲染路由是实时从库里取
+     * ViewModel 渲染的，页面在展示数据落库那一刻就可访问（见 R-35）。
+     * `warnings` 里是非阻断的素材降级码（TP-4-09）—— 本地素材库是空的，
+     * 因此必然有 ASSET_LIBRARY_MISS。
+     */
     const job = await app.inject({
       method: 'GET',
       url: `/api/v1/generation-jobs/${handles.job_id}`,
       headers: { cookie },
     });
     expect(job.statusCode).toBe(200);
-    expect(job.json()).toMatchObject({ status: 'RESOLVING_ASSETS', progress: 76 });
+    expect(job.json()).toMatchObject({ status: 'COMPLETED', progress: 100 });
+    expect(job.json<{ warnings: string[] }>().warnings).toContain('ASSET_LIBRARY_MISS');
+
+    // T1/T2 里程碑都已写入（21.2 措施一，TP-4-14）
+    const milestones = await pool.query<{ t1_at: Date | null; t2_at: Date | null }>(
+      'SELECT t1_at, t2_at FROM generation_jobs WHERE id = $1',
+      [handles.job_id],
+    );
+    expect(milestones.rows[0]!.t1_at).not.toBeNull();
+    expect(milestones.rows[0]!.t2_at).not.toBeNull();
+    // T1 不晚于 T2：文字版计划先可读，带图页面后可看
+    expect(milestones.rows[0]!.t1_at!.getTime()).toBeLessThanOrEqual(
+      milestones.rows[0]!.t2_at!.getTime(),
+    );
 
     // 6. 计划可读，且是一份合法的 TravelPlan
     const plan = await app.inject({
@@ -507,67 +527,70 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     expect(presentation.json<{ validation_status: string }>().validation_status).toBe('DEGRADED');
   });
 
-  it('重跑生成产出新版本，展示数据按版本隔离且素材被复用（19.3、19.5）', async () => {
+  it('同一任务重复投递被终态挡住（13.8 的 Worker 侧并发保护）', async () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
       payload: requestBody(),
     });
-    const handles = created.json<{ plan_id: string }>();
     const cookie = anonymousCookie(created.headers['set-cookie']);
     const payload = await takeQueuedPayload();
 
     const first = await generatePlan(workerDeps(), payload);
+    expect(first.outcome).toBe('saved');
+
     /*
-     * 第二次消费不会被「终态」挡住（任务停在 RESOLVING_ASSETS），因此会
-     * 真的重跑一遍：生成 → 落一个**新版本** → 重新编排。
+     * P4 起任务会推进到 COMPLETED，因此第二次消费被终态挡住 ——
+     * 这正是 13.8 要的行为（重复投递不双执行）。
      *
-     * 这不是缺陷：19.3 明确「新计划版本产生时不删旧行，按 plan_version_id
-     * 隔离」。真正需要断言的是三件事 —— 新版本有自己完整的 N+1 页、
-     * 13.4 默认返回新版本、素材没有被重复生成。
+     * ## R-36：V1 没有「重新生成」入口，多版本机制因此不可达
+     *
+     * `travel_plan_versions` 的版本号、`current_version_id`、13.4 的
+     * `?plan_version_id=` 参数、13.7 的 `EXPORT_PLAN_VERSION_MISMATCH`
+     * （「计划已产生新版本」）—— 这一整套多版本机制在十三章里**没有任何
+     * 端点能触发**：13.1 的每次提交都建一个新的 `travel_plans` 行。
+     *
+     * P3 时期这条测试能造出两个版本，靠的是「任务停在非终态所以能重复消费」
+     * —— 那是交付边界的副作用，不是设计的入口。P4 把状态机走完之后，
+     * 多版本只能由数据修复或将来的重生成端点产生。
+     * 因此这里改为断言重复投递的正确行为，版本隔离的断言下移到
+     * `presentations` 仓储的集成测试（它直接构造两个版本）。
      */
     const second = await generatePlan(workerDeps(), payload);
+    expect(second).toEqual({ outcome: 'skipped', reason: 'already_terminal' });
 
-    expect(first.outcome).toBe('saved');
-    expect(second.outcome).toBe('saved');
-    if (first.outcome !== 'saved' || second.outcome !== 'saved') return;
-    expect(second.versionId).not.toBe(first.versionId);
+    if (first.outcome !== 'saved') return;
 
+    // 只有一个版本，且它有完整的 5 天 + 完整页
     const perVersion = await pool.query<{ plan_version_id: string; count: string }>(
       `SELECT plan_version_id, count(*) AS count
-         FROM plan_presentations WHERE plan_id = $1
+         FROM plan_presentations WHERE plan_version_id = $1
         GROUP BY plan_version_id`,
-      [handles.plan_id],
+      [first.versionId],
     );
-    expect(perVersion.rows).toHaveLength(2);
-    for (const row of perVersion.rows) {
-      // 每个版本各自完整的 5 天 + 完整页
-      expect(row.count).toBe('6');
-    }
+    expect(perVersion.rows).toHaveLength(1);
+    expect(perVersion.rows[0]!.count).toBe('6');
 
-    // 13.4 默认返回当前版本（13.4「默认返回最新的有效版本」）
+    // 13.4 默认返回当前版本，且显式指定同一版本得到同样的结果
     const current = await app.inject({
       method: 'GET',
-      url: `/api/v1/travel-plans/${handles.plan_id}/presentations/1`,
+      url: `/api/v1/travel-plans/${payload.planId}/presentations/1`,
       headers: { cookie },
     });
-    expect(current.json<{ plan_version_id: string }>().plan_version_id).toBe(second.versionId);
+    expect(current.json<{ plan_version_id: string }>().plan_version_id).toBe(first.versionId);
 
-    // 指定旧版本仍可取到（回滚与对比用）
-    const old = await app.inject({
+    const explicit = await app.inject({
       method: 'GET',
-      url: `/api/v1/travel-plans/${handles.plan_id}/presentations/1?plan_version_id=${first.versionId}`,
+      url: `/api/v1/travel-plans/${payload.planId}/presentations/1?plan_version_id=${first.versionId}`,
       headers: { cookie },
     });
-    expect(old.json<{ plan_version_id: string }>().plan_version_id).toBe(first.versionId);
+    expect(explicit.json<{ plan_version_id: string }>().plan_version_id).toBe(first.versionId);
 
     /*
-     * 19.5 的内容寻址复用，两个方向同时生效：
-     *   跨天   —— fixture 的每一天走的是同一批地点，route_node_hash 相同；
-     *   跨版本 —— 两次生成的路线也相同。
-     * 因此 10 个路线槽位（2 版本 × 5 天）总共只落了**一张** SVG。
+     * 19.5 的内容寻址复用（跨天）：fixture 的每一天走的是同一批地点，
+     * 因此 5 个路线槽位的 `route_node_hash` 相同，库里只落了**一张** SVG。
      * 这条断言是「重复编排不重复花钱」的直接证据 ——
-     * 数字从 10 降到 1 全靠 assets_cache_key_uk 与内容寻址的哈希。
+     * 数字从 5 降到 1 全靠 assets_cache_key_uk 与内容寻址的哈希。
      */
     const svgCount = await pool.query<{ count: string }>(
       `SELECT count(*) FROM assets WHERE source_type = 'GENERATED_SVG'`,
@@ -575,41 +598,20 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     expect(svgCount.rows[0]!.count).toBe('1');
 
     /*
-     * AI 图的成本断言。这里要说清楚一件容易搞反的事：
-     *
-     * 第二次生成**不会重画第一次画过的那些键** —— 缓存键在版本之间相同，
-     * 那些槽位在 `findByCacheKey` 就命中了，压根走不到 AI 层。但第二次
-     * 仍然有自己的 3 张任务额度，于是它会把额度花在**第一次没排上的键**上
-     * （第一次的 3 张额度只够覆盖一部分槽位）。
-     *
-     * 因此库里的 AI 图会随重跑略有增长，但增长量由**每任务 3 张**封住，
-     * 与槽位数（14 天可达 84 个）无关 —— 这正是 21.4 那条上限的作用。
+     * 21.4：单任务 AI 图上限 3 张。绑定数可以多于 3（19.5 的跨天复用让多个
+     * 槽位指向同一张），但**素材行**不能 —— 这与槽位数（14 天可达 84 个）无关。
      */
     const aiAssets = await pool.query<{ count: string }>(
       `SELECT count(*) FROM assets WHERE source_type = 'AI_GENERATED'`,
     );
-    expect(Number(aiAssets.rows[0]!.count)).toBeLessThanOrEqual(2 * MAX_AI_IMAGES_PER_JOB);
+    expect(Number(aiAssets.rows[0]!.count)).toBeLessThanOrEqual(MAX_AI_IMAGES_PER_JOB);
 
-    /*
-     * 绑定是**按版本**记的（`UNIQUE(plan_version_id, template_id, slot_id)`），
-     * 因此两个版本各有一套。
-     *
-     * 两套的数量**不相等**，而且这正是 19.5 想要的结果：第二次生成时库里
-     * 已经有第一次画的那几张，于是更多槽位在缓存键上直接命中 ——
-     * 第二个版本因此比第一个更完整，而它没有多花任何 AI 调用。
-     * 断言写成「相等」会把这条优化判成缺陷。
-     */
-    const perVersionBindings = await pool.query<{ plan_version_id: string; count: string }>(
-      `SELECT plan_version_id, count(*) AS count
-         FROM plan_asset_bindings WHERE plan_id = $1
-        GROUP BY plan_version_id ORDER BY min(created_at)`,
-      [handles.plan_id],
+    // 绑定按版本记（`UNIQUE(plan_version_id, template_id, slot_id)`），至少 5 条路线图
+    const bindings = await pool.query<{ count: string }>(
+      'SELECT count(*) AS count FROM plan_asset_bindings WHERE plan_version_id = $1',
+      [first.versionId],
     );
-    expect(perVersionBindings.rows).toHaveLength(2);
-    const [firstCount, secondCount] = perVersionBindings.rows.map((row) => Number(row.count));
-    // 每个版本至少有 5 天的路线图
-    expect(firstCount).toBeGreaterThanOrEqual(5);
-    expect(secondCount).toBeGreaterThanOrEqual(firstCount!);
+    expect(Number(bindings.rows[0]!.count)).toBeGreaterThanOrEqual(5);
   });
 
   it('落库的版本带脱敏投影与向量，且能被同城的相似计划检索到（门禁 #26）', async () => {

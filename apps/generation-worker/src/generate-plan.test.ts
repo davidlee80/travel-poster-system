@@ -94,6 +94,14 @@ class FakePlans implements TravelPlansRepository {
     return Promise.resolve(true);
   }
 
+  /** TP-4-14：记录到的里程碑 */
+  readonly milestones: string[] = [];
+
+  markMilestone(_jobId: string, milestone: 't1' | 't2'): Promise<void> {
+    this.milestones.push(milestone);
+    return Promise.resolve();
+  }
+
   cancelJob(): Promise<'cancelled'> {
     // Worker 不调用它（取消入口在 API 侧），但接口要求实现
     throw new Error('Worker 不应调用 cancelJob');
@@ -601,18 +609,21 @@ describe('16.3 超时（TP-4-10）', () => {
   it('任务预算耗尽 → FAILED + JOB_TIMEOUT，且停在 GENERATING_PLAN 之前', async () => {
     const { deps, plans, llm } = harness();
     /*
-     * 第一次读时钟给 0（任务预算从此刻起算），之后一律给 300_001 ——
-     * 也就是「刚开始就已经超了 300 秒」。这样写不依赖 now() 被调用几次，
-     * 而按调用序号排布返回值的写法会随实现里多一次读时钟而失效。
+     * 每读一次时钟就前进 400 秒 —— 比 300 秒的任务预算更长。因此**无论
+     * now() 被调用几次**，预算创建之后的第一次检查就已经超时。
+     * 按调用序号排布返回值的写法会随实现里多一次读时钟而失效（试过一次）。
+     *
+     * 入队时刻设为 epoch 但队列判定用的是 `now - createdAt`，
+     * 第一次读到的 400 秒仍在 600 秒的队列上限内，因此不会走成队列超时。
      */
+    plans.queuedAt = new Date(0);
     let clock = 0;
     const result = await generatePlan(
       {
         ...deps,
         now: () => {
-          const value = clock;
-          clock = 300_001;
-          return value;
+          clock += 400_000;
+          return clock;
         },
       },
       payload,
@@ -660,5 +671,32 @@ describe('16.1 用户取消（TP-4-08）', () => {
     expect(result).toEqual({ outcome: 'skipped', reason: 'cancelled' });
     expect(llm.calls).toHaveLength(0);
     expect(plans.path).toEqual(['NORMALIZING', 'VALIDATING_REQUEST', 'RETRIEVING_REFERENCES']);
+  });
+});
+
+describe('16.1 推进到 COMPLETED 与 T1/T2 里程碑（TP-4-08/14）', () => {
+  it('未装配展示编排时停在 SAVING_PLAN，但 T1 已记录', async () => {
+    /*
+     * T1 的定义是「提交 → SAVING_PLAN 完成，用户可看到文字版计划」，
+     * 它与展示编排无关 —— 因此即使后半段没装配，这个里程碑也必须有。
+     */
+    const { deps, plans } = harness();
+    await generatePlan(deps, payload);
+
+    expect(plans.milestones).toEqual(['t1']);
+    expect(plans.path).not.toContain('COMPLETED');
+  });
+
+  it('T1 的计时起点是入队时刻，不是开始消费的时刻（21.2）', async () => {
+    const { deps, plans } = harness();
+    plans.queuedAt = new Date('2026-08-18T10:00:00Z');
+    /*
+     * 用消费起点算会让队列积压时 SLA 看起来完好 —— 而用户从点下按钮
+     * 就开始等，排队那段同样是他的等待。
+     * 这里只断言里程碑被记录：具体秒数进的是直方图（不便断言），
+     * 而「起点取哪个」由实现里的 queuedAtMs 表达。
+     */
+    await generatePlan(deps, payload);
+    expect(plans.milestones).toContain('t1');
   });
 });

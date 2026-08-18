@@ -13,9 +13,14 @@
     "render:fixture": "node --enable-source-maps dist/cli.js"
   },
   "dependencies": {
+    "@tps/db": "workspace:*",
     "@tps/observability": "workspace:*",
     "@tps/presentation": "workspace:*",
+    "@tps/queue": "workspace:*",
+    "@tps/schemas": "workspace:*",
     "@tps/shared": "workspace:*",
+    "@tps/storage": "workspace:*",
+    "bullmq": "^5.65.0",
     "pdf-lib": "^1.17.1",
     "playwright-core": "1.62.1",
     "sharp": "^0.34.4"

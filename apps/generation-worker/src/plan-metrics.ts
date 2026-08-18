@@ -1,4 +1,4 @@
-import { createCounter, createHistogram } from '@tps/observability';
+import { SLA_BUCKETS, createCounter, createHistogram } from '@tps/observability';
 import {
   MAX_DETERMINISTIC_ROUNDS,
   MAX_REGENERATIONS,
@@ -15,6 +15,36 @@ import {
  * 一个测试的计数会漏进另一个的断言。因此规则层只提供
  * `ResolvePlanObserver` 回调，由这里接到注册表上。
  */
+
+/**
+ * 21.3 的 `travel_job_milestone_seconds`（TP-4-14）。
+ *
+ * 这是**验证 21.2 分段 SLA 的唯一数据来源**：T1 < 75 秒、T2 < 110 秒，
+ * 以及 21.3 的「SLA 违约」告警（T1 的 P95 持续 15 分钟超 75 秒）。
+ *
+ * `total_days_bucket` 是必须的维度：T3 按天数分档（≤7 天 240 秒、
+ * 8～14 天 420 秒），而 T1/T2 同样与天数相关（8～14 天要分段调两次模型）。
+ * 不分档的话，一个全是 14 天请求的时段会让 P95 看起来在违约，
+ * 而它其实符合那一档的目标。
+ *
+ * `user_type` 是 R-13 的通用维度（分身份观察 SLA）。
+ */
+export const jobMilestoneSeconds = createHistogram({
+  name: 'travel_job_milestone_seconds',
+  help: '分段交付里程碑耗时（21.2 的 T1/T2/T3）',
+  labelNames: ['milestone', 'total_days_bucket', 'user_type'],
+  buckets: [...SLA_BUCKETS],
+});
+
+/**
+ * 天数分档。与 21.2 的两档目标一致（≤7 天 / 8～14 天）。
+ *
+ * 用字符串而不是数字：标签值必须是有界小集合（21.3），
+ * 而 `total_days` 有 14 个取值 —— 分成两档后图上才能直接对着目标读。
+ */
+export function totalDaysBucket(totalDays: number): string {
+  return totalDays <= 7 ? '1-7' : '8-14';
+}
 
 /**
  * 21.3：定位最常违规的规则。

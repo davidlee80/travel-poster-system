@@ -91,6 +91,17 @@ export interface PresentationsRepository {
     readonly pageType: PageTypeValue;
     readonly dayNumber?: number;
   }): Promise<PresentationDetail | null>;
+  /**
+   * 该版本已落库的每日页天号，升序（TP-4-12）。
+   *
+   * 导出的 `ALL_DAYS` 需要它：`exports.day_numbers` 对非 SINGLE_DAY 恒为 null
+   * （`exports_day_numbers_check` 强制），因此「有哪几天」只能来自
+   * `plan_presentations`。用它而不是 `travel_plan_versions.total_days`：
+   * 真正能渲染的是**落了 ViewModel 的那些天**，而两者在编排失败时会不一致 ——
+   * 按 total_days 渲染会对不存在的页面发请求，得到 404 与一批失败天号。
+   */
+  listDayNumbers(planVersionId: string): Promise<readonly number[]>;
+
   /** TP-3-15：重复解析不产生重复绑定 */
   saveBindings(inputs: readonly SaveBindingInput[]): Promise<void>;
   /** 渲染与回填 ViewModel 用：连素材表一起取出展示所需字段 */
@@ -227,6 +238,16 @@ export function createPresentationsRepository(pool: Pool): PresentationsReposito
         validationStatus: row.validation_status,
         viewModel: row.view_model,
       };
+    },
+
+    async listDayNumbers(planVersionId) {
+      const { rows } = await pool.query<{ day_number: number }>(
+        `SELECT day_number FROM plan_presentations
+          WHERE plan_version_id = $1 AND page_type = 'DAILY_POSTER' AND day_number IS NOT NULL
+          ORDER BY day_number`,
+        [planVersionId],
+      );
+      return rows.map((row) => row.day_number);
     },
 
     async saveBindings(inputs) {

@@ -157,15 +157,30 @@ importers:
 
   apps/render-worker:
     dependencies:
+      '@tps/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@tps/observability':
         specifier: workspace:*
         version: link:../../packages/observability
       '@tps/presentation':
         specifier: workspace:*
         version: link:../../packages/presentation
+      '@tps/queue':
+        specifier: workspace:*
+        version: link:../../packages/queue
+      '@tps/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
       '@tps/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@tps/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
+      bullmq:
+        specifier: ^5.65.0
+        version: 5.81.3
       pdf-lib:
         specifier: ^1.17.1
         version: 1.17.1

@@ -42,7 +42,11 @@ import {
   queueWaitExceeded,
   type JobDeadline,
 } from './job-deadline.js';
-import { createPlanValidationObserver } from './plan-metrics.js';
+import {
+  createPlanValidationObserver,
+  jobMilestoneSeconds,
+  totalDaysBucket,
+} from './plan-metrics.js';
 import {
   buildAndSavePresentations,
   type BuildPresentationDeps,
@@ -325,6 +329,13 @@ export async function generatePlan(
     return fail(deps, context.jobId, 'JOB_QUEUE_TIMEOUT');
   }
 
+  /*
+   * 里程碑的计时起点是**入队时刻**而不是开始消费的时刻（21.2）。
+   * T1 的定义是「提交 → SAVING_PLAN 完成」，用户从点下按钮就开始等 ——
+   * 排队那段时间同样是他的等待。用消费起点算会让队列积压时 SLA 看起来完好。
+   */
+  const queuedAtMs = queuedAt?.getTime() ?? now();
+
   // 16.3：整个生成任务 300 秒。协作式检查，理由见 job-deadline.ts
   const deadline = createJobDeadline(now(), JOB_TIMEOUT_MS, now);
 
@@ -548,6 +559,23 @@ export async function generatePlan(
     planVersionId: saved.versionId,
   });
 
+  /*
+   * ── T1 计划可读（21.2 措施一，TP-4-14）──
+   *
+   * 这一刻用户就能通过 13.3 读到完整文字版计划。里程碑写在这里而不是
+   * 任务结束时：客户端据此**提前**切换到「显示文字计划」，
+   * 而不是等 `status === 'COMPLETED'` —— 那要再等素材解析与渲染。
+   */
+  await deps.plans.markMilestone(context.jobId, 't1');
+  jobMilestoneSeconds.observe(
+    {
+      milestone: 't1',
+      total_days_bucket: totalDaysBucket(normalized.total_days),
+      user_type: context.userType,
+    },
+    (now() - queuedAtMs) / 1000,
+  );
+
   log.info(
     {
       stage: 'SAVING_PLAN',
@@ -616,6 +644,73 @@ export async function generatePlan(
         { stage: 'RESOLVING_ASSETS', rule_id: 'V-20' },
         '预算明细之和与总计不一致，展示以明细之和为准',
       );
+    }
+
+    /*
+     * ── T2 页面可看（21.2 措施一）──
+     *
+     * 13.4 此刻能读到带图的展示数据，前端可以切换到完整信息图页面。
+     */
+    await deps.plans.markMilestone(context.jobId, 't2');
+    jobMilestoneSeconds.observe(
+      {
+        milestone: 't2',
+        total_days_bucket: totalDaysBucket(normalized.total_days),
+        user_type: context.userType,
+      },
+      (now() - queuedAtMs) / 1000,
+    );
+
+    /*
+     * ── RENDERING_HTML → COMPLETED（16.1，TP-4-08）──
+     *
+     * ## R-35：这个系统的 HTML 页面不是「产物」，因此没有快照可生成
+     *
+     * 16.1 把 `RENDERING_HTML` 描述为「渲染服务出 HTML 快照」。但 17.1 的
+     * 渲染路由是**按 `plan_version_id` 实时从库里取 ViewModel 渲染**的
+     * （见 apps/web 的 presentation-source.ts）—— 页面在展示数据落库的那一刻
+     * 就已经可访问，没有中间产物需要生成。
+     *
+     * 生成一份快照 HTML 存起来反而有害：ViewModel 与快照会各自演化，
+     * 而「页面显示的内容」从此有两个真相源；模板改版后旧快照还在，
+     * 用户看到的是一个月前的排版。
+     *
+     * 因此这一阶段的实质工作是**确认页面可渲染**：
+     *   - ViewModel 通过 `TravelPosterViewModelSchema`（已在编排时保证）；
+     *   - 必需槽位有产物或有到底的降级（`validation_status`）。
+     * 两者都成立即推进 `RENDERING_HTML → COMPLETED`。
+     *
+     * 17.3 的溢出检查与模板异常需要真的开一个浏览器，那发生在**导出链路**
+     * 上（render-worker 的 renderPage 已经做了）。而 16.1 明确导出失败
+     * 不阻断（「重试一次后跳到下一状态，最终仍为 COMPLETED」），
+     * 因此把它放在导出侧不会让阻断判定丢失 —— 丢失的只有「排版拥挤」这类
+     * 降级信号，而它本来就是非阻断的（R-24 的 RENDER_OVERFLOW_UNRESOLVED）。
+     *
+     * `EXPORTING_PNG` / `EXPORTING_PDF` 两个状态在 16.1 里是「可跳过」的
+     * （`generate_png` / `generate_pdf` 为 false 时），而 V1 的导出是**用户
+     * 主动发起**的独立任务（13.5），不属于生成任务的一部分。因此生成任务
+     * 从 `RENDERING_HTML` 直接到 `COMPLETED` —— 这条边在 16.1 的转移表里
+     * 本来就存在。
+     */
+    if (result.validationStatus === 'INVALID') {
+      /*
+       * 16.3：`RENDER_CORE_ASSET_MISSING` 是阻断类。走到这里说明必需槽位
+       * （Hero / 路线图）连降级链都没兜住 —— 而那两条链都有到底的兜底
+       * （渐变背景 / 文字路线），因此这是代码缺陷而不是数据问题。
+       */
+      log.error(
+        { stage: 'RENDERING_HTML', error_code: 'RENDER_CORE_ASSET_MISSING' },
+        '必需素材的降级链未兜住，页面核心结构无法生成',
+      );
+      await fail(deps, context.jobId, 'PLAN_PERSIST_FAILED', saved.versionId);
+      return { outcome: 'saved', versionId: saved.versionId, status: finalStatus };
+    }
+
+    if (!(await advance(deps, context.jobId, 'RENDERING_HTML'))) {
+      return cancelled('RENDERING_HTML');
+    }
+    if (!(await advance(deps, context.jobId, 'COMPLETED'))) {
+      return cancelled('COMPLETED');
     }
 
     return {

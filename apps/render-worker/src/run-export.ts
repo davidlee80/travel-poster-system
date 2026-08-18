@@ -1,0 +1,287 @@
+import { randomUUID } from 'node:crypto';
+
+import type { ExportsRepository, PresentationsRepository } from '@tps/db';
+import { ExportArtifactSchema, EXPORT_URL_TTL_SECONDS, type ExportArtifact } from '@tps/schemas';
+import { RENDER_PAGE_KEYS, issueRenderToken, type Logger } from '@tps/shared';
+import { exportFileName, exportObjectKey, type ExportStorage } from '@tps/storage';
+import type { Browser, BrowserContext } from 'playwright-core';
+
+import { createRenderContext } from './browser.js';
+import { capturePdf, mergePdfs } from './pdf.js';
+import { capturePng } from './png.js';
+import { renderPage } from './render-page.js';
+
+/**
+ * 导出任务的执行（TP-4-12，设计稿 13.5 的产物组织、13.6、16.3）。
+ *
+ * 与 `export-plan.ts` 的分工：那一条是 **CLI 路径**（P1 的视觉基线），
+ * 产物写本地目录、串行渲染以保证可复现。这一条是**队列路径**：
+ * 产物进对象存储、状态回写 `exports` 行、失败按 16.3 判定。
+ *
+ * 两者共用 `renderPage` / `capturePng` / `capturePdf` / `mergePdfs` ——
+ * 也就是「怎么渲染」只有一份实现，而「产物去哪里」各自不同。
+ *
+ * ## 13.5 的产物组织
+ *
+ * ```text
+ * PNG + SINGLE_DAY   1 个 PNG
+ * PNG + ALL_DAYS     N 个 PNG，files[] 按 day_number 升序
+ * PNG + FULL_PLAN    1 个整页 PNG
+ * PDF + SINGLE_DAY   1 个单页 PDF
+ * PDF + ALL_DAYS     **1 个 N 页 PDF**（不是 N 个文件）
+ * PDF + FULL_PLAN    1 个多页 PDF
+ * ```
+ *
+ * ## PARTIAL 的判定（13.6）
+ *
+ * 「`ALL_DAYS` 下部分天导出失败但至少一天成功时返回 `PARTIAL` + 成功项，
+ * 而不是整体 `FAILED`」。对 PDF 的 `ALL_DAYS` 这一条有个后果值得写下来：
+ * 产物是**合并后的一个文件**，因此「部分天失败」意味着那个 PDF 少了几页。
+ * 仍然交付它 —— 12 页的行程比零页有用，而 `PARTIAL` + `error` 已经如实
+ * 说明了缺失。悄悄交付一个完整的假象才是不能做的事。
+ */
+
+export interface RunExportDeps {
+  readonly exports: ExportsRepository;
+  /** `ALL_DAYS` 的天号来自这里，见 `listDayNumbers` 的说明 */
+  readonly presentations: Pick<PresentationsRepository, 'listDayNumbers'>;
+  readonly storage: ExportStorage;
+  readonly browser: Browser;
+  /** 渲染服务的基地址，形如 `http://web:3000` */
+  readonly baseUrl: string;
+  /** 17.1 的渲染令牌签名密钥 */
+  readonly signingKey: string;
+  readonly logger: Logger;
+}
+
+/** 结局带上 format/scope，供 21.2 的分环节耗时指标按目标分组 */
+interface ExportShape {
+  readonly format: 'PNG' | 'PDF';
+  readonly scope: 'ALL_DAYS' | 'SINGLE_DAY' | 'FULL_PLAN';
+}
+
+export type RunExportOutcome =
+  | ({ readonly kind: 'completed'; readonly files: number } & ExportShape)
+  | ({
+      readonly kind: 'partial';
+      readonly files: number;
+      readonly failed: readonly number[];
+    } & ExportShape)
+  | ({ readonly kind: 'failed'; readonly errorCode: string } & ExportShape)
+  | { readonly kind: 'skipped'; readonly reason: 'not_found' | 'not_queued' };
+
+/** 一页渲染 + 抓取的结果 */
+interface Captured {
+  readonly dayNumber: number | null;
+  readonly bytes: Uint8Array;
+  readonly degraded: boolean;
+}
+
+export async function runExport(deps: RunExportDeps, exportId: string): Promise<RunExportOutcome> {
+  const row = await deps.exports.findById(exportId);
+  if (row === null) {
+    /*
+     * 任务不存在：多半是保留期清理删掉了用户，而队列里还留着消息。
+     * 与生成侧同一处理 —— 静默跳过而不是报错，报错会让 BullMQ 反复重试
+     * 一个永远不会存在的任务。
+     */
+    deps.logger.warn({}, '导出任务不存在，跳过');
+    return { kind: 'skipped', reason: 'not_found' };
+  }
+
+  if (!(await deps.exports.markRendering(exportId))) {
+    // 重复投递：另一个消费者已经在处理（或已完成）
+    return { kind: 'skipped', reason: 'not_queued' };
+  }
+
+  /*
+   * `ALL_DAYS` 要渲染「实际落了 ViewModel 的那些天」，而不是请求里的天数：
+   * 编排失败时两者不一致，按后者渲染会对不存在的页面发请求。
+   */
+  const days =
+    row.scope === 'ALL_DAYS'
+      ? await deps.presentations.listDayNumbers(row.planVersionId)
+      : row.dayNumbers;
+  const pages = pagesFor(row.scope, days, row.planVersionId);
+  const context = await createRenderContext(deps.browser);
+
+  const captured: Captured[] = [];
+  const failedDays: number[] = [];
+
+  try {
+    for (const page of pages) {
+      try {
+        captured.push(await capture(deps, context, row.planVersionId, row.format, page));
+      } catch (error) {
+        /*
+         * 单页失败不中断整批（13.6 的 PARTIAL）。记下天号，最后一起报告。
+         * 中断的话，一个 14 天导出会因为第 3 天的一次瞬时失败而全部作废，
+         * 而前两天已经渲染完的成本白花。
+         */
+        failedDays.push(page.dayNumber ?? 0);
+        deps.logger.warn(
+          { format: row.format, page_type: page.dayNumber === null ? 'full' : 'day' },
+          `第 ${page.dayNumber ?? 0} 页导出失败：${String(error)}`,
+        );
+      }
+    }
+  } finally {
+    await context.close();
+  }
+
+  if (captured.length === 0) {
+    const errorCode = row.format === 'PNG' ? 'EXPORT_PNG_FAILED' : 'EXPORT_PDF_FAILED';
+    await deps.exports.finish({
+      exportId,
+      status: 'FAILED',
+      files: [],
+      errorCode,
+      errorDetail: { failed_days: failedDays },
+    });
+    return { kind: 'failed', errorCode, format: row.format, scope: row.scope };
+  }
+
+  const artifacts = await upload(deps, row.exportId, row.format, row.scope, captured);
+
+  const partial = failedDays.length > 0;
+  await deps.exports.finish({
+    exportId,
+    status: partial ? 'PARTIAL' : 'COMPLETED',
+    files: artifacts,
+    errorCode: partial ? (row.format === 'PNG' ? 'EXPORT_PNG_FAILED' : 'EXPORT_PDF_FAILED') : null,
+    ...(partial ? { errorDetail: { failed_days: failedDays } } : {}),
+  });
+
+  const shape = { format: row.format, scope: row.scope };
+  return partial
+    ? { kind: 'partial', files: artifacts.length, failed: failedDays, ...shape }
+    : { kind: 'completed', files: artifacts.length, ...shape };
+}
+
+export interface PageTarget {
+  readonly dayNumber: number | null;
+  readonly path: string;
+  readonly pageKey: string;
+}
+
+/** scope → 要渲染的页面列表（13.5 的产物组织） */
+export function pagesFor(
+  scope: 'ALL_DAYS' | 'SINGLE_DAY' | 'FULL_PLAN',
+  dayNumbers: readonly number[] | null,
+  planVersionId: string,
+): readonly PageTarget[] {
+  const encoded = encodeURIComponent(planVersionId);
+
+  if (scope === 'FULL_PLAN') {
+    return [
+      {
+        dayNumber: null,
+        path: `/render/plans/${encoded}/full`,
+        pageKey: RENDER_PAGE_KEYS.full(),
+      },
+    ];
+  }
+
+  /*
+   * `ALL_DAYS` 的天号由调用方从 `plan_presentations` 查出后传进来
+   * （`exports.day_numbers` 对非 SINGLE_DAY 恒为 null）。
+   * 空或 null 时返回空列表 —— 调用方会因此得到 `FAILED`，而那是对的：
+   * 一个没有任何展示页的版本确实无法导出。默认渲染第 1 天会产出一份
+   * 「只有第一天」的 PDF 并标成 COMPLETED，那种静默的错误更糟。
+   */
+  const days = dayNumbers ?? [];
+
+  return days.map((dayNumber) => ({
+    dayNumber,
+    path: `/render/plans/${encoded}/days/${dayNumber}`,
+    pageKey: RENDER_PAGE_KEYS.day(dayNumber),
+  }));
+}
+
+async function capture(
+  deps: RunExportDeps,
+  context: BrowserContext,
+  planVersionId: string,
+  format: 'PNG' | 'PDF',
+  target: PageTarget,
+): Promise<Captured> {
+  const rendered = await renderPage({
+    context,
+    baseUrl: deps.baseUrl,
+    path: target.path,
+    // 每页一个新令牌：令牌与页面绑定，jti 唯一以支持重放检测（17.1）
+    renderToken: issueRenderToken(
+      { planVersionId, pageKey: target.pageKey, jti: randomUUID() },
+      deps.signingKey,
+    ),
+  });
+
+  try {
+    const bytes =
+      format === 'PNG' ? (await capturePng(rendered.page)).buffer : await capturePdf(rendered.page);
+
+    return { dayNumber: target.dayNumber, bytes, degraded: rendered.degraded };
+  } finally {
+    await rendered.page.close();
+  }
+}
+
+/** 上传并构造 `ExportArtifact[]`（含 storage_key，重签名要用） */
+async function upload(
+  deps: RunExportDeps,
+  exportId: string,
+  format: 'PNG' | 'PDF',
+  scope: 'ALL_DAYS' | 'SINGLE_DAY' | 'FULL_PLAN',
+  captured: readonly Captured[],
+): Promise<readonly ExportArtifact[]> {
+  const contentType = format === 'PNG' ? 'image/png' : 'application/pdf';
+
+  /*
+   * 13.5：`PDF` + `ALL_DAYS` 产**一个 N 页文件**，页序 = 天序。
+   * 合并而不是返回 N 个 PDF —— 用户要的是一份能打印的行程，
+   * 而 14 个单页 PDF 需要他自己按文件名排序再合并。
+   */
+  if (format === 'PDF' && captured.length > 1) {
+    const ordered = [...captured].sort((a, b) => (a.dayNumber ?? 0) - (b.dayNumber ?? 0));
+    const merged = await mergePdfs(ordered.map((item) => Buffer.from(item.bytes)));
+    return [await putOne(deps, exportId, format, scope, null, merged, contentType)];
+  }
+
+  const ordered = [...captured].sort((a, b) => (a.dayNumber ?? 0) - (b.dayNumber ?? 0));
+  const artifacts: ExportArtifact[] = [];
+  for (const item of ordered) {
+    artifacts.push(
+      await putOne(deps, exportId, format, scope, item.dayNumber, item.bytes, contentType),
+    );
+  }
+  return artifacts;
+}
+
+async function putOne(
+  deps: RunExportDeps,
+  exportId: string,
+  format: 'PNG' | 'PDF',
+  scope: 'ALL_DAYS' | 'SINGLE_DAY' | 'FULL_PLAN',
+  dayNumber: number | null,
+  bytes: Uint8Array,
+  contentType: string,
+): Promise<ExportArtifact> {
+  const key = exportObjectKey(exportId, exportFileName(format, scope, dayNumber));
+  await deps.storage.put({ key, body: bytes, contentType });
+
+  /*
+   * 上传后立刻签一次 URL 并落库。GET 端点会**再签一次**（13.6 的重签名），
+   * 因此这里的 URL 只是「刚导出完就能用」的便利值 ——
+   * 真正长期有效的东西是 `storage_key`。
+   */
+  const signed = await deps.storage.presign(key, EXPORT_URL_TTL_SECONDS);
+
+  return ExportArtifactSchema.parse({
+    format,
+    day_number: dayNumber,
+    url: signed.url,
+    byte_size: bytes.byteLength,
+    expires_at: signed.expiresAt.toISOString(),
+    storage_key: key,
+  });
+}

@@ -201,6 +201,15 @@ export interface TravelPlansRepository {
   updateJobState(input: UpdateJobStateInput): Promise<boolean>;
 
   /**
+   * 记录 T1 / T2 里程碑时刻（21.2 措施一，TP-4-14）。
+   *
+   * 只写一次：`COALESCE(t1_at, NOW())` —— 重试导致的第二次到达不该覆盖
+   * 首次时刻。覆盖的后果是 SLA 统计里那个任务的 T1 变成「重试成功的时刻」，
+   * 而用户真正等到计划可读的时间是第一次。
+   */
+  markMilestone(jobId: string, milestone: 't1' | 't2'): Promise<void>;
+
+  /**
    * 用户主动取消（16.1「任意非终态 → CANCELLED」，TP-4-08）。
    *
    * 带 `user_id` 谓词（13.0）：取消是写操作，越权取消别人的任务比越权
@@ -591,6 +600,16 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
       );
 
       return (rowCount ?? 0) > 0;
+    },
+
+    async markMilestone(jobId, milestone) {
+      const column = milestone === 't1' ? 't1_at' : 't2_at';
+      await pool.query(
+        `UPDATE generation_jobs
+            SET ${column} = COALESCE(${column}, NOW()), updated_at = NOW()
+          WHERE id = $1`,
+        [jobId],
+      );
     },
 
     async cancelJob(jobId, userId) {
