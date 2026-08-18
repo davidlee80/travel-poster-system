@@ -1,24 +1,21 @@
 import { IdentityService, RedisSessionStore } from '@tps/api/identity';
 import { buildServer } from '@tps/api/server';
 import {
-  createAssetsRepository,
   createPool,
   createPresentationsRepository,
-  createUsersRepository,
   createRetrievalRepository,
+  createUsersRepository,
   createTravelPlansRepository,
   migrate,
   migrationsDirectory,
 } from '@tps/db';
-import { FakeImageClient, FakeLlmClient, LocalHashingEmbeddingClient } from '@tps/llm';
+import { LocalHashingEmbeddingClient } from '@tps/llm';
 import { metricsText } from '@tps/observability';
-import { InMemoryObjectStorage } from '@tps/storage';
 import { GenerationMetadataSchema, TravelPosterViewModelSchema } from '@tps/schemas';
 import { parseRetrievalProjection, projectionToEmbeddingText } from '@tps/planning';
 import {
   BullMqPlanQueue,
   GenerationJobPayloadSchema,
-  InMemoryAssetLock,
   PLAN_QUEUE_NAME,
   RedisCounterStore,
   RedisIdempotencyLock,
@@ -29,21 +26,18 @@ import { TravelPlanSchema, findForbiddenProjectionKeys } from '@tps/schemas';
 import {
   COOKIE_NAMES,
   GracefulShutdown,
-  InMemoryCounterStore,
   QuotaGuard,
   createSilentLogger,
   loadQuotaConfig,
   type ServiceConfig,
-  type UserType,
 } from '@tps/shared';
 import { Queue } from 'bullmq';
 import type { Pool } from 'pg';
 import type { Redis } from 'ioredis';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { AiImageBudget, MAX_AI_IMAGES_PER_JOB } from './assets/ai-budget.js';
-import { renderFakeGeneratedImage } from './assets/fake-image.js';
-import { fixturePlanFor } from './fixture-plan.js';
+import { MAX_AI_IMAGES_PER_JOB } from './assets/ai-budget.js';
+import { createE2eWorkerDeps } from './e2e-harness.js';
 import { generatePlan } from './generate-plan.js';
 
 /**
@@ -230,48 +224,8 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     return GenerationJobPayloadSchema.parse(waiting[0]!.data);
   }
 
-  function workerDeps() {
-    const embedding = new LocalHashingEmbeddingClient();
-    const storage = new InMemoryObjectStorage();
-    return {
-      plans: createTravelPlansRepository(pool),
-      retrieval: { repository: createRetrievalRepository(pool), embedding },
-      // 与 LLM_MODE=fake 的默认行为一致：按请求构造录制输出
-      llm: (normalized: Parameters<typeof fixturePlanFor>[0]) =>
-        new FakeLlmClient([fixturePlanFor(normalized)]),
-      embedding,
-      logger: createSilentLogger(),
-      llmTimeoutMs: 30_000,
-      /*
-       * P3 的展示编排。对象存储用进程内实现 —— 真实 MinIO 的写入由
-       * @tps/storage 的集成测试覆盖，这条链路要验证的是
-       * 「编排 → 解析 → 落库 → 13.4 能读到」。
-       */
-      presentation: {
-        assets: createAssetsRepository(pool),
-        presentations: createPresentationsRepository(pool),
-        storage,
-        embedding,
-      },
-      /*
-       * P4 的 AI 兜底层。图片客户端用 fake 渲染函数（渐变图），因此
-       * 「生成 → 11.2 后处理 → 上传 → 落库 → 缓存键复用」全链路是真的，
-       * 只有画面内容是占位 —— 与 LLM_MODE=fake 同一处理。
-       */
-      aiAssets: (userType: UserType) => ({
-        image: new FakeImageClient(renderFakeGeneratedImage),
-        assetLock: new InMemoryAssetLock(),
-        imageTimeoutMs: 20_000,
-        userTypeLabel: userType,
-        budget: new AiImageBudget({
-          counters: new InMemoryCounterStore(),
-          userType,
-          heroQuota: userType === 'ANONYMOUS' ? 0 : 2,
-        }),
-      }),
-      storage,
-    };
-  }
+  // 依赖装配见 e2e-harness.ts（与 acceptance.integration.test.ts 共用）
+  const workerDeps = () => createE2eWorkerDeps(pool);
 
   it('无身份提交 → 入队 → 生成 → 计划可读', async () => {
     // 1. 提交（13.0 第 3.a 条：无身份也不返回 401，现场建匿名号）
