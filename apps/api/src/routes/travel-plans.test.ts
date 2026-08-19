@@ -344,6 +344,8 @@ function build(
     quotaConfig,
     now,
     secureCookies: false,
+    // P7：这些用例验的是 R-13 的双模式行为，因此显式打开匿名入口
+    anonymousEnabled: true,
   });
 
   const repository = new FakePlansRepository();
@@ -1169,6 +1171,8 @@ describe('TP-2-31：日志不含禁记字段', () => {
       quotaConfig,
       now,
       secureCookies: false,
+      // P7：这些用例验的是 R-13 的双模式行为，因此显式打开匿名入口
+      anonymousEnabled: true,
     });
 
     const app = buildServer({

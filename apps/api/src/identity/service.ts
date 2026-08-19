@@ -59,7 +59,20 @@ export type ResolveResult =
       /** 同时持有两种有效凭据时，需要执行匿名归并（13.9.4） */
       readonly pendingMerge: { readonly anonymousUserId: string } | null;
     }
-  | { readonly outcome: 'identity_required' }
+  | {
+      readonly outcome: 'identity_required';
+      /**
+       * 要下发的 Cookie 变更（P7）。
+       *
+       * 拒绝一个已有的 `tp_anon` 时要顺便清掉它 —— 不清的话浏览器每次请求
+       * 都白带一次、服务端每次都要查一遍库再拒，而浏览器永远处在
+       * 「带着一个不被接受的凭据」的状态。
+       *
+       * 放在**拒绝**结局上而不是只放在 `resolved` 上是必要的：清除动作恰好
+       * 只能搭载在拒绝的那一次响应上，之后不会再有带着它的成功响应。
+       */
+      readonly cookies: readonly CookieMutation[];
+    }
   | {
       readonly outcome: 'anon_creation_rate_limited';
       readonly retryAfterSeconds: number | null;
@@ -94,6 +107,14 @@ export interface IdentityServiceDeps {
   readonly quotaConfig: QuotaConfig;
   readonly now: () => Date;
   readonly secureCookies: boolean;
+  /**
+   * 匿名身份入口（P7 的 `FEATURE_ANONYMOUS_ENABLED`）。
+   *
+   * `false` 时 `resolve()` 有两处短路：不自动建匿名号、已有的 `tp_anon`
+   * 一律不解析。`createAnonymous()` 本身**不受影响** ——
+   * 开关拦的是解析路径，不是能力本身（重新打开只需改这一个布尔值）。
+   */
+  readonly anonymousEnabled: boolean;
 }
 
 function toIdentity(row: UserRow): Identity {
@@ -128,6 +149,10 @@ export class IdentityService {
    *      都无效 + 其他端点      → identity_required
    *   4. 两者同时有效           → 以 session 为准，并标记待归并
    *
+   * **P7**：`anonymousEnabled` 为 false 时，分支 2 与 3 一起短路成
+   * `identity_required`，分支 4 保留但不触发归并。分支 1 完全不变 ——
+   * 关闭匿名不影响注册路径，这是「开关」而非「重写」的边界。
+   *
    * 第 4 条放在最后判断是因为它是第 1 条的特例 ——
    * 先按 session 解析出身份，再看是否额外携带了匿名令牌。
    */
@@ -143,25 +168,65 @@ export class IdentityService {
           // 滑动过期：每次使用都续期（13.0）
           await sessions.touch(input.sessionCookie);
 
-          // 分支 4：同时持有有效匿名令牌 → 待归并
+          /*
+           * 分支 4：同时持有有效匿名令牌 → 待归并。
+           *
+           * **P7：关闭时不归并，但仍然清除 `tp_anon`。**
+           * 归并的前提是「匿名数据要接到注册账号上」，而 P7 的口径是存量
+           * 匿名数据统一走 30 天保留期清理（15.1）。留着归并入口会造成一种
+           * 半开状态：新匿名号建不了，但旧匿名号还能通过登录把数据搬过来 ——
+           * 而那条路径此后再没有测试之外的流量走过，属于 P4/P5 反复记录的
+           * 「东西还在但没人到得了」那一类。
+           *
+           * 仍然清 Cookie：它已经不被接受，留着只是每次白带一次。
+           */
           let pendingMerge: { anonymousUserId: string } | null = null;
+          let clearAnon = false;
           if (input.anonCookie !== undefined) {
-            const anon = await users.findActiveByAnonTokenHash(hashToken(input.anonCookie));
-            if (anon !== null && anon.id !== row.id) {
-              pendingMerge = { anonymousUserId: anon.id };
+            if (!this.deps.anonymousEnabled) {
+              clearAnon = true;
+            } else {
+              const anon = await users.findActiveByAnonTokenHash(hashToken(input.anonCookie));
+              if (anon !== null && anon.id !== row.id) {
+                pendingMerge = { anonymousUserId: anon.id };
+                clearAnon = true;
+              }
             }
           }
 
           return {
             outcome: 'resolved',
             identity: toIdentity(row),
-            cookies: pendingMerge
+            cookies: clearAnon
               ? [{ name: COOKIE_NAMES.anonymous, value: null, maxAgeSeconds: 0 }]
               : [],
             pendingMerge,
           };
         }
       }
+    }
+
+    /*
+     * ── P7：匿名入口关闭 ──
+     *
+     * 分支 2 与 3 一起短路。**顺序在这里很重要**：这一段必须在分支 2
+     * 之前，否则一个持有效 `tp_anon` 的存量用户仍会被解析成匿名身份 ——
+     * 那正是这次迭代要关掉的东西。
+     *
+     * 不在各业务路由里拦：`allowAnonymousCreation` 有 15 个调用点，
+     * 而 `/auth/session` 根本不走 `resolveIdentity`（它直接调本方法）。
+     * 路由层的拦截会漏掉会话端点，表现是「其他端点都拒了，
+     * 但会话端点还在发匿名号」。
+     */
+    if (!this.deps.anonymousEnabled) {
+      return {
+        outcome: 'identity_required',
+        // 有 tp_anon 才需要清；没有的话不下发无意义的 Set-Cookie
+        cookies:
+          input.anonCookie === undefined
+            ? []
+            : [{ name: COOKIE_NAMES.anonymous, value: null, maxAgeSeconds: 0 }],
+      };
     }
 
     // 分支 2：匿名令牌
@@ -176,7 +241,7 @@ export class IdentityService {
 
     // 分支 3
     if (!input.allowAnonymousCreation) {
-      return { outcome: 'identity_required' };
+      return { outcome: 'identity_required', cookies: [] };
     }
 
     return this.createAnonymous(input.ip);

@@ -128,6 +128,11 @@ async function main(): Promise<void> {
     now: () => new Date(),
     // 生产必须为 true；本地 http://localhost 下浏览器不会保存 Secure Cookie
     secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
+    /*
+     * P7：与生成/导出两个开关同源（`loadFeatureFlags`），因此「一次放量只改
+     * 一节配置」这条对它同样成立。默认 false —— 见 FeatureFlags 上的说明。
+     */
+    anonymousEnabled: featureFlags.anonymousEnabled,
   });
 
   /*

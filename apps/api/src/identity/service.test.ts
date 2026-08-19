@@ -23,7 +23,10 @@ interface Harness {
   readonly sessions: InMemorySessionStore;
 }
 
-function makeHarness(config: QuotaConfig = quotaConfig()): Harness {
+function makeHarness(
+  config: QuotaConfig = quotaConfig(),
+  options: { readonly anonymousEnabled?: boolean } = {},
+): Harness {
   const users = new FakeUsersRepository(() => NOW);
   const sessions = new InMemorySessionStore(() => NOW.getTime());
   const store = new InMemoryCounterStore(() => NOW.getTime());
@@ -39,6 +42,11 @@ function makeHarness(config: QuotaConfig = quotaConfig()): Harness {
       quotaConfig: config,
       now: () => NOW,
       secureCookies: false,
+      /*
+       * 默认 true：既有的 8 组用例验的是 R-13 的双模式行为，它们在开关
+       * 打开时必须完全不变（P7 的回归面）。关闭态的用例显式传 false。
+       */
+      anonymousEnabled: options.anonymousEnabled ?? true,
     }),
   };
 }
@@ -553,5 +561,190 @@ describe('归属隔离：两类身份等强（验收门禁 #22）', () => {
     if (resolved.outcome !== 'resolved') throw new Error('resolve failed');
     expect(resolved.identity.userId).toBe(a.identity.userId);
     expect(resolved.identity.userId).not.toBe(b.identity.userId);
+  });
+});
+
+// ── P7：匿名入口关闭 ────────────────────────────────────────
+
+describe('P7 匿名入口关闭（FEATURE_ANONYMOUS_ENABLED=false）', () => {
+  let closed: Harness;
+
+  beforeEach(() => {
+    closed = makeHarness(quotaConfig(), { anonymousEnabled: false });
+  });
+
+  it('生成端点在无 Cookie 时返回 identity_required —— 13.0 第 3.a 条被反转', async () => {
+    /*
+     * **这是本次迭代最重要的一条断言。**
+     *
+     * 13.0 第 3.a 条原文是「生成端点永不因缺身份返回 401」，它是产品要求
+     * 「未注册用户也能直接生成」的落地点。P7 的产品决策反转了那个要求，
+     * 因此这里的期望与 `service.test.ts` 开头那条用例正好相反 ——
+     * 两条并存是有意的：一条验开关打开时的旧行为、一条验关闭时的新行为。
+     */
+    const result = await closed.service.resolve({
+      anonCookie: undefined,
+      sessionCookie: undefined,
+      ip: '203.0.113.10',
+      allowAnonymousCreation: true,
+    });
+
+    expect(result.outcome).toBe('identity_required');
+  });
+
+  it('无 Cookie 时不产生任何 users 行（连号都不建）', async () => {
+    await closed.service.resolve({
+      anonCookie: undefined,
+      sessionCookie: undefined,
+      ip: '203.0.113.10',
+      allowAnonymousCreation: true,
+    });
+
+    expect(closed.users.count()).toBe(0);
+  });
+
+  it('持有效 tp_anon 时仍被拒，并**清除**那个 Cookie', async () => {
+    /*
+     * 存量匿名用户的浏览器里还有 tp_anon。不清除的话它每次请求都白带一次，
+     * 而服务端每次都要查一遍库再拒 —— 既浪费一次查询，也让浏览器永远处在
+     * 「带着一个不被接受的凭据」的状态。
+     */
+    const open = makeHarness();
+    const created = await open.service.resolve({
+      anonCookie: undefined,
+      sessionCookie: undefined,
+      ip: '203.0.113.11',
+      allowAnonymousCreation: true,
+    });
+    expect(created.outcome).toBe('resolved');
+    const anonToken =
+      created.outcome === 'resolved'
+        ? cookieValue(created.cookies, COOKIE_NAMES.anonymous)
+        : undefined;
+    expect(typeof anonToken).toBe('string');
+
+    // 换成关闭态的服务，但共用同一个仓储（模拟「开关关闭后存量用户再来」）
+    const shut = new IdentityService({
+      users: open.users,
+      sessions: open.sessions,
+      quota: new QuotaGuard({
+        config: quotaConfig(),
+        store: new InMemoryCounterStore(() => NOW.getTime()),
+        now: () => NOW,
+      }),
+      quotaConfig: quotaConfig(),
+      now: () => NOW,
+      secureCookies: false,
+      anonymousEnabled: false,
+    });
+
+    const result = await shut.resolve({
+      anonCookie: anonToken as string,
+      sessionCookie: undefined,
+      ip: '203.0.113.11',
+      allowAnonymousCreation: true,
+    });
+
+    expect(result.outcome).toBe('identity_required');
+    if (result.outcome === 'identity_required') {
+      expect(cookieValue(result.cookies, COOKIE_NAMES.anonymous)).toBeNull();
+    }
+  });
+
+  it('注册用户的 tp_session 照常解析（关闭匿名不影响注册路径）', async () => {
+    const registered = await closed.service.register({
+      email: 'only-registered@example.com',
+      password: 'a-sufficiently-long-passphrase-1',
+      displayName: null,
+      anonCookie: undefined,
+    });
+    expect(registered.outcome).toBe('registered');
+    const session =
+      registered.outcome === 'registered'
+        ? cookieValue(registered.cookies, COOKIE_NAMES.session)
+        : undefined;
+
+    const result = await closed.service.resolve({
+      anonCookie: undefined,
+      sessionCookie: session as string,
+      ip: null,
+      allowAnonymousCreation: true,
+    });
+
+    expect(result.outcome).toBe('resolved');
+    if (result.outcome === 'resolved') {
+      expect(result.identity.userType).toBe('REGISTERED');
+    }
+  });
+
+  it('session 与 anon 同时有效时：按 session 解析、清除 anon、**不归并**', async () => {
+    /*
+     * 归并的前提是「匿名数据要接到注册账号上」。P7 的口径是存量匿名数据
+     * 统一走 30 天保留期清理，因此归并入口一并关闭 ——
+     * 否则会出现一种半开状态：新匿名号建不了，但旧匿名号还能通过登录
+     * 把数据搬到注册账号，而那条路径此后再没有测试之外的流量走过。
+     *
+     * 仍然清除 anon Cookie：它已经不被接受，留着只是每次白带一次。
+     */
+    const open = makeHarness();
+    const anon = await open.service.resolve({
+      anonCookie: undefined,
+      sessionCookie: undefined,
+      ip: null,
+      allowAnonymousCreation: true,
+    });
+    const anonToken =
+      anon.outcome === 'resolved' ? cookieValue(anon.cookies, COOKIE_NAMES.anonymous) : undefined;
+
+    const shut = new IdentityService({
+      users: open.users,
+      sessions: open.sessions,
+      quota: new QuotaGuard({
+        config: quotaConfig(),
+        store: new InMemoryCounterStore(() => NOW.getTime()),
+        now: () => NOW,
+      }),
+      quotaConfig: quotaConfig(),
+      now: () => NOW,
+      secureCookies: false,
+      anonymousEnabled: false,
+    });
+
+    const registered = await shut.register({
+      email: 'no-merge@example.com',
+      password: 'a-sufficiently-long-passphrase-1',
+      displayName: null,
+      anonCookie: undefined,
+    });
+    const session =
+      registered.outcome === 'registered'
+        ? cookieValue(registered.cookies, COOKIE_NAMES.session)
+        : undefined;
+
+    const result = await shut.resolve({
+      anonCookie: anonToken as string,
+      sessionCookie: session as string,
+      ip: null,
+      allowAnonymousCreation: false,
+    });
+
+    expect(result.outcome).toBe('resolved');
+    if (result.outcome === 'resolved') {
+      expect(result.identity.userType).toBe('REGISTERED');
+      expect(result.pendingMerge).toBeNull();
+      expect(cookieValue(result.cookies, COOKIE_NAMES.anonymous)).toBeNull();
+    }
+  });
+
+  it('createAnonymous 直接调用仍然可用（重新打开与仓储层测试要用）', async () => {
+    /*
+     * 开关拦的是**解析路径**，不是能力本身。这条用例守的是「不删代码」——
+     * 把 createAnonymous 一起废掉的话，重新打开匿名入口就不是改一个环境
+     * 变量的事了，而 P7 的全部前提是「可逆」。
+     */
+    const result = await closed.service.createAnonymous('203.0.113.12');
+
+    expect(result.outcome).toBe('resolved');
+    expect(closed.users.count()).toBe(1);
   });
 });

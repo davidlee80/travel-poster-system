@@ -164,6 +164,8 @@ beforeEach(() => {
     quotaConfig,
     now,
     secureCookies: false,
+    // P7：这些用例验的是 R-13 的双模式行为，因此显式打开匿名入口
+    anonymousEnabled: true,
   });
 
   const exports = new FakeExports();

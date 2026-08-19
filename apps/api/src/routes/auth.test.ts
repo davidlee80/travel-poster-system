@@ -54,6 +54,8 @@ function makeApp(config: QuotaConfig = quotaConfig()) {
     quotaConfig: config,
     now: () => NOW,
     secureCookies: false,
+    // P7：这些用例验的是 R-13 的双模式行为，因此显式打开匿名入口
+    anonymousEnabled: true,
   });
 
   const app = buildServer({

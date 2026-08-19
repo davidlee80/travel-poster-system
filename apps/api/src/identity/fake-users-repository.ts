@@ -30,6 +30,16 @@ export class FakeUsersRepository implements UsersRepository {
     return this.rows.get(id);
   }
 
+  /**
+   * 测试辅助：当前行数。
+   *
+   * P7 用它断言「匿名入口关闭时连号都不建」—— 那一条只能靠行数表达：
+   * 返回 `identity_required` 但顺手建了一行的实现，从响应上看不出区别。
+   */
+  count(): number {
+    return this.rows.size;
+  }
+
   /** 测试辅助：模拟业务表中挂在某用户名下的行数 */
   readonly businessRows = new Map<string, number>();
 
