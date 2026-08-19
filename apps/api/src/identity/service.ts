@@ -307,8 +307,17 @@ export class IdentityService {
     let row: UserRow | null = null;
     let upgraded = false;
 
+    /*
+     * P7：匿名入口关闭时不走「原地升级」分支，一律新建账号。
+     *
+     * 与 `resolve()` 分支 4 的口径一致：存量匿名数据统一走 30 天保留期清理，
+     * 而不是留一条把它接到新账号上的路。半开状态（新号建不了但旧号能升级）
+     * 的问题是那条路径此后再没有真实流量走过。
+     *
+     * `upgradeAnonymous` 本身保留 —— 开关打开即恢复（TP-1-35 第一场景）。
+     */
     const anonRow =
-      input.anonCookie === undefined
+      input.anonCookie === undefined || !this.deps.anonymousEnabled
         ? null
         : await users.findActiveByAnonTokenHash(hashToken(input.anonCookie));
 
@@ -386,9 +395,14 @@ export class IdentityService {
       return { outcome: 'invalid_credentials' };
     }
 
-    // 归并：该设备上先匿名用过，再登录已有账号
+    /*
+     * 归并：该设备上先匿名用过，再登录已有账号。
+     *
+     * P7：匿名入口关闭时跳过 —— 理由同 `resolve()` 分支 4 与 `register()`。
+     * `mergeAnonymousInto` 保留且仍有仓储层测试（门禁 #24/#25）。
+     */
     let merged: { anonymousUserId: string } | null = null;
-    if (input.anonCookie !== undefined) {
+    if (input.anonCookie !== undefined && this.deps.anonymousEnabled) {
       const anonRow = await users.findActiveByAnonTokenHash(hashToken(input.anonCookie));
       if (anonRow !== null && anonRow.id !== row.id) {
         await users.mergeAnonymousInto(anonRow.id, row.id);

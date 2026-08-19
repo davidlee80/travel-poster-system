@@ -114,6 +114,19 @@ export async function resolveIdentity(
     return null;
   }
   if (result.outcome === 'identity_required') {
+    /*
+     * P7：先下发 Cookie 清除，**再**发错误体。顺序反了 Cookie 就不会下发 ——
+     * `sendError` 里的 `reply.send()` 一旦执行，之后对 header 的写入无效。
+     *
+     * 要清的只可能是 `tp_anon`（见 `IdentityService.resolve` 的短路分支）。
+     * 没有它时 `cookies` 是空数组，因此这一行对「本来就没有身份」的请求
+     * 不产生任何 Set-Cookie。
+     */
+    applyCookies(reply, result.cookies, deps.secureCookies);
+    if (result.cookies.length > 0) {
+      // 带着 tp_anon 来的请求 —— 这是「存量匿名流量还剩多少」的唯一信号
+      recordIdentityEvent('anonymous_rejected', 'rejected');
+    }
     sendError(request, reply, 'AUTH_IDENTITY_REQUIRED');
     return null;
   }

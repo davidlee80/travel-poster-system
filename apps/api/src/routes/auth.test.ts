@@ -40,7 +40,10 @@ function quotaConfig(overrides: Partial<QuotaConfig> = {}): QuotaConfig {
   };
 }
 
-function makeApp(config: QuotaConfig = quotaConfig()) {
+function makeApp(
+  config: QuotaConfig = quotaConfig(),
+  options: { readonly anonymousEnabled?: boolean } = {},
+) {
   const logger = createSilentLogger();
   const users = new FakeUsersRepository(() => NOW);
   const sessions = new InMemorySessionStore(() => NOW.getTime());
@@ -54,8 +57,8 @@ function makeApp(config: QuotaConfig = quotaConfig()) {
     quotaConfig: config,
     now: () => NOW,
     secureCookies: false,
-    // P7：这些用例验的是 R-13 的双模式行为，因此显式打开匿名入口
-    anonymousEnabled: true,
+    // 默认 true：既有用例验的是 R-13 的双模式行为，它们必须完全不变
+    anonymousEnabled: options.anonymousEnabled ?? true,
   });
 
   const app = buildServer({
@@ -374,5 +377,138 @@ describe('Cookie 解析', () => {
     expect(parseCookies(undefined)).toEqual({});
     expect(parseCookies('')).toEqual({});
     expect(parseCookies('=novalue; ; valid=1')).toEqual({ valid: '1' });
+  });
+});
+
+// ── P7：匿名入口关闭后的端点行为 ──────────────────────────
+
+describe('P7 匿名入口关闭（端点层）', () => {
+  it('GET /auth/session 返回 401 而不是自动建号', async () => {
+    /*
+     * 这是 13.0 第 3.a 条反转后最直接可见的一处：会话端点原本是匿名号的
+     * **唯一签发入口**（前端一进页面就调它）。
+     *
+     * 返回 401 而不是 200 + `{authenticated:false}`：13.0 的错误体是统一
+     * 契约，为「未登录」单开一种成功响应会让客户端多一条分支，而它要做的事
+     * （引导注册）与拿到 401 时完全一样。
+     */
+    const h = makeApp(quotaConfig(), { anonymousEnabled: false });
+
+    const response = await h.app.inject({ method: 'GET', url: '/api/v1/auth/session' });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json<{ error: { code: string } }>().error.code).toBe('AUTH_IDENTITY_REQUIRED');
+    // 关键：一个匿名号都没建
+    expect(h.users.count()).toBe(0);
+  });
+
+  it('GET /auth/session 不下发 tp_anon', async () => {
+    const h = makeApp(quotaConfig(), { anonymousEnabled: false });
+
+    const response = await h.app.inject({ method: 'GET', url: '/api/v1/auth/session' });
+
+    const raw = response.headers['set-cookie'];
+    const list = Array.isArray(raw) ? raw.map(String) : typeof raw === 'string' ? [raw] : [];
+    expect(list.filter((c) => c.startsWith(`${COOKIE_NAMES.anonymous}=`))).toEqual([]);
+  });
+
+  it('带着存量 tp_anon 访问时被拒，且响应清除该 Cookie', async () => {
+    /*
+     * 存量匿名用户的浏览器里还有 tp_anon。不清的话它每次请求都白带一次、
+     * 服务端每次都要查一遍库再拒，而浏览器永远处在「带着一个不被接受的
+     * 凭据」的状态。
+     *
+     * 先用打开态签一个真实令牌，再换成关闭态的应用（共用同一仓储）——
+     * 这正是「开关关闭后存量用户再来」的形状。
+     */
+    const open = makeApp();
+    const issued = await open.app.inject({ method: 'GET', url: '/api/v1/auth/session' });
+    const anonValue = setCookieValue(issued.headers, COOKIE_NAMES.anonymous);
+    expect(anonValue).toBeTruthy();
+    const anonCookie = `${COOKIE_NAMES.anonymous}=${anonValue ?? ''}`;
+
+    const shut = makeApp(quotaConfig(), { anonymousEnabled: false });
+    const response = await shut.app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/session',
+      headers: { cookie: anonCookie },
+    });
+
+    expect(response.statusCode).toBe(401);
+
+    const raw = response.headers['set-cookie'];
+    const list = Array.isArray(raw) ? raw.map(String) : typeof raw === 'string' ? [raw] : [];
+    const cleared = list.find((c) => c.startsWith(`${COOKIE_NAMES.anonymous}=`));
+    expect(cleared, '应下发一条清除 tp_anon 的 Set-Cookie').toBeDefined();
+    expect(cleared).toContain('Max-Age=0');
+  });
+
+  it('注册不带 tp_anon 也能成功（关闭匿名后唯一的入口）', async () => {
+    const h = makeApp(quotaConfig(), { anonymousEnabled: false });
+
+    const response = await h.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: 'registered-only@example.com',
+        password: 'a-sufficiently-long-passphrase-1',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    // 13.9.1 的响应体是扁平的 SessionResponse，没有 user 包装
+    expect(response.json<{ user_type: string }>().user_type).toBe('REGISTERED');
+  });
+
+  it('注册时携带 tp_anon 不再原地升级，而是新建账号', async () => {
+    /*
+     * 与 resolve() 分支 4 的口径一致：存量匿名数据走保留期清理，
+     * 不留一条把它接到新账号上的路。半开状态（新号建不了但旧号能升级）
+     * 的问题是那条路径此后再没有真实流量走过。
+     */
+    const open = makeApp();
+    const issued = await open.app.inject({ method: 'GET', url: '/api/v1/auth/session' });
+    const anonCookie = `${COOKIE_NAMES.anonymous}=${setCookieValue(issued.headers, COOKIE_NAMES.anonymous) ?? ''}`;
+    const anonCountBefore = open.users.count();
+    expect(anonCountBefore).toBe(1);
+
+    const response = await open.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      headers: { cookie: anonCookie },
+      payload: {
+        email: 'no-upgrade@example.com',
+        password: 'a-sufficiently-long-passphrase-1',
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    // 打开态：原地升级，行数不变
+    expect(open.users.count()).toBe(1);
+
+    // 关闭态：同样的请求应当新建一行
+    const shut = makeApp(quotaConfig(), { anonymousEnabled: false });
+    const seeded = makeApp();
+    const seededSession = await seeded.app.inject({ method: 'GET', url: '/api/v1/auth/session' });
+    const seededAnon = `${COOKIE_NAMES.anonymous}=${setCookieValue(seededSession.headers, COOKIE_NAMES.anonymous) ?? ''}`;
+    const shutResponse = await shut.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      headers: { cookie: seededAnon },
+      payload: {
+        email: 'fresh-account@example.com',
+        password: 'a-sufficiently-long-passphrase-1',
+      },
+    });
+
+    expect(shutResponse.statusCode).toBe(201);
+    /*
+     * shut 的仓储原本是空的，注册后只有这一个新建的注册账号。
+     *
+     * 「有没有原地升级」只能靠行数判断 —— 13.9.1 的响应体里没有 upgraded
+     * 字段（那是 IdentityService 的内部结局，只用于选 upgrade / register
+     * 两个指标事件）。这也是为什么打开态那一半要断言「行数不变」：
+     * 两个断言合起来才区分得出「升级」与「新建」。
+     */
+    expect(shut.users.count()).toBe(1);
   });
 });

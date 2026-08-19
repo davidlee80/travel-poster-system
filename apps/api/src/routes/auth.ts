@@ -116,7 +116,21 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       });
     }
     if (result.outcome === 'identity_required') {
-      // allowAnonymousCreation 为 true 时不应走到这里；保留分支以便类型穷尽
+      /*
+       * P7：匿名入口关闭时会走到这里 —— 会话端点不再自动建号。
+       *
+       * 返回 401 而不是 200 + `{authenticated: false}`：13.0 的错误体是统一
+       * 契约，为「未登录」单开一种成功响应会让客户端多一条分支，
+       * 而它要做的事（引导注册）与拿到 401 时完全一样。
+       * 前端把 401 当作正常的「未登录」状态处理（见 SessionProvider）。
+       *
+       * 开关打开时这里仍然不可达（`allowAnonymousCreation: true` 会去建号），
+       * 因此这个分支同时是类型穷尽与新行为两用。
+       */
+      applyCookies(reply, result.cookies, secureCookies);
+      if (result.cookies.length > 0) {
+        recordIdentityEvent('anonymous_rejected', 'rejected');
+      }
       return fail(request, reply, 'AUTH_IDENTITY_REQUIRED');
     }
 
