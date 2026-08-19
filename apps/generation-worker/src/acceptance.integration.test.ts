@@ -155,24 +155,33 @@ interface Case {
   readonly index: number;
   readonly totalDays: number;
   readonly profile: ConstraintProfile;
-  readonly identity: 'ANONYMOUS' | 'REGISTERED';
   readonly name: string;
 }
 
+/**
+ * 20 个用例 = 4 个天数档 × 5 种约束组合。
+ *
+ * ## P7：身份轴已移除
+ *
+ * 原先这里有第三个轴（匿名 / 注册按索引交替）。P7 关闭匿名入口后，
+ * 前端来的一切请求都必须是注册用户，那个轴退化成常量。
+ *
+ * 移除而不是保留成「全 REGISTERED」的字段：一个恒为同一个值的维度
+ * 会让读用例名的人以为覆盖了两种身份。矩阵仍是 20 个 —— 身份轴本来是
+ * **叠在**这 20 个上的（4 × 5 = 20），不是乘上去的。
+ *
+ * 匿名侧那些仍然有效的能力（升级、归并、AI Hero 额度 0、保留期清理）
+ * 改由服务层与仓储层的测试覆盖，见 `tools/acceptance-gates.mjs`
+ * 的 #23/#24/#25/#29/#31。
+ */
 const CASES: readonly Case[] = DAY_COUNTS.flatMap((totalDays, dayIndex) =>
   PROFILES.map((profile, profileIndex): Case => {
     const index = dayIndex * PROFILES.length + profileIndex;
-    /*
-     * 身份按索引交替，因此每个天数档下 2～3 个注册、2～3 个匿名 ——
-     * 把「注册」集中在某一档会让那一档之外的 AI Hero 路径完全没被跑到。
-     */
-    const identity = index % 2 === 0 ? 'ANONYMOUS' : 'REGISTERED';
     return {
       index,
       totalDays,
       profile,
-      identity,
-      name: `#${String(index + 1).padStart(2, '0')} ${totalDays} 天 · ${profile.label} · ${identity === 'ANONYMOUS' ? '匿名' : '注册'}`,
+      name: `#${String(index + 1).padStart(2, '0')} ${totalDays} 天 · ${profile.label}`,
     };
   }),
 );
@@ -265,21 +274,26 @@ describeIntegration('24.1 #1：20 个端到端用例（集成）', () => {
   }
 
   /**
-   * 按身份取一个 Cookie 头。
+   * 取一个注册用户的会话 Cookie。
    *
-   * 注册路径走的是**真实的注册端点**而不是直接插一行 users ——
-   * 门禁 #21/#23 关心的正是「匿名建号 → 注册」这条转换，
-   * 而绕过端点插行会让那条路径永远没被跑到。
+   * 走的是**真实的注册端点**而不是直接插一行 users：注册端点上有口令强度、
+   * 邮箱唯一、配额默认值三处逻辑，绕过它插行会让那三处永远没被跑到。
+   *
+   * ## P7：不再先取 tp_anon
+   *
+   * 原先的做法是 `GET /auth/session` 拿匿名 Cookie → 带着它注册（走 13.9.2
+   * 的「原地升级」分支）。关闭匿名入口后那条路走不通了，而且这里本来也
+   * **不该**依赖它 —— 20 个验收用例要验的是生成链路，把它们的前置条件
+   * 挂在另一个功能上，等于让一个功能的关闭连带 21 个用例一起红，
+   * 而红的原因与它们要验的东西无关。
+   *
+   * 「携带 tp_anon 原地升级」那条分支由 `apps/api` 的 auth 用例覆盖
+   * （TP-1-35 的第一场景），它在开关打开时仍然有效。
    */
   async function cookieFor(kase: Case): Promise<string> {
-    const session = await app.inject({ method: 'GET', url: '/api/v1/auth/session' });
-    const anonymous = cookieFrom(session.headers['set-cookie'], COOKIE_NAMES.anonymous);
-    if (kase.identity === 'ANONYMOUS') return anonymous;
-
     const registered = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
-      headers: { cookie: anonymous },
       payload: {
         email: `case-${kase.index}@example.com`,
         password: 'a-sufficiently-long-passphrase-1',
@@ -435,23 +449,18 @@ describeIntegration('24.1 #1：20 个端到端用例（集成）', () => {
       expect(cost.rows[0]!.regenerations).toBeLessThanOrEqual(2);
 
       /*
-       * ── 21.4：匿名用户的 AI Hero 额度为 0 ──
+       * ── 21.4 的「匿名 AI Hero 额度为 0」不再在这里断言（P7）──
        *
-       * 这一条只对匿名成立，是双身份覆盖的意义所在：同一段代码在两种身份下
-       * 必须有不同的行为，而只测一种身份的话这个差异永远不会被验证。
+       * 那条断言原本挂在匿名用例上，而 P7 之后这里没有匿名用例了。
+       *
+       * **能力本身仍在**（`AiImageBudget` 的 `heroQuota: 0` → 拒绝并给出
+       * `HERO_QUOTA_EXHAUSTED`），且由 `assets/ai-budget.test.ts` 的
+       * 「TP-4-17 匿名的 AI Hero 额度为 0」一组用例直接覆盖 ——
+       * 那一组不经 API，因此与匿名入口的开关状态无关。
+       *
+       * 把它记在这里而不是默默删掉：这一条是 21.4 的成本上限里唯一按身份
+       * 分档的规则，将来重新打开匿名入口时，它需要重新回到端到端覆盖。
        */
-      if (kase.identity === 'ANONYMOUS') {
-        const hero = await pool.query<{ count: string }>(
-          `SELECT count(*)::text AS count
-             FROM plan_asset_bindings b
-             JOIN assets a ON a.id = b.asset_id
-            WHERE b.plan_version_id = (SELECT current_version_id FROM travel_plans WHERE id = $1)
-              AND b.role = 'HERO_BACKGROUND'
-              AND a.source_type = 'AI_GENERATED'`,
-          [handles.plan_id],
-        );
-        expect(hero.rows[0]!.count).toBe('0');
-      }
     },
     /*
      * 单个用例 30 秒。14 天档要跑两次模型调用、15 个展示页、
@@ -474,8 +483,14 @@ describeIntegration('24.1 #1：20 个端到端用例（集成）', () => {
     expect([...new Set(CASES.map((kase) => kase.totalDays))].sort((a, b) => a - b)).toEqual([
       1, 3, 7, 14,
     ]);
-    expect(CASES.filter((kase) => kase.identity === 'ANONYMOUS')).toHaveLength(10);
-    expect(CASES.filter((kase) => kase.identity === 'REGISTERED')).toHaveLength(10);
+    /*
+     * P7：原先这里有两条身份轴的断言（匿名 10、注册 10）。身份轴移除后
+     * 换成「五种约束组合各覆盖到」—— 那是矩阵的第二个轴，
+     * 也是身份轴移除后唯一还能缩水而无症状的维度。
+     */
+    expect([...new Set(CASES.map((kase) => kase.profile.label))]).toEqual(
+      PROFILES.map((profile) => profile.label),
+    );
     // 每个天数档下五种约束组合各一次
     for (const days of DAY_COUNTS) {
       const labels = CASES.filter((kase) => kase.totalDays === days).map(
