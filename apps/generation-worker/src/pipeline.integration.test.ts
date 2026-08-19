@@ -125,6 +125,8 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
       quotaConfig,
       now: () => new Date(),
       secureCookies: false,
+      // P7：这条链路验的是「无身份提交 → 自动建号」，因此保持打开
+      anonymousEnabled: true,
     });
 
     app = buildServer({

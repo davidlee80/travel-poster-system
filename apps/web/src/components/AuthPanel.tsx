@@ -43,9 +43,14 @@ export function AuthPanel() {
     );
   }
 
-  const session = status.session;
+  /*
+   * P7：`anonymous` 态（服务端拒绝了未注册请求）与「匿名身份」在这里的
+   * 呈现完全相同 —— 都是「显示注册/登录表单」。因此只在需要读身份字段时
+   * 才区分两者，其余分支共用。
+   */
+  const session = status.kind === 'ready' ? status.session : null;
 
-  if (session.user_type === 'REGISTERED') {
+  if (session !== null && session.user_type === 'REGISTERED') {
     return (
       <div className="auth-panel">
         <div className="auth-panel__who">

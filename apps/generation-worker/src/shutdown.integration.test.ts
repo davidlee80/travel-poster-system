@@ -120,6 +120,8 @@ describeShutdown('L-10 / 门禁 #34：优雅停机（集成，仅 Linux）', () 
       quotaConfig,
       now: () => new Date(),
       secureCookies: false,
+      // P7：停机验证与身份模式无关，跟随默认的关闭态
+      anonymousEnabled: false,
     });
 
     app = buildServer({

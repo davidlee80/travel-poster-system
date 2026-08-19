@@ -11,6 +11,7 @@ import {
 import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { generatePlan, getJobStatus } from '@/lib/api-client';
+import { useSession } from './SessionProvider';
 import {
   INITIAL_FORM_STATE,
   browserTimezone,
@@ -59,6 +60,17 @@ type Phase =
   | { readonly kind: 'error'; readonly message: string; readonly retryable: boolean };
 
 export function PlanRequestForm(): React.ReactElement {
+  const { status } = useSession();
+  /*
+   * 只有拿到身份且是注册用户才允许提交（P7）。
+   *
+   * `loading` 也算未就绪 —— 首次加载时禁用比「先允许点、再发现不行」好：
+   * 后者会让访客填完整张表单再被拒。
+   *
+   * 开关打开时匿名身份也能生成，因此这里不能只看 REGISTERED；判断的是
+   * 「服务端有没有给我一个可用身份」，而那正是 `ready` 的含义。
+   */
+  const signedIn = status.kind === 'ready';
   const [state, setState] = useState<TravelRequestFormState>(INITIAL_FORM_STATE);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   /** 防止组件卸载后仍在轮询并 setState */
@@ -316,9 +328,27 @@ export function PlanRequestForm(): React.ReactElement {
         />
       </label>
 
-      <button className="request-form__submit" type="submit" disabled={busy}>
+      {/*
+        P7：未注册时禁用提交并说明原因。
+        
+        不禁用的话，点下去会拿到一个 401 —— 而 401 的错误文案是给开发者看的，
+        访客只会看到「请求失败」。禁用 + 一句话说明把「为什么不能点」写在
+        点之前，那是唯一能让他去注册的时机。
+      */}
+      <button
+        className="request-form__submit"
+        type="submit"
+        disabled={busy || !signedIn}
+        title={signedIn ? undefined : '生成旅行计划需要先注册或登录'}
+      >
         {busy ? '生成中…' : '生成旅行计划'}
       </button>
+
+      {signedIn ? null : (
+        <p className="request-form__hint" role="note">
+          生成旅行计划需要先注册或登录 —— 计划会保存在你的账号下，换设备也能打开。
+        </p>
+      )}
 
       {phase.kind === 'generating' ? (
         <div className="request-form__status" role="status">

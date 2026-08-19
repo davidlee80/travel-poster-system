@@ -21,6 +21,17 @@ export function AnonymousNotice() {
   const { status } = useSession();
 
   // loading 时不显示：闪一下再消失比不显示更差
+  /*
+   * P7：`anonymous` 态**不**渲染这条提示。
+   *
+   * 提示条的内容是「未登录状态下生成的计划保存 30 天」—— 那句话的前提是
+   * 未登录也能生成。匿名入口关闭后它变成了一句错误承诺：访客根本生不成计划，
+   * 而这条提示会让他以为可以直接开始。
+   *
+   * 文案常量保留在下方（未被渲染）：`pnpm test:docs` 校验界面提示条与隐私
+   * 政策的保留期是同一个数字，删掉文案会让那条一致性断言失去锚点 ——
+   * 而政策里那 30 天仍然有效（存量匿名数据照常按 30 天清理）。
+   */
   if (status.kind !== 'ready' || status.session.user_type !== 'ANONYMOUS') {
     return null;
   }
