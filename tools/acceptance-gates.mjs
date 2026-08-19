@@ -1,11 +1,11 @@
 /**
- * 24.1 的 34 项验收门禁清单（TP-5-06）。
+ * 24.1 的 38 项验收门禁清单（TP-5-06；#35～#38 随 P6 的 TP-6-17 纳入）。
  *
  * ## 为什么需要这份清单
  *
- * 设计稿 24.1 用三张表列出 34 项，每项给了「验证方式」与「通过线」。
+ * 设计稿 24.1 用四张表列出 38 项，每项给了「验证方式」与「通过线」。
  * 但那是**文字描述**：「端到端自动化用例」「越权测试」「逐字段断言」。
- * 要回答「现在是 34/34 吗」，得有人把 34 项逐个对着代码找一遍 ——
+ * 要回答「现在是 38/38 吗」，得有人把 38 项逐个对着代码找一遍 ——
  * 而那件事没人会每周做，于是「34/34 通过」永远停留在「应该是吧」。
  *
  * 这份清单把每项映射到一条**可执行的命令**，并对确实不能自动化的项
@@ -313,7 +313,44 @@ export const GATES = [
     why: '端到端测试起真实 Worker 子进程并发 SIGTERM。**在 Windows / macOS 上自动跳过**（那里没有 POSIX 信号，child.kill 映射到 TerminateProcess），因此本机看到的是「通过」但实际跳过 —— 真正执行它的是 CI 的 shutdown job（L-10）',
     needsDb: true,
   },
+
+  // ── 24.1 的 V1.7 新增四项（R-45～R-52，随 P6 纳入）──────
+  {
+    id: 35,
+    title: '搜索图入库合规（license_type 为空即丢弃；source_metadata 逐字段完整）',
+    ref: '24.1 #35、9.6 的 R-46',
+    kind: 'command',
+    run: 'pnpm test:asset-ingest',
+    why: '**不需要数据库**：仓储用进程内假实现，因此这一项总是真的在跑。做成集成测试的话，没有 DATABASE_URL 的环境里 vitest 会 describe.skip 并以 0 退出，于是报告把它算成通过（#34 就是这个问题）',
+  },
+  {
+    id: 36,
+    title: '搜索图复用与去重（第二次请求库内命中、图源零外呼；相同字节走标签并集）',
+    ref: '24.1 #36、9.6 的 R-46/R-47',
+    kind: 'command',
+    run: 'pnpm test:asset-ingest',
+    why: '同 #35 不需要数据库。SQL 侧的部分唯一索引由 pnpm test:integration 的 assets-repository 覆盖',
+  },
+  {
+    id: 37,
+    title: '通用空间隔离与归并零搬运（匿名 A 拿不到匿名 B 的产物；归并后对象无拷贝/重命名）',
+    ref: '24.1 #37、15.4 的 R-49/R-50',
+    kind: 'command',
+    run: 'pnpm test:storage-keys && pnpm test:merge',
+    why: '前半（隔离）由 15.4 键构造器的纯函数测试 + api 的 exports 越权用例覆盖；后半（零搬运）由归并集成测试的对象存储操作计数断言覆盖 —— 「零」只能靠计数，看最终状态看不出中间有没有搬过',
+    needsDb: true,
+  },
+  {
+    id: 38,
+    title:
+      '清理以归属为准（已归并用户的 anon/ 对象不被误删；纯匿名到期对象被删；anon/ 前缀无生命周期规则）',
+    ref: '24.1 #38、15.1 的 R-50/R-51',
+    kind: 'command',
+    run: 'pnpm test:retention',
+    why: '含三类断言：删对象在删行之前的顺序、MERGED 行不进清理路径的回归断言、生命周期规则声明的文本层断言（本机没有 mc，与 P5 对 Helm 的处理同一形态）',
+    needsDb: true,
+  },
 ];
 
 /** 24.1 的项数。写成常量供自检，防止无意增删 */
-export const GATE_COUNT = 34;
+export const GATE_COUNT = 38;
