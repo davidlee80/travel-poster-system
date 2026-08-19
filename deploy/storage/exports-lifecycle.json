@@ -1,0 +1,10 @@
+{
+  "Rules": [
+    {
+      "ID": "registered-exports-90d",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "users/" },
+      "Expiration": { "Days": 90 }
+    }
+  ]
+}
