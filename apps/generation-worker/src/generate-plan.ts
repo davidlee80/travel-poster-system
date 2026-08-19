@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import type { TravelPlansRepository } from '@tps/db';
 import type { EmbeddingClient, LlmClient } from '@tps/llm';
 import {
@@ -33,7 +31,7 @@ import {
   type TravelPlanLlmOutput,
 } from '@tps/schemas';
 import type { GenerationJobPayload } from '@tps/queue';
-import type { Logger, UserType } from '@tps/shared';
+import { uuidv7, type Logger, type UserType } from '@tps/shared';
 
 import type { AiLayerDeps } from './assets/resolve-assets.js';
 import type { LicensedSourceLayerDeps } from './assets/resolvers/licensed-source.js';
@@ -606,8 +604,14 @@ export async function generatePlan(
    * `plan_version_id`（六章的 TravelPlan 三个 ID 都是必填）。
    * 等插入后再补的话，库里会短暂存在一份 `TravelPlanSchema` 读不回来的
    * 计划 —— 而 13.3 正是用它解析后返回。
+   *
+   * **UUIDv7 而不是 v4**（R-48，TP-6-10）：这个 ID 同时是 15.4 的
+   * `content_id` —— 该次生成的全部产物（展示数据、素材绑定、导出文件、
+   * 存储键、日志与 Trace）都以它为锚点。时间有序换来两件事：
+   * 15.4 的存储路径可以从 ID 派生年月而不引入第二个时间来源，
+   * 13.11 的时间范围检索可以在主键上做范围扫描而不需要新索引。
    */
-  const versionId = randomUUID();
+  const versionId = uuidv7();
 
   /*
    * 投影与向量都由**最终落库的**计划算出。
