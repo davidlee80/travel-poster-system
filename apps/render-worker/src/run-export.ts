@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
-import type { ExportsRepository, PresentationsRepository } from '@tps/db';
+import type { ExportJobRow, ExportsRepository, PresentationsRepository } from '@tps/db';
 import { ExportArtifactSchema, EXPORT_URL_TTL_SECONDS, type ExportArtifact } from '@tps/schemas';
 import { RENDER_PAGE_KEYS, issueRenderToken, type Logger } from '@tps/shared';
-import { exportFileName, exportObjectKey, type ExportStorage } from '@tps/storage';
+import {
+  exportFileName,
+  exportObjectKeyFor,
+  type ContentSpace,
+  type ExportStorage,
+} from '@tps/storage';
 import type { Browser, BrowserContext } from 'playwright-core';
 
 import { createRenderContext } from './browser.js';
@@ -154,7 +159,14 @@ export async function runExport(deps: RunExportDeps, exportId: string): Promise<
     };
   }
 
-  const artifacts = await upload(deps, row.exportId, row.format, row.scope, captured);
+  const artifacts = await upload(
+    deps,
+    contentSpaceOf(row),
+    row.exportId,
+    row.format,
+    row.scope,
+    captured,
+  );
 
   const partial = failedDays.length > 0;
   await deps.exports.finish({
@@ -169,6 +181,28 @@ export async function runExport(deps: RunExportDeps, exportId: string): Promise<
   return partial
     ? { kind: 'partial', files: artifacts.length, failed: failedDays, ...shape }
     : { kind: 'completed', files: artifacts.length, ...shape };
+}
+
+/**
+ * 导出行 → 15.4 的产物空间（TP-6-12）。
+ *
+ * 单独一个导出的纯函数，而不是在 `runExport` 里内联对象字面量：
+ * 这四个字段的映射是**唯一**可能写错的地方（比如把 `planId` 当成
+ * `content_id`、或者把 `exports.created_at` 当成版本行的创建时刻），
+ * 而 `runExport` 的主体需要真实 Chromium + web 服务 + MinIO 三者同时在位
+ * 才能跑（P4 的交付边界 4），因此内联的话这个映射永远没有单测覆盖。
+ *
+ * 写错的表现极隐蔽：键仍然合法、上传仍然成功、下载仍然可用 ——
+ * 只有 retention 的对象清理会因为推不出同一个键而漏删（那时已经晚了）。
+ */
+export function contentSpaceOf(row: ExportJobRow): ContentSpace {
+  return {
+    userType: row.userType,
+    userId: row.userId,
+    // `content_id` 就是 `plan_version_id`（R-48），不是 plan_id
+    contentId: row.planVersionId,
+    contentCreatedAt: row.planVersionCreatedAt,
+  };
 }
 
 export interface PageTarget {
@@ -254,6 +288,7 @@ async function capture(
 /** 上传并构造 `ExportArtifact[]`（含 storage_key，重签名要用） */
 async function upload(
   deps: RunExportDeps,
+  space: ContentSpace,
   exportId: string,
   format: 'PNG' | 'PDF',
   scope: 'ALL_DAYS' | 'SINGLE_DAY' | 'FULL_PLAN',
@@ -269,14 +304,14 @@ async function upload(
   if (format === 'PDF' && captured.length > 1) {
     const ordered = [...captured].sort((a, b) => (a.dayNumber ?? 0) - (b.dayNumber ?? 0));
     const merged = await mergePdfs(ordered.map((item) => Buffer.from(item.bytes)));
-    return [await putOne(deps, exportId, format, scope, null, merged, contentType)];
+    return [await putOne(deps, space, exportId, format, scope, null, merged, contentType)];
   }
 
   const ordered = [...captured].sort((a, b) => (a.dayNumber ?? 0) - (b.dayNumber ?? 0));
   const artifacts: ExportArtifact[] = [];
   for (const item of ordered) {
     artifacts.push(
-      await putOne(deps, exportId, format, scope, item.dayNumber, item.bytes, contentType),
+      await putOne(deps, space, exportId, format, scope, item.dayNumber, item.bytes, contentType),
     );
   }
   return artifacts;
@@ -284,6 +319,7 @@ async function upload(
 
 async function putOne(
   deps: RunExportDeps,
+  space: ContentSpace,
   exportId: string,
   format: 'PNG' | 'PDF',
   scope: 'ALL_DAYS' | 'SINGLE_DAY' | 'FULL_PLAN',
@@ -291,7 +327,7 @@ async function putOne(
   bytes: Uint8Array,
   contentType: string,
 ): Promise<ExportArtifact> {
-  const key = exportObjectKey(exportId, exportFileName(format, scope, dayNumber));
+  const key = exportObjectKeyFor(space, exportId, exportFileName(format, scope, dayNumber));
   await deps.storage.put({ key, body: bytes, contentType });
 
   /*
