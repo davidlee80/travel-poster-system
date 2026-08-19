@@ -64,6 +64,7 @@ function repository(rows: readonly AssetCandidateRow[]): {
       return Promise.resolve(rows);
     },
     findByCacheKey: () => Promise.resolve(null),
+    findById: () => Promise.resolve(null),
     findByContentHash: () => Promise.resolve(null),
     mergeTags: () => Promise.resolve(),
     insertAsset: () => Promise.resolve({ assetId: 'x', created: true }),

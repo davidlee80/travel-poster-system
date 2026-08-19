@@ -142,6 +142,21 @@ export interface AssetsRepository {
   /** 19.4：精确键命中，不重算评分 */
   findByCacheKey(cacheKey: string): Promise<AssetCandidateRow | null>;
   /**
+   * 按主键读回一行（TP-6-03）。
+   *
+   * 用途是「刚入库、要立刻拿它构造 `ResolvedAsset`」，而落库后的尺寸、
+   * 比例与对象 URL 都只有数据库知道（11.2 会缩图与转码）。
+   *
+   * 不能用 `findCandidates` 代替：那个方法在三个预过滤维度全空时**刻意返回
+   * 零行**（避免全表扫描，见 `assets-repository.integration.test.ts`），
+   * 而这里只有一个 ID。也不能一律用 `findByCacheKey` —— 缓存键可以是 null
+   * （美食槽位缺菜名时 19.2 算不出键）。
+   *
+   * 与 `findByCacheKey` 一样过滤 `status` 与授权到期：读回来是为了**用**，
+   * 一行刚入库就已下架只可能是并发的人工下架，此时不该拿它渲染。
+   */
+  findById(assetId: string): Promise<AssetCandidateRow | null>;
+  /**
    * 按内容指纹查已有素材（R-47 的去重分支入口）。
    *
    * **不过滤 `status`**，与 `findByCacheKey` 相反。它回答的不是「找一张能用的
@@ -276,6 +291,21 @@ export function createAssetsRepository(pool: Pool): AssetsRepository {
             AND a.status = 'ACTIVE'
             AND (a.license_expires_at IS NULL OR a.license_expires_at > NOW())`,
         [cacheKey],
+      );
+
+      const row = rows[0];
+      return row === undefined ? null : toCandidate(row);
+    },
+
+    async findById(assetId) {
+      const { rows } = await pool.query<CandidateSqlRow>(
+        // 与 findByCacheKey 同一组谓词，只换查询键：读回来是为了用
+        `SELECT ${CANDIDATE_COLUMNS}, NULL::float8 AS cosine
+           FROM assets a
+          WHERE a.id = $1::uuid
+            AND a.status = 'ACTIVE'
+            AND (a.license_expires_at IS NULL OR a.license_expires_at > NOW())`,
+        [assetId],
       );
 
       const row = rows[0];

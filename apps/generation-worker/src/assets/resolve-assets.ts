@@ -32,6 +32,10 @@ import {
 } from './asset-metrics.js';
 import { resolveByAi } from './resolvers/ai-generator.js';
 import { resolveFallback } from './resolvers/fallback.js';
+import {
+  resolveByLicensedSource,
+  type LicensedSourceLayerDeps,
+} from './resolvers/licensed-source.js';
 import { resolveFromLocalLibrary } from './resolvers/local-library.js';
 import { resolveRouteMap } from './resolvers/svg-map.js';
 
@@ -52,10 +56,16 @@ import { resolveRouteMap } from './resolvers/svg-map.js';
  * FOOD_IMAGE          缓存键命中 → 素材库 → AI 生成 → 默认占位（9.5）
  * ```
  *
- * 「授权图片源」这一层（9.4/9.5 的第二层）V1 不接：它需要与具体图库签约，
- * 而 `ASSET_LICENSED_SOURCE_UNAVAILABLE` 这个告警码已经为它留好位置。
- * AI 与授权源同属 `fallback_level: 1`，不为空缺的那一层重编号 ——
- * 等级会出现在 `plan_asset_bindings.resolution_strategy` 的历史数据里。
+ * 三条图片链的完整顺序（9.3～9.6，P6 补上搜索层后）：
+ *
+ * ```text
+ * 缓存键命中 → 素材库 → 授权图源搜索 → AI 生成 → 默认占位
+ *     0            0            1            1          2
+ * ```
+ *
+ * 搜索与 AI 同属 `fallback_level: 1`（十八章没有为它们分级），
+ * 由 `resolution_strategy` 区分 —— 那一列会进 `plan_asset_bindings`
+ * 的历史数据，因此两者必须可分辨。
  *
  * ## 并发与预算
  *
@@ -84,6 +94,14 @@ export interface ResolveAssetsDeps {
    * 而那条路径必须是**经过测试**的，不是应急时才第一次走。
    */
   readonly ai?: AiLayerDeps;
+  /**
+   * 授权图源搜索（十八章第 1 级的前半，TP-6-03）。
+   *
+   * 与 `ai` 同样可缺省，理由也相同：9.6 的全局熔断、未配置图源的部署、
+   * 以及「只跑库内检索」的场景都需要同一条无搜索的路径 ——
+   * 而那条路径必须是**经过测试**的，不是应急时才第一次走。
+   */
+  readonly licensedSource?: LicensedSourceLayerDeps;
 }
 
 /**
@@ -302,14 +320,38 @@ async function resolveByRole(
   const library = await resolveFromLocalLibrary(deps, item, { deadline });
   if (library.kind === 'hit') return { resolved: library.resolved, warnings: [] };
 
+  const aiWarnings: AssetWarningCode[] = ['ASSET_LIBRARY_MISS'];
+
   /*
-   * ── AI 生成（十八章的第 1 级，TP-4-02）──
+   * ── 授权图源搜索（十八章第 1 级的前半，TP-6-03）──
    *
-   * 只有在素材库确实未命中时才走到这里。顺序不能反：AI 生成要花钱、
+   * 在 AI **之前**：一张合规的真实照片对景点与美食都优于 AI 插画（9.4/9.5），
+   * 而它更便宜（5 秒 vs 20 秒）且命中即入库为全平台共享资产 ——
+   * 下一次同一冷组合走的是上面那个「素材库」分支，零外呼（9.6）。
+   *
+   * 位置在缓存键与素材库**之后**：预热命中仍是主路径（21.2 措施二），
+   * 搜索只发生在冷组合上。
+   */
+  const search = deps.licensedSource;
+  if (search !== undefined) {
+    const searched = await resolveByLicensedSource(
+      { ...deps, ...search, searchBudget: search.searchBudget },
+      item,
+      cacheKey,
+    );
+    aiWarnings.push(...searched.warnings);
+    if (searched.resolved !== null) {
+      return { resolved: searched.resolved, warnings: searched.warnings };
+    }
+  }
+
+  /*
+   * ── AI 生成（十八章第 1 级的后半，TP-4-02）──
+   *
+   * 只有在素材库与搜索都未命中时才走到这里。顺序不能反：AI 生成要花钱、
    * 要 20 秒，而库里那张已经审核过的照片对「景点图」而言本来就更好（9.4）。
    */
   const ai = deps.ai;
-  const aiWarnings: AssetWarningCode[] = ['ASSET_LIBRARY_MISS'];
   if (ai !== undefined) {
     const generated = await resolveByAi({ ...deps, ...ai, budget: ai.budget }, item, cacheKey);
     aiWarnings.push(...generated.warnings);

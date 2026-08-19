@@ -16,13 +16,16 @@ import {
   photoSpotSlotId,
   routeMapSlotId,
 } from '@tps/presentation';
-import { FakeImageClient, ImageUnavailableError } from '@tps/llm';
+import { FakeImageClient, FakeLicensedSourceClient, ImageUnavailableError } from '@tps/llm';
+import type { LicensedSourceClient } from '@tps/llm';
 import { InMemoryAssetLock } from '@tps/queue';
 import { InMemoryObjectStorage } from '@tps/storage';
 import { InMemoryCounterStore, createSilentLogger } from '@tps/shared';
+import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 
 import { AiImageBudget } from './ai-budget.js';
+import { ImageSearchBudget } from './search-budget.js';
 import { PLACEHOLDER_SPECS } from './placeholders.js';
 import {
   DAY_CONCURRENCY,
@@ -86,6 +89,7 @@ function fakeRepo(options: FakeRepoOptions = {}): {
   concurrency: { peak: number };
 } {
   const inserted: string[] = [];
+  const byId = new Map<string, AssetCandidateRow>();
   let active = 0;
   const concurrency = { peak: 0 };
 
@@ -98,10 +102,31 @@ function fakeRepo(options: FakeRepoOptions = {}): {
       return options.candidates ?? [];
     },
     findByCacheKey: (key) => Promise.resolve(options.byCacheKey?.[key] ?? null),
+    // 落库后按 ID 读回（TP-6-03 的搜索层要用它构造 ResolvedAsset）
+    findById: (assetId) => Promise.resolve(byId.get(assetId) ?? null),
     findByContentHash: () => Promise.resolve(null),
     mergeTags: () => Promise.resolve(),
     insertAsset: (input) => {
       inserted.push(input.assetType);
+      byId.set(
+        input.assetId,
+        row({
+          assetId: input.assetId,
+          entityName: input.entityName,
+          destinationName: input.destinationName,
+          destinationPlaceId: input.destinationPlaceId,
+          sourceType: input.sourceType,
+          representationType: input.representationType,
+          storageUrl: input.storageUrl,
+          thumbnailUrl: input.thumbnailUrl,
+          width: input.width,
+          height: input.height,
+          aspectRatio: input.aspectRatio,
+          licenseType: input.licenseType,
+          attributionText: input.attributionText,
+          styleTags: input.styleTags,
+        }),
+      );
       return Promise.resolve({ assetId: input.assetId, created: true });
     },
     insertVariant: () => Promise.resolve(),
@@ -264,6 +289,7 @@ describe('来源顺序（九章）', () => {
     const repo: AssetsRepository = {
       findCandidates: () => Promise.resolve([]),
       findByCacheKey: (key) => Promise.resolve(stored.get(key) ?? null),
+      findById: () => Promise.resolve(null),
       findByContentHash: () => Promise.resolve(null),
       mergeTags: () => Promise.resolve(),
       insertAsset: (input) => {
@@ -332,6 +358,7 @@ describe('异常与降级（16.3）', () => {
         return calls === 1 ? Promise.reject(new Error('数据库抖动')) : Promise.resolve([]);
       },
       findByCacheKey: () => Promise.resolve(null),
+      findById: () => Promise.resolve(null),
       findByContentHash: () => Promise.resolve(null),
       mergeTags: () => Promise.resolve(),
       insertAsset: (input) => Promise.resolve({ assetId: input.assetId, created: true }),
@@ -533,5 +560,189 @@ describe('AI 层的位置（十八章第 1 级，TP-4-02）', () => {
     const { repo } = fakeRepo();
     const { warnings } = await resolveAssets(deps(repo), envelopeFor(14));
     expect(new Set(warnings).size).toBe(warnings.length);
+  });
+});
+
+describe('搜索层的位置（十八章第 1 级前半，TP-6-03）', () => {
+  /** 一张能过 11.2 全部校验的图 */
+  async function searchablePhoto(): Promise<Uint8Array> {
+    const width = 1600;
+    const height = 900;
+    const pixels = Buffer.alloc(width * height * 3);
+    let state = 11;
+    for (let i = 0; i < pixels.length; i += 1) {
+      state = (state * 1103515245 + 12345) % 2147483648;
+      pixels[i] = state % 256;
+    }
+    return new Uint8Array(
+      await sharp(pixels, { raw: { width, height, channels: 3 } })
+        .png()
+        .toBuffer(),
+    );
+  }
+
+  function searchLayer(client: FakeLicensedSourceClient) {
+    return {
+      search: client,
+      searchBudget: new ImageSearchBudget({ counters: new InMemoryCounterStore() }),
+      searchTimeoutMs: 5_000,
+    };
+  }
+
+  it('库内未命中时**先搜索再 AI**（9.4/9.5：真实照片优于 AI 插画）', async () => {
+    /*
+     * 断言的是**顺序**而不是「AI 一次都没被调用」：Hero 槽位要求 16:6，
+     * 而假图源只能返回一份固定字节（16:9），因此 Hero 会在 11.2 的比例校验
+     * 上被拒并继续降级到 AI —— 那是正确行为。
+     *
+     * 顺序用一份共享调用日志表达：只要每次 AI 调用之前都已经有过一次搜索，
+     * 这一层就在正确的位置上。反过来（AI 在前）会让每张景点图都先花 20 秒
+     * 生成一张插画，而库外那张合规照片本来 5 秒就能拿到。
+     */
+    const { repo } = fakeRepo();
+    const calls: string[] = [];
+    const client = new FakeLicensedSourceClient({
+      candidates: [
+        {
+          provider: 'fake-openverse',
+          originalUrl: 'https://example.test/1',
+          downloadUrl: 'https://example.test/1/full.jpg',
+          licenseType: 'CC0',
+          attributionText: null,
+          licenseExpiresAt: null,
+          mimeType: 'image/jpeg',
+        },
+      ],
+      bytes: await searchablePhoto(),
+    });
+    const recordingClient: LicensedSourceClient = {
+      providers: client.providers,
+      search: (query, timeoutMs) => {
+        calls.push('search');
+        return client.search(query, timeoutMs);
+      },
+      download: (item, timeoutMs) => client.download(item, timeoutMs),
+    };
+
+    const { all } = await resolveAssets(
+      {
+        ...deps(repo),
+        licensedSource: {
+          search: recordingClient,
+          searchBudget: new ImageSearchBudget({ counters: new InMemoryCounterStore() }),
+          searchTimeoutMs: 5_000,
+        },
+        ai: {
+          image: new FakeImageClient(() => {
+            calls.push('ai');
+            throw new ImageUnavailableError('AI 层在搜索之后');
+          }),
+          assetLock: new InMemoryAssetLock(),
+          budget: new AiImageBudget({
+            counters: new InMemoryCounterStore(),
+            userType: 'REGISTERED',
+            heroQuota: 2,
+          }),
+          imageTimeoutMs: 20_000,
+          userTypeLabel: 'REGISTERED',
+        },
+      },
+      envelopeFor(1),
+    );
+
+    // 至少有一个 16:9 的图片槽位由搜索层解决
+    expect(all.some((r) => r.resolution.strategy === 'LICENSED_SOURCE_MATCH')).toBe(true);
+    // 第一次调用一定是搜索，且每次 AI 之前都有搜索
+    expect(calls[0]).toBe('search');
+    expect(calls.indexOf('search')).toBeLessThan(
+      calls.includes('ai') ? calls.indexOf('ai') : Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it('缓存键命中时该槽位零外呼（19.5 的预热路径不受影响，门禁 #36）', async () => {
+    /*
+     * 21.2 措施二的结论不能被搜索层推翻：预热命中（≥ 80%）仍是主路径。
+     * 断言的是「缓存键命中的槽位压根不会走到搜索层」——
+     * 否则 600 张预热图每次都要陪着一次 5 秒的外呼。
+     */
+    const envelope = envelopeFor(1);
+    const heroSlot = envelope.requirements.find((r) => r.slot_id === heroSlotId(1))!;
+    const key = heroCacheKey({
+      destinationPlaceId: heroSlot.subject?.destination_place_id,
+      destinationName: heroSlot.subject?.destination,
+      theme: heroSlot.subject?.theme,
+      visualStyle: 'CHINESE_TRAVEL_EDITORIAL',
+      aspectRatio: '16:6',
+    });
+    const { repo } = fakeRepo({
+      byCacheKey: { [key]: row({ assetId: 'preheated-hero', aspectRatio: 16 / 6, height: 600 }) },
+    });
+    const client = new FakeLicensedSourceClient({ candidates: [], bytes: new Uint8Array() });
+
+    const { all } = await resolveAssets(
+      {
+        ...deps(repo),
+        licensedSource: {
+          search: client,
+          searchBudget: new ImageSearchBudget({ counters: new InMemoryCounterStore() }),
+          searchTimeoutMs: 5_000,
+        },
+      },
+      envelope,
+    );
+
+    const hero = all.find((r) => r.slot_id === heroSlotId(1))!;
+    expect(hero.resolution.strategy).toBe('CACHE_HIT');
+    // Hero 的检索词含目的地；命中缓存的槽位不该出现在搜索调用里
+    expect(client.searchCalls.every((call) => !call.text.includes('主题氛围'))).toBe(true);
+  });
+
+  it('不装配搜索层时降级链回到 P4 的「库 → AI → 占位」', async () => {
+    const { repo } = fakeRepo();
+    const { response, warnings } = await resolveAssets(deps(repo), envelopeFor(1));
+
+    expect(response.status).toBe('COMPLETED');
+    expect(warnings).toContain('ASSET_LIBRARY_MISS');
+    expect(warnings).not.toContain('ASSET_LICENSED_SOURCE_UNAVAILABLE');
+  });
+
+  it('搜索超时进 warnings 且任务继续（9.6：非阻断）', async () => {
+    const { repo } = fakeRepo();
+    const client = new FakeLicensedSourceClient({
+      behaviors: ['timeout', 'timeout', 'timeout', 'timeout', 'timeout', 'timeout'],
+    });
+
+    const { response, warnings } = await resolveAssets(
+      { ...deps(repo), licensedSource: searchLayer(client) },
+      envelopeFor(1),
+    );
+
+    expect(response.status).toBe('COMPLETED');
+    expect(warnings).toContain('ASSET_LICENSED_SOURCE_UNAVAILABLE');
+  });
+
+  it('搜索命中的槽位写入 resolution_strategy = LICENSED_SOURCE_MATCH（TP-6-03）', async () => {
+    const { repo } = fakeRepo();
+    const client = new FakeLicensedSourceClient({
+      candidates: [
+        {
+          provider: 'fake-openverse',
+          originalUrl: 'https://example.test/1',
+          downloadUrl: 'https://example.test/1/full.jpg',
+          licenseType: 'CC0',
+          attributionText: null,
+          licenseExpiresAt: null,
+          mimeType: 'image/jpeg',
+        },
+      ],
+      bytes: await searchablePhoto(),
+    });
+
+    const { bindings } = await resolveAssets(
+      { ...deps(repo), licensedSource: searchLayer(client) },
+      envelopeFor(1),
+    );
+
+    expect(bindings.some((b) => b.resolutionStrategy === 'LICENSED_SOURCE_MATCH')).toBe(true);
   });
 });

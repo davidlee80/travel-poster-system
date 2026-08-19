@@ -11,8 +11,10 @@ import {
   FakeLlmClient,
   LocalHashingEmbeddingClient,
   createImageClient,
+  createLicensedSourceClient,
   createLlmClient,
   loadImageConfig,
+  loadImageSearchConfig,
   loadLlmConfig,
 } from '@tps/llm';
 import {
@@ -39,6 +41,7 @@ import { loadQuotaConfig, optionalInt, quotaFor, requireString, runWorker } from
 import { UnrecoverableError, Worker } from 'bullmq';
 
 import { AiImageBudget, DEFAULT_AI_IMAGE_DAILY_BUDGET } from './assets/ai-budget.js';
+import { ImageSearchBudget } from './assets/search-budget.js';
 import { isUnrecoverable } from './retry-policy.js';
 import { renderFakeGeneratedImage } from './assets/fake-image.js';
 import { fixturePlanFor } from './fixture-plan.js';
@@ -92,6 +95,18 @@ const imageConfig = loadImageConfig();
 const image = createImageClient(imageConfig, { renderer: renderFakeGeneratedImage });
 const quotaConfig = loadQuotaConfig();
 const aiDailyBudget = optionalInt('AI_IMAGE_DAILY_BUDGET', DEFAULT_AI_IMAGE_DAILY_BUDGET);
+
+/*
+ * 授权图源搜索（P6，9.6）。`direct` 模式在 loadImageSearchConfig 里就会抛错
+ * （本轮无适配器，见 image-search.ts 的头部）—— 启动即失败而不是运行时
+ * 静默跳过搜索层，后者与全局熔断在指标图上完全一样。
+ *
+ * `fake` 模式不注入候选源，因此 search() 抛 ImageSearchUnavailableError ——
+ * 本地与 CI 走的是「搜索层不可用 → 降入 AI」这条真实的降级路径，
+ * 而不是一条被跳过的分支。
+ */
+const imageSearchConfig = loadImageSearchConfig();
+const licensedSource = createLicensedSourceClient(imageSearchConfig);
 
 await runWorker({
   serviceName: SERVICE_NAME,
@@ -155,6 +170,19 @@ await runWorker({
                  * 每任务一个预算实例（21.4 的 3 张图与 21.2 的 2 次 Hero 都是
                  * 单任务计数），额度上限按身份取（匿名的 AI Hero 为 0，TP-4-17）。
                  */
+                /*
+                 * 搜索层同样是每任务一个预算实例（9.6 的单任务 8 次与连续
+                 * 失败 2 次都是任务内状态）。与 aiAssets 不同的是它**不看身份**
+                 * —— 9.6 规定匿名与注册同额，因为命中入库为全平台共享资产。
+                 */
+                searchAssets: () => ({
+                  search: licensedSource,
+                  searchTimeoutMs: imageSearchConfig.timeoutMs,
+                  searchBudget: new ImageSearchBudget({
+                    counters,
+                    dailyBudget: imageSearchConfig.dailyBudget,
+                  }),
+                }),
                 aiAssets: (userType) => ({
                   image,
                   assetLock,

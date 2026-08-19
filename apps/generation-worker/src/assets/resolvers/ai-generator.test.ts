@@ -93,6 +93,7 @@ function harness(
     findCandidates: () => Promise.resolve([]),
     findByCacheKey: (key) => Promise.resolve(store.get(key) ?? null),
     // AI 路径不参与指纹去重（迁移 0007：只有 LICENSED_SOURCE 带 content_hash）
+    findById: () => Promise.resolve(null),
     findByContentHash: () => Promise.resolve(null),
     mergeTags: () => Promise.resolve(),
     insertAsset: (input) => {

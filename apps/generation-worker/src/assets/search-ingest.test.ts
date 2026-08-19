@@ -93,6 +93,7 @@ function fakeRepository(): FakeRepo {
   const repo: AssetsRepository = {
     findCandidates: () => Promise.resolve([]),
     findByCacheKey: () => Promise.resolve(null),
+    findById: () => Promise.resolve(null),
     findByContentHash: (hash) => Promise.resolve(byHash.get(hash) ?? null),
     mergeTags: (input) => {
       merges.push(input);
