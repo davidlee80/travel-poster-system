@@ -591,3 +591,144 @@ describe('搜索为空', () => {
     expect(client.searchCalls).toHaveLength(0);
   });
 });
+
+// ── 指纹去重与标签并集（R-47，门禁 #36）─────────────────────
+
+describe('content_hash 去重分支（R-47，门禁 #36）', () => {
+  it('相同原图字节第二次入库走合并分支，不新增行', async () => {
+    const repo = fakeRepository();
+    const client = new FakeLicensedSourceClient({ candidates: [candidate()], bytes: goodPhoto });
+    const d = deps(repo.repo, client);
+
+    const first = await ingestSearchResult(d, requirement(), null);
+    const second = await ingestSearchResult(d, requirement(), null);
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.assetId).toBe(first.assetId);
+    expect(repo.inserted).toHaveLength(1);
+  });
+
+  it('合并分支零上传（不产生第二份对象）', async () => {
+    const repo = fakeRepository();
+    const client = new FakeLicensedSourceClient({ candidates: [candidate()], bytes: goodPhoto });
+    const storage = new InMemoryObjectStorage();
+    const d = { ...deps(repo.repo, client), storage };
+
+    await ingestSearchResult(d, requirement(), null);
+    const afterFirst = storage.objects.size;
+    await ingestSearchResult(d, requirement(), null);
+
+    // 第一次写两个对象（原图 + 缩略图），第二次一个都不写
+    expect(afterFirst).toBe(2);
+    expect(storage.objects.size).toBe(2);
+  });
+
+  it('合并分支不做 11.2 后处理（指纹相同则结果必然相同）', async () => {
+    /*
+     * 断言方式：把第二次的候选换成一张**分辨率不足**的图但字节相同是不可能的
+     * （字节相同就是同一张图），因此改为断言耗时特征之外的可观测量 ——
+     * 合并分支不调用 embedding。后处理与向量化都在 ingestAsset 里，
+     * 而合并分支压根不进那个函数。
+     */
+    const repo = fakeRepository();
+    const client = new FakeLicensedSourceClient({ candidates: [candidate()], bytes: goodPhoto });
+    let embedCalls = 0;
+    const embedding = {
+      model: 'counting',
+      dimensions: 4,
+      embed: (texts: readonly string[]) => {
+        embedCalls += 1;
+        return Promise.resolve(texts.map(() => [1, 0, 0, 0]));
+      },
+    };
+    const d = { ...deps(repo.repo, client), embedding };
+
+    await ingestSearchResult(d, requirement(), null);
+    const afterFirst = embedCalls;
+    await ingestSearchResult(d, requirement(), null);
+
+    expect(afterFirst).toBe(1);
+    expect(embedCalls).toBe(1);
+  });
+
+  it('合并的是新上下文的标签并集（R-47）', async () => {
+    const repo = fakeRepository();
+    const client = new FakeLicensedSourceClient({ candidates: [candidate()], bytes: goodPhoto });
+    const d = deps(repo.repo, client);
+
+    await ingestSearchResult(d, requirement(), null);
+    // 第二次是另一个 POI 的槽位命中同一张图
+    await ingestSearchResult(
+      d,
+      requirement({
+        slot_id: 'day_5.place.lingyin',
+        subject: {
+          destination: '杭州',
+          destination_place_id: 'cn-hangzhou',
+          entity_name: '灵隐寺',
+          entity_place_id: 'hz-lingyin',
+          theme: '禅意山林',
+        },
+      }),
+      null,
+    );
+
+    expect(repo.merges).toHaveLength(1);
+    const merge = repo.merges[0];
+    expect(merge?.assetId).toBe(repo.inserted[0]?.assetId);
+    // 新上下文的主题桶与检索词都并进去，因此这张图今后也能被灵隐寺召回
+    expect(merge?.searchText).toContain('灵隐寺');
+    expect(merge?.styleTags).toContain('provider:fake-openverse');
+  });
+
+  it('已下架素材的指纹命中时丢弃该候选，不复活它', async () => {
+    /*
+     * 人工下架（assets.status = 'RETIRED'）是 9.6 保留的唯一人工通道
+     * （「事前人工审核与全自动矛盾，事后下架与它不矛盾」）。
+     * 搜索层再次命中同一张图时必须绕开它 —— 复用等于把下架撤销，
+     * 而 mergeTags 到一个下架行上则是纯粹的无用写入。
+     */
+    const repo = fakeRepository();
+    const hash = createHash('sha256').update(goodPhoto).digest('hex');
+    repo.seed(hash, {
+      assetId: 'retired-asset-id',
+      status: 'RETIRED',
+      styleTags: ['canal'],
+      searchText: '拱宸桥',
+    });
+    const client = new FakeLicensedSourceClient({ candidates: [candidate()], bytes: goodPhoto });
+
+    const outcome = await ingestSearchResult(deps(repo.repo, client), requirement(), null);
+
+    expect(outcome.assetId).toBeNull();
+    expect(outcome.rejections).toEqual(['CONTENT_RETIRED']);
+    expect(repo.merges).toHaveLength(0);
+    expect(repo.inserted).toHaveLength(0);
+  });
+
+  it('下架命中后继续试下一个候选', async () => {
+    const repo = fakeRepository();
+    const hash = createHash('sha256').update(goodPhoto).digest('hex');
+    repo.seed(hash, {
+      assetId: 'retired-asset-id',
+      status: 'RETIRED',
+      styleTags: [],
+      searchText: null,
+    });
+    /*
+     * 两个候选，但 FakeLicensedSourceClient 对所有候选返回同一份 bytes，
+     * 因此两个都会撞上同一个下架指纹 —— 断言的是「逐个试完」而不是
+     * 「撞一次就整体放弃」。
+     */
+    const client = new FakeLicensedSourceClient({
+      candidates: [candidate(), candidate()],
+      bytes: goodPhoto,
+    });
+
+    const outcome = await ingestSearchResult(deps(repo.repo, client), requirement(), null);
+
+    expect(outcome.rejections).toEqual(['CONTENT_RETIRED', 'CONTENT_RETIRED']);
+    expect(client.downloadCalls).toHaveLength(2);
+  });
+});

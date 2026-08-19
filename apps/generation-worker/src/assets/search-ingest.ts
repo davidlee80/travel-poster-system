@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { semanticQueryText, themeBucket } from '@tps/assets';
+import { buildSearchText, semanticQueryText, themeBucket } from '@tps/assets';
 import type { LicensedSourceCandidate, LicensedSourceClient } from '@tps/llm';
 import { SourceMetadataSchema, type AssetRequirementItem } from '@tps/schemas';
 
@@ -214,7 +214,53 @@ async function tryCandidate(
   const contentHash = createHash('sha256').update(bytes).digest('hex');
   const tags = styleTagsFor(item, candidate);
 
-  // ── 门禁三、四与入库（11.2 后处理 + 质量下限）──
+  /*
+   * ── 门禁三：内容指纹去重（R-47）──
+   *
+   * 位置在 11.2 后处理**之前**：转码与缩略图是这条链上最贵的两步
+   * （两次完整的解码+编码），而指纹相同意味着后处理结果必然相同。
+   *
+   * 指纹算的是**原图**字节而不是转码后的 WebP：后者依赖 sharp/libvips 的
+   * 版本与质量参数，升一次依赖同一张原图的指纹就全变了，
+   * 去重从此失效而没有任何报错。
+   */
+  const existing = await deps.assets.findByContentHash(contentHash);
+  if (existing !== null) {
+    if (existing.status !== 'ACTIVE') {
+      /*
+       * 人工下架（`assets.status`）是 9.6 保留的唯一人工通道 ——
+       * 「事前人工审核与全自动矛盾，事后下架与它不矛盾」。
+       * 搜索层再次命中同一张图时必须绕开：复用等于把下架撤销，
+       * 而把标签并到一个下架行上是纯粹的无用写入。
+       */
+      deps.logger.info(
+        { role: item.role, reason_code: 'CONTENT_RETIRED' },
+        '搜索候选的内容指纹命中已下架素材，已丢弃',
+      );
+      return { kind: 'rejected', reason: 'CONTENT_RETIRED' };
+    }
+
+    /*
+     * 同一张图从第二个上下文被搜到：把新上下文的标签与检索词并进去
+     * （R-47 的合并分支），不新增行、不上传对象。
+     *
+     * 合并 `search_text` 是这一步的实质收益：一张运河风景图第一次因
+     * 「拱宸桥」入库，第二次因「灵隐寺」命中 —— 并集之后它今后能被
+     * 两个 POI 都召回，而新增一行只会让两行互相竞争排名。
+     */
+    await deps.assets.mergeTags({
+      assetId: existing.assetId,
+      styleTags: tags,
+      searchText: searchTextFor(item),
+    });
+    deps.logger.info(
+      { role: item.role, strategy: 'content_hash_merge' },
+      '搜索候选的内容指纹已在库，合并标签后复用既有素材',
+    );
+    return { kind: 'accepted', assetId: existing.assetId, created: false };
+  }
+
+  // ── 门禁四、五与入库（11.2 后处理 + 质量下限）──
   const nowMs = (deps.now ?? Date.now)();
   const ingested = await ingestAsset(deps, {
     bytes,
@@ -291,4 +337,20 @@ function styleTagsFor(
   tags.add(`provider:${candidate.provider}`);
 
   return [...tags];
+}
+
+/**
+ * 合并分支写回的检索词。
+ *
+ * 与 `ingestAsset` 内部的 `buildSearchText` 用同一组输入，因此并集之后的
+ * `search_text` 与「这张图一开始就是从这个上下文入库的」结果一致 ——
+ * 两处口径不同会让倒排召回依赖于「哪个上下文先来」。
+ */
+function searchTextFor(item: AssetRequirementItem): string {
+  return buildSearchText({
+    entityName: item.role === 'HERO_BACKGROUND' ? null : (item.subject?.entity_name ?? null),
+    destinationName: item.subject?.destination ?? null,
+    title: item.subject?.theme ?? null,
+    styleTags: [],
+  });
 }
