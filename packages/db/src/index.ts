@@ -47,10 +47,12 @@ export {
 export {
   createAssetsRepository,
   type AssetCandidateRow,
+  type AssetFingerprintRow,
   type AssetsRepository,
   type FindCandidatesQuery,
   type InsertAssetInput,
   type InsertVariantInput,
+  type MergeTagsInput,
 } from './assets.js';
 export {
   createPresentationsRepository,

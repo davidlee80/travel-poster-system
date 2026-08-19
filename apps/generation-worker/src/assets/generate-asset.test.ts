@@ -46,6 +46,8 @@ function harness(): {
   const assets: AssetsRepository = {
     findCandidates: () => Promise.resolve([]),
     findByCacheKey: (key) => Promise.resolve(store.get(key) ?? null),
+    findByContentHash: () => Promise.resolve(null),
+    mergeTags: () => Promise.resolve(),
     insertAsset: (input) => {
       inserted.push(input);
       store.set(input.cacheKey ?? input.assetId, {

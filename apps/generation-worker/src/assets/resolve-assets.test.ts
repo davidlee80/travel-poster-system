@@ -98,6 +98,8 @@ function fakeRepo(options: FakeRepoOptions = {}): {
       return options.candidates ?? [];
     },
     findByCacheKey: (key) => Promise.resolve(options.byCacheKey?.[key] ?? null),
+    findByContentHash: () => Promise.resolve(null),
+    mergeTags: () => Promise.resolve(),
     insertAsset: (input) => {
       inserted.push(input.assetType);
       return Promise.resolve({ assetId: input.assetId, created: true });
@@ -262,6 +264,8 @@ describe('来源顺序（九章）', () => {
     const repo: AssetsRepository = {
       findCandidates: () => Promise.resolve([]),
       findByCacheKey: (key) => Promise.resolve(stored.get(key) ?? null),
+      findByContentHash: () => Promise.resolve(null),
+      mergeTags: () => Promise.resolve(),
       insertAsset: (input) => {
         if (input.cacheKey !== null && stored.has(input.cacheKey)) {
           return Promise.resolve({ assetId: stored.get(input.cacheKey)!.assetId, created: false });
@@ -328,6 +332,8 @@ describe('异常与降级（16.3）', () => {
         return calls === 1 ? Promise.reject(new Error('数据库抖动')) : Promise.resolve([]);
       },
       findByCacheKey: () => Promise.resolve(null),
+      findByContentHash: () => Promise.resolve(null),
+      mergeTags: () => Promise.resolve(),
       insertAsset: (input) => Promise.resolve({ assetId: input.assetId, created: true }),
       insertVariant: () => Promise.resolve(),
     };
