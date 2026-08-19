@@ -31,6 +31,12 @@ export {
   type RetrievalSource,
 } from './retrieval.js';
 export {
+  createContentFindRepository,
+  type ContentFindQuery,
+  type ContentFindRepository,
+  type ContentFindRow,
+} from './content-find.js';
+export {
   createRetentionRepository,
   type ExpiredAnonymousUser,
   type PurgeUserResult,
