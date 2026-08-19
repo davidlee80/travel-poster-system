@@ -59,6 +59,26 @@ export {
 } from './image.js';
 
 export {
+  DEFAULT_IMAGE_SEARCH_DAILY_BUDGET,
+  FakeLicensedSourceClient,
+  IMAGE_SEARCH_MODES,
+  IMAGE_SEARCH_TIMEOUT_MS,
+  ImageSearchTimeoutError,
+  ImageSearchUnavailableError,
+  createLicensedSourceClient,
+  loadImageSearchConfig,
+  searchWarningCode,
+  type CreateLicensedSourceClientOptions,
+  type FakeLicensedSourceOptions,
+  type FakeSearchBehavior,
+  type ImageSearchConfig,
+  type ImageSearchMode,
+  type LicensedSourceCandidate,
+  type LicensedSourceClient,
+  type LicensedSourceQuery,
+} from './image-search.js';
+
+export {
   DEFAULT_LLM_TIMEOUT_MS,
   LLM_MODES,
   LlmConfigError,
