@@ -96,6 +96,14 @@ export interface InsertAssetInput {
    * 不参与指纹去重（理由见迁移 0007 的头部注释）。
    */
   readonly contentHash?: string;
+  /**
+   * 搜索入库图的来源元数据（9.6 / R-46，迁移 0008）。
+   *
+   * `LICENSED_SOURCE` 必填 —— 数据库有 `assets_licensed_source_metadata_check`
+   * 兜着「有」，`SourceMetadataSchema` 在写入前保证「全」（与 AI 侧
+   * `generation_metadata` + `GenerationMetadataSchema` 的分工相同）。
+   */
+  readonly sourceMetadata?: unknown;
 }
 
 /**
@@ -336,9 +344,10 @@ export function createAssetsRepository(pool: Pool): AssetsRepository {
            destination_place_id, title, original_url, storage_url, thumbnail_url,
            mime_type, width, height, aspect_ratio, style_tags, search_text,
            license_type, attribution_text, license_expires_at, quality_score,
-           embedding, cache_key, generation_metadata, content_hash)
+           embedding, cache_key, generation_metadata, content_hash, source_metadata)
          VALUES ($24::uuid, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                 $15::jsonb, $16, $17, $18, $19, $20, $21::vector, $22, $23::jsonb, $25)
+                 $15::jsonb, $16, $17, $18, $19, $20, $21::vector, $22, $23::jsonb, $25,
+                 $26::jsonb)
          ON CONFLICT (cache_key) WHERE cache_key IS NOT NULL DO NOTHING
          RETURNING id`,
         [
@@ -367,6 +376,9 @@ export function createAssetsRepository(pool: Pool): AssetsRepository {
           input.generationMetadata === null ? null : JSON.stringify(input.generationMetadata),
           input.assetId,
           input.contentHash ?? null,
+          input.sourceMetadata === undefined || input.sourceMetadata === null
+            ? null
+            : JSON.stringify(input.sourceMetadata),
         ],
       );
 
