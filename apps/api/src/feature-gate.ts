@@ -21,6 +21,15 @@ export const ALL_FEATURES_ON: FeatureFlags = {
   generationEnabled: true,
   exportEnabled: true,
   generationRolloutPercent: 100,
+  /*
+   * P7：这一项**不**跟着「全开」—— 名字里的 ALL_ON 指的是灰度开关，
+   * 而匿名入口是产品已决定关闭的功能，不属于「未配置就该照旧」那一类。
+   *
+   * 让它在这里为 true 的后果很具体：任何用这个常量兜底的部署（本地开发、
+   * 不走 Helm 的运行方式）都会重新开放匿名注册，而那与 loadFeatureFlags
+   * 的默认值相反 —— 两个「默认」不一致是最难查的一类配置问题。
+   */
+  anonymousEnabled: false,
 };
 
 /**

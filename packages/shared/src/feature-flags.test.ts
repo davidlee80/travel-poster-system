@@ -14,6 +14,7 @@ const KEYS = [
   'FEATURE_GENERATION_ENABLED',
   'FEATURE_EXPORT_ENABLED',
   'FEATURE_GENERATION_ROLLOUT_PERCENT',
+  'FEATURE_ANONYMOUS_ENABLED',
 ] as const;
 
 afterEach(() => {
@@ -24,16 +25,58 @@ const ALL_ON: FeatureFlags = {
   generationEnabled: true,
   exportEnabled: true,
   generationRolloutPercent: 100,
+  // P7：匿名入口的默认值与其余三项相反，见下方用例
+  anonymousEnabled: false,
 };
 
 describe('loadFeatureFlags', () => {
-  it('缺省全开、放量 100%', () => {
+  it('缺省全开、放量 100%（匿名入口除外）', () => {
     /*
      * 默认全开而不是全关：忘记配开关的表现应当是「与引入灰度之前一样」，
      * 而不是「整个产品 503」—— 后者那种故障在灰度机制引入前不存在，
      * 排查时没人会想到去看开关。
      */
     expect(loadFeatureFlags()).toEqual(ALL_ON);
+  });
+
+  it('匿名入口默认**关闭**，与其余三项的默认方向相反（P7）', () => {
+    /*
+     * 这一条是刻意的不对称，值得一条专门的用例钉住。
+     *
+     * 其余三个开关是「正常开着，紧急时关」——「忘记配」应当等于「和引入
+     * 灰度之前一样」。而匿名入口是**产品已经决定关闭**的功能：忘记配它
+     * 不该等于「回到旧行为」，那会让任何漏配的部署静默重新开放匿名注册，
+     * 而那是一次产品行为的回退，不是一次可观测的故障 ——
+     * 没有任何告警会响，只有转化数据在几周后变得可疑。
+     */
+    expect(loadFeatureFlags().anonymousEnabled).toBe(false);
+  });
+
+  it('匿名入口可以显式打开（重新开放旧行为的唯一途径）', () => {
+    process.env['FEATURE_ANONYMOUS_ENABLED'] = 'true';
+    expect(loadFeatureFlags().anonymousEnabled).toBe(true);
+  });
+
+  it('匿名入口的取值解析与其余布尔开关一致（含 1/yes，非法值抛错）', () => {
+    /*
+     * 复用 `optionalBool` 而不是自己解析：三个开关的取值语义必须一致 ——
+     * 「`FEATURE_EXPORT_ENABLED=1` 有效但 `FEATURE_ANONYMOUS_ENABLED=1`
+     * 被当成 false」是一种没人能预料的不一致，而它的表现是静默开放匿名。
+     *
+     * 非法值抛错这一条尤其重要：如果 `yes ` （带空格）被吞成默认值 false，
+     * 那么想**打开**匿名的人会得到「配了但没生效」而没有任何提示。
+     */
+    process.env['FEATURE_ANONYMOUS_ENABLED'] = 'false';
+    expect(loadFeatureFlags().anonymousEnabled).toBe(false);
+
+    process.env['FEATURE_ANONYMOUS_ENABLED'] = '1';
+    expect(loadFeatureFlags().anonymousEnabled).toBe(true);
+
+    process.env['FEATURE_ANONYMOUS_ENABLED'] = 'yes';
+    expect(loadFeatureFlags().anonymousEnabled).toBe(true);
+
+    process.env['FEATURE_ANONYMOUS_ENABLED'] = 'maybe';
+    expect(() => loadFeatureFlags()).toThrow(/必须是布尔值/);
   });
 
   it('放量比例越界时拒绝启动', () => {
@@ -58,6 +101,7 @@ describe('loadFeatureFlags', () => {
       generationEnabled: false,
       exportEnabled: false,
       generationRolloutPercent: 30,
+      anonymousEnabled: false,
     });
   });
 });

@@ -101,6 +101,8 @@ spec:
               value: {{ $.Values.featureFlags.exportEnabled | quote }}
             - name: FEATURE_GENERATION_ROLLOUT_PERCENT
               value: {{ $.Values.featureFlags.generationRolloutPercent | quote }}
+            - name: FEATURE_ANONYMOUS_ENABLED
+              value: {{ $.Values.featureFlags.anonymousEnabled | quote }}
           envFrom:
             - configMapRef:
                 name: {{ include "tps.fullname" $ }}-config

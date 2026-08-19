@@ -66,6 +66,10 @@ featureFlags:
   # 0～100。按 user_id 的稳定哈希分桶 —— 同一个用户每次得到同一个结果，
   # 否则用户会看到「刚才能用现在不能用」
   generationRolloutPercent: 100
+  # 匿名身份入口（P7）。**默认关闭**，与上面三项的默认方向相反 ——
+  # 那三个是「正常开着、紧急时关」，这一个是产品已决定关闭的功能。
+  # 改成 true 即恢复 R-13 的双模式旧行为（无需迁移，见运维手册）。
+  anonymousEnabled: false
 
 services:
   web:

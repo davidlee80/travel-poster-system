@@ -35,6 +35,30 @@ export interface FeatureFlags {
   readonly exportEnabled: boolean;
   /** 0～100。生成功能的放量比例 */
   readonly generationRolloutPercent: number;
+  /**
+   * 匿名身份入口（P7）。**默认 `false`**。
+   *
+   * 关闭时：不自动创建匿名号、已有的 `tp_anon` 凭据一律不解析 ——
+   * 前端来的一切请求都必须是注册用户（见 `IdentityService.resolve`）。
+   *
+   * ## 默认值与其余三项相反，这是有意的
+   *
+   * 那三个是「正常开着，紧急时关」，因此默认 `true`：忘记配的表现应当是
+   * 「和引入灰度之前一样」。而这一个是**产品已经决定关闭**的功能，
+   * 默认 `true` 会让任何漏配的部署静默重新开放匿名注册 ——
+   * 而那是一次产品行为的回退，不是一次可观测的故障：没有任何告警会响，
+   * 只有转化数据在几周后变得可疑。
+   *
+   * ## 不走 `decideFeature`
+   *
+   * 那个函数按 `user_id` 分桶做百分比放量，而匿名判定发生在**身份存在
+   * 之前** —— 没有 `user_id` 可用。混进去会迫使调用方编一个假 ID，
+   * 而那个假 ID 会进分桶哈希，把放量分布也一起搞乱。
+   *
+   * 匿名入口也不该有「放量比例」：一半的访客能匿名生成、另一半必须注册，
+   * 是一种没人想要的产品形态。
+   */
+  readonly anonymousEnabled: boolean;
 }
 
 export function loadFeatureFlags(): FeatureFlags {
@@ -58,6 +82,8 @@ export function loadFeatureFlags(): FeatureFlags {
     generationEnabled: optionalBool('FEATURE_GENERATION_ENABLED', true),
     exportEnabled: optionalBool('FEATURE_EXPORT_ENABLED', true),
     generationRolloutPercent: percent,
+    // 默认 false —— 与上面两个相反的理由见 FeatureFlags.anonymousEnabled
+    anonymousEnabled: optionalBool('FEATURE_ANONYMOUS_ENABLED', false),
   };
 }
 

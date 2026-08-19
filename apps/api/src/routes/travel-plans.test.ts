@@ -1337,6 +1337,7 @@ describe('TP-5-10 灰度开关', () => {
       generationEnabled: false,
       exportEnabled: true,
       generationRolloutPercent: 100,
+      anonymousEnabled: false,
     });
 
     const response = await harness.app.inject({
@@ -1364,6 +1365,7 @@ describe('TP-5-10 灰度开关', () => {
       generationEnabled: true,
       exportEnabled: true,
       generationRolloutPercent: 0,
+      anonymousEnabled: false,
     });
 
     const response = await harness.app.inject({
@@ -1385,6 +1387,7 @@ describe('TP-5-10 灰度开关', () => {
       generationEnabled: true,
       exportEnabled: true,
       generationRolloutPercent: 100,
+      anonymousEnabled: false,
     });
 
     const response = await harness.app.inject({
