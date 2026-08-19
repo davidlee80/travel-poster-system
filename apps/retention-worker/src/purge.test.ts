@@ -1,5 +1,6 @@
 import type { ExpiredAnonymousUser, PurgeUserResult, RetentionRepository } from '@tps/db';
 import { createSilentLogger } from '@tps/shared';
+import { InMemoryExportStorage } from '@tps/storage';
 import { describe, expect, it } from 'vitest';
 
 import { PURGE_BATCH_SIZE, PURGE_GRACE_DAYS, runPurgeRound } from './purge.js';
@@ -16,15 +17,20 @@ interface FakeOptions {
   /** 这些用户的 purgeUser 会抛错 */
   readonly failing?: readonly string[];
   readonly transferredPerUser?: number;
+  /** 每个用户名下的导出产物对象键（TP-6-14） */
+  readonly objectKeys?: Record<string, readonly string[]>;
 }
 
 function fake(options: FakeOptions = {}): {
   repository: RetentionRepository;
   purged: string[];
   scans: { limit: number; graceDays: number }[];
+  /** 每个用户的调用顺序：'objects' 在 'delete-row' 之前才算对（TP-6-14） */
+  order: string[];
 } {
   const purged: string[] = [];
   const scans: { limit: number; graceDays: number }[] = [];
+  const order: string[] = [];
   const failing = new Set(options.failing ?? []);
 
   const repository: RetentionRepository = {
@@ -37,19 +43,29 @@ function fake(options: FakeOptions = {}): {
         })),
       );
     },
-    purgeUser: (userId): Promise<PurgeUserResult> => {
-      if (failing.has(userId)) return Promise.reject(new Error('级联删除失败'));
+    listExportObjectKeys: (userId) => Promise.resolve(options.objectKeys?.[userId] ?? []),
+    purgeUser: async (userId, beforeDelete): Promise<PurgeUserResult> => {
+      /*
+       * 假实现模拟真实的事务顺序：beforeDelete 先跑，它抛错则整体失败
+       * 且**不记入 purged**（真实实现是事务回滚，行保留）。
+       */
+      if (beforeDelete !== undefined) {
+        await beforeDelete();
+        order.push(`objects:${userId}`);
+      }
+      if (failing.has(userId)) throw new Error('级联删除失败');
+      order.push(`delete-row:${userId}`);
       purged.push(userId);
-      return Promise.resolve({
+      return {
         userId,
         transferred: options.transferredPerUser ?? 1,
         deleted: true,
-      });
+      };
     },
     countKnowledgeRows: () => Promise.resolve(purged.length * (options.transferredPerUser ?? 1)),
   };
 
-  return { repository, purged, scans };
+  return { repository, purged, scans, order };
 }
 
 describe('批量与默认值', () => {
@@ -139,5 +155,110 @@ describe('转存计数', () => {
     const { repository } = fake({ users: ['u1', 'u2'], transferredPerUser: 3 });
     const summary = await runPurgeRound({ retention: repository, logger: createSilentLogger() });
     expect(summary.transferred).toBe(6);
+  });
+});
+
+describe('对象存储清理（TP-6-14，门禁 #38）', () => {
+  it('删对象在删行之前', async () => {
+    /*
+     * 顺序是 TP-6-14 的硬约束：行先删则 exports.files[].storage_key 随之
+     * 消失，而那是唯一能推出对象键的地方 —— 产物成为永久孤儿，
+     * 且因为 anon/ 前缀禁挂生命周期规则（R-50），它们永远不会过期。
+     */
+    const { repository, order } = fake({
+      users: ['u1'],
+      objectKeys: { u1: ['anon/202608/c1/exports/e1/day-01.png'] },
+    });
+    const storage = new InMemoryExportStorage();
+    storage.objects.set('anon/202608/c1/exports/e1/day-01.png', {
+      body: new Uint8Array(),
+      contentType: 'image/png',
+    });
+
+    await runPurgeRound({
+      retention: repository,
+      logger: createSilentLogger(),
+      exportStorage: storage,
+    });
+
+    expect(order).toEqual(['objects:u1', 'delete-row:u1']);
+    expect(storage.objects.size).toBe(0);
+  });
+
+  it('删对象失败则**行保留**（下一轮重试）', async () => {
+    const { repository, purged } = fake({
+      users: ['u1'],
+      objectKeys: { u1: ['anon/202608/c1/exports/e1/day-01.png'] },
+    });
+    const failingStorage = {
+      delete: () => Promise.reject(new Error('S3 5xx')),
+    };
+
+    const summary = await runPurgeRound({
+      retention: repository,
+      logger: createSilentLogger(),
+      exportStorage: failingStorage,
+    });
+
+    expect(purged).toEqual([]);
+    expect(summary).toMatchObject({ scanned: 1, purged: 0, failed: 1 });
+  });
+
+  it('没有产物的用户照常清理，不调用 delete', async () => {
+    const { repository, purged } = fake({ users: ['u1'] });
+    const storage = new InMemoryExportStorage();
+
+    await runPurgeRound({
+      retention: repository,
+      logger: createSilentLogger(),
+      exportStorage: storage,
+    });
+
+    expect(purged).toEqual(['u1']);
+    expect(storage.counts.delete).toBe(0);
+  });
+
+  it('未配置导出桶时清理照常完成（本地无 MinIO 的降级）', async () => {
+    const { repository, purged } = fake({
+      users: ['u1'],
+      objectKeys: { u1: ['anon/202608/c1/exports/e1/day-01.png'] },
+    });
+
+    const summary = await runPurgeRound({ retention: repository, logger: createSilentLogger() });
+
+    expect(purged).toEqual(['u1']);
+    expect(summary.objectsDeleted).toBe(0);
+  });
+
+  it('objectsDeleted 汇总删除的对象数', async () => {
+    const { repository } = fake({
+      users: ['u1', 'u2'],
+      objectKeys: {
+        u1: ['anon/202608/c1/exports/e1/day-01.png', 'anon/202608/c1/exports/e1/day-02.png'],
+        u2: ['users/u2/202608/c2/exports/e2/plan.pdf'],
+      },
+    });
+    const storage = new InMemoryExportStorage();
+
+    const summary = await runPurgeRound({
+      retention: repository,
+      logger: createSilentLogger(),
+      exportStorage: storage,
+    });
+
+    expect(summary.objectsDeleted).toBe(3);
+  });
+
+  it('ExportStorage 接口上不存在任何按前缀删除的方法（R-50 的硬约束）', () => {
+    /*
+     * 类型层面已经保证（接口里没有 deletePrefix），但类型只在编译期存在。
+     * 这一条是运行期的兜底断言 —— 它拦的是「有人加了一个 deletePrefix
+     * 但忘了它为什么不该存在」。
+     */
+    const storage = new InMemoryExportStorage();
+    const names = Object.getOwnPropertyNames(Object.getPrototypeOf(storage));
+
+    expect(names.filter((name) => /prefix/i.test(name))).toEqual([]);
+    expect(names).toContain('delete');
   });
 });

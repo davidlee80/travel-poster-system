@@ -1,6 +1,8 @@
 import type { RetentionRepository } from '@tps/db';
+import type { ExportStorage } from '@tps/storage';
 import type { Logger } from '@tps/shared';
 
+import { deleteExportObjects } from './objects.js';
 import { anonPurgeTotal, knowledgeRows } from './retention-metrics.js';
 
 /**
@@ -38,6 +40,16 @@ export interface PurgeDeps {
   readonly now?: () => Date;
   /** 排空信号：返回 true 时停止处理后续用户（见 main.ts 的说明） */
   readonly isDraining?: () => boolean;
+  /**
+   * 导出桶（TP-6-14）。
+   *
+   * **可缺省**：没有 MinIO 的本地运行仍要能跑清理（与 P3/P4 的同一处理）。
+   * 缺省时数据库行照常清理，对象留在桶里 —— 那是可接受的降级，
+   * 因为对象最终会被 `users/` 前缀的 90 天生命周期规则回收；
+   * 而 `anon/` 前缀没有规则，因此**生产部署必须配置它**
+   * （deploy/storage/README.md 有说明）。
+   */
+  readonly exportStorage?: Pick<ExportStorage, 'delete'>;
 }
 
 export interface PurgeSummary {
@@ -47,6 +59,8 @@ export interface PurgeSummary {
   readonly transferred: number;
   /** 因排空而未处理的用户数 */
   readonly skipped: number;
+  /** 已删除的导出产物对象数（TP-6-14） */
+  readonly objectsDeleted: number;
 }
 
 export async function runPurgeRound(deps: PurgeDeps): Promise<PurgeSummary> {
@@ -63,6 +77,7 @@ export async function runPurgeRound(deps: PurgeDeps): Promise<PurgeSummary> {
   let failed = 0;
   let transferred = 0;
   let skipped = 0;
+  let objectsDeleted = 0;
 
   for (const user of expired) {
     if (deps.isDraining?.() === true) {
@@ -76,9 +91,27 @@ export async function runPurgeRound(deps: PurgeDeps): Promise<PurgeSummary> {
     }
 
     try {
-      const result = await deps.retention.purgeUser(user.userId);
+      /*
+       * TP-6-14 的顺序：先从数据库取出该用户名下产物的真实对象键
+       * （R-53：读 `files[].storage_key`，覆盖 15.4 新布局与存量旧布局），
+       * 再把删除动作交给 `purgeUser` 在**同一事务内、删行之前**执行。
+       *
+       * 键必须在事务外先取：`purgeUser` 的 `beforeDelete` 运行时行还在，
+       * 但在那里再查一次会多一次往返，而这一次查询与删除之间不存在
+       * 「产物被新增」的可能 —— 用户已到期 30 天 + 30 天宽限。
+       */
+      const keys = await deps.retention.listExportObjectKeys(user.userId);
+      const storage = deps.exportStorage;
+
+      const result = await deps.retention.purgeUser(user.userId, async () => {
+        if (storage !== undefined) {
+          await deleteExportObjects({ storage, logger: deps.logger }, keys);
+        }
+      });
+
       purged += 1;
       transferred += result.transferred;
+      if (storage !== undefined) objectsDeleted += keys.length;
       anonPurgeTotal.inc({ outcome: 'purged' });
     } catch (error) {
       /*
@@ -109,5 +142,5 @@ export async function runPurgeRound(deps: PurgeDeps): Promise<PurgeSummary> {
       (skipped > 0 ? `、因排空跳过 ${skipped} 个` : ''),
   );
 
-  return { scanned: expired.length, purged, failed, transferred, skipped };
+  return { scanned: expired.length, purged, failed, transferred, skipped, objectsDeleted };
 }

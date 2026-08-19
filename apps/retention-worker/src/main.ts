@@ -6,7 +6,8 @@ import {
   loadTracingConfig,
   startTracing,
 } from '@tps/observability';
-import { optionalInt, runWorker } from '@tps/shared';
+import { optionalInt, optionalString, runWorker } from '@tps/shared';
+import { S3ExportStorage, loadExportsStorageConfig } from '@tps/storage';
 
 import { PURGE_BATCH_SIZE, PURGE_GRACE_DAYS, runPurgeRound } from './purge.js';
 
@@ -48,6 +49,17 @@ registerDefaultMetrics(SERVICE_NAME);
 const dbPool = createPool(loadDbConfig());
 const retention = createRetentionRepository(dbPool);
 
+/*
+ * 导出桶（TP-6-14）。**可缺省**：没有 MinIO 的本地运行仍要能跑清理。
+ * 缺省时对象留在桶里 —— `users/` 前缀有 90 天生命周期规则兜着，
+ * 而 `anon/` 前缀没有（R-50 的硬约束），因此生产部署必须配置 S3_*。
+ * 见 deploy/storage/README.md。
+ */
+const exportStorage =
+  optionalString('S3_ENDPOINT', '') === ''
+    ? undefined
+    : new S3ExportStorage(loadExportsStorageConfig());
+
 /**
  * 轮询间隔。默认 24 小时（15.1「每日一次」）。
  *
@@ -87,6 +99,7 @@ await runWorker({
             batchSize,
             graceDays,
             isDraining: () => handle.isDraining(),
+            ...(exportStorage === undefined ? {} : { exportStorage }),
           }),
         )
         .catch((error: unknown) => {

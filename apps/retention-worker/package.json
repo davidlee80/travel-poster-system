@@ -14,7 +14,8 @@
   "dependencies": {
     "@tps/db": "workspace:*",
     "@tps/observability": "workspace:*",
-    "@tps/shared": "workspace:*"
+    "@tps/shared": "workspace:*",
+    "@tps/storage": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

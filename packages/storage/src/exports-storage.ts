@@ -1,4 +1,5 @@
 import {
+  DeleteObjectsCommand,
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -43,9 +44,30 @@ export interface ExportStorage {
     key: string,
     ttlSeconds: number,
   ): Promise<{ readonly url: string; readonly expiresAt: Date }>;
+  /**
+   * 逐键删除（TP-6-14，设计稿 15.1 / R-50）。
+   *
+   * **接口上没有 `deletePrefix`，也不该有。** R-50 是硬约束：
+   * 「一切清理以数据库归属为准，禁止按路径前缀清理」—— `anon/` 前缀下混有
+   * 已升级 / 已归并用户的长期数据（归并只改数据库行、对象零搬运），
+   * 按前缀删会把它们一起删掉，而那是不可恢复的。
+   *
+   * 把这条约束表达为「接口里没有那个方法」而不是注释里的一句提醒：
+   * 前者让违反它需要先改接口（一次会被 review 看见的改动），
+   * 后者只需要有人没读注释。
+   */
+  delete(keys: readonly string[]): Promise<void>;
 }
 
-/** 导出文件按 `exports/{export_id}/{文件名}` 组织，便于按任务整体清理 */
+/**
+ * 导出文件的**旧**键布局。
+ *
+ * @deprecated 15.4（R-49）改为按用户空间归档，新产物走
+ * `@tps/storage` 的 `exportObjectKeyFor`。保留这个函数是为了让「旧键布局
+ * 长什么样」在代码里有据可查 —— 实施计划第七章明确存量对象**不迁移**
+ * （导出物 90 天自然过期），因此库里会同时存在两种键，
+ * 而 retention 的清理读 `exports.files[].storage_key` 从而对两者都有效（R-53）。
+ */
 export function exportObjectKey(exportId: string, fileName: string): string {
   return `exports/${exportId}/${fileName}`;
 }
@@ -65,6 +87,9 @@ export function exportFileName(
   if (dayNumber !== null) return `day-${String(dayNumber).padStart(2, '0')}.${extension}`;
   return scope === 'FULL_PLAN' ? `full-plan.${extension}` : `all-days.${extension}`;
 }
+
+/** S3 的 DeleteObjects 单次上限。MinIO 同样遵守 */
+const DELETE_BATCH_SIZE = 1000;
 
 export class S3ExportStorage implements ExportStorage {
   private readonly client: S3Client;
@@ -95,6 +120,34 @@ export class S3ExportStorage implements ExportStorage {
     );
   }
 
+  async delete(keys: readonly string[]): Promise<void> {
+    if (keys.length === 0) return;
+
+    /*
+     * `DeleteObjects` 一次最多 1000 个键（S3 API 限制，MinIO 同样遵守）。
+     * 分批而不是逐个删：一个用户的产物通常是个位数，但 14 天 × PNG 的
+     * `ALL_DAYS` 导出就有 14 个文件，几次导出后到几十个 —— 逐个删是几十次
+     * 往返，而清理任务与在线流量共用带宽。
+     */
+    for (let i = 0; i < keys.length; i += DELETE_BATCH_SIZE) {
+      const batch = keys.slice(i, i + DELETE_BATCH_SIZE);
+      await this.client.send(
+        new DeleteObjectsCommand({
+          Bucket: this.config.bucket,
+          Delete: {
+            Objects: batch.map((key) => ({ Key: key })),
+            /*
+             * `Quiet: false` —— 要看到每个键的结果。安静模式只回错误，
+             * 于是「删了几个」无从断言，而 TP-6-14 的顺序约束
+             * （删对象失败则不删行）依赖于能判定失败。
+             */
+            Quiet: false,
+          },
+        }),
+      );
+    }
+  }
+
   async presign(key: string, ttlSeconds: number): Promise<{ url: string; expiresAt: Date }> {
     const url = await getSignedUrl(
       this.client,
@@ -120,10 +173,26 @@ export class S3ExportStorage implements ExportStorage {
 export class InMemoryExportStorage implements ExportStorage {
   readonly objects = new Map<string, { body: Uint8Array; contentType: string }>();
 
+  /**
+   * 操作计数（TP-6-13 的「归并零搬运」断言）。
+   *
+   * R-50 要求归并只改数据库行、对象存储零搬运。「零」只能靠计数断言 ——
+   * 看对象是否还在原处不够：一次「拷到新键再删旧键」的搬运结束后，
+   * 对象**也**只在一个地方，从最终状态看不出中间发生过什么。
+   */
+  readonly counts = { put: 0, presign: 0, delete: 0 };
+
   constructor(private readonly base = 'https://exports.test.local') {}
 
   put(input: PutObjectInput): Promise<void> {
+    this.counts.put += 1;
     this.objects.set(input.key, { body: input.body, contentType: input.contentType });
+    return Promise.resolve();
+  }
+
+  delete(keys: readonly string[]): Promise<void> {
+    this.counts.delete += 1;
+    for (const key of keys) this.objects.delete(key);
     return Promise.resolve();
   }
 
@@ -132,6 +201,7 @@ export class InMemoryExportStorage implements ExportStorage {
      * 假签名里带一个递增的 nonce：13.6 的「重签名」测试要断言
      * 「URL 变了但没有重新渲染」，而两次返回同一个字符串就测不出来。
      */
+    this.counts.presign += 1;
     this.nonce += 1;
     return Promise.resolve({
       url: `${this.base}/${key}?sig=${this.nonce}&expires=${ttlSeconds}`,

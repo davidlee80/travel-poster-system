@@ -54,8 +54,30 @@ export interface RetentionRepository {
     readonly now?: Date;
   }): Promise<readonly ExpiredAnonymousUser[]>;
 
-  /** 转存知识 + 级联删除，同一事务（15.1、TP-4-22） */
-  purgeUser(userId: string): Promise<PurgeUserResult>;
+  /**
+   * 该用户名下全部导出产物的**真实**对象键（TP-6-14）。
+   *
+   * 读 `exports.files[].storage_key` —— 那是 `FinishExportInput.files` 落库时
+   * 写进去的、真的被 `put` 用过的键。
+   *
+   * **这是对设计稿的一处偏离（R-53）**：15.1 / R-51 写的是「按其名下
+   * `content_id` 枚举并删除对象（由 15.4 键构造器推导对象键）」。推导法只能
+   * 覆盖 15.4 的新布局，而实施计划第七章明确存量旧键布局
+   * （`exports/{export_id}/`）**不迁移** —— 于是那些对象永远删不掉，
+   * 成为永久孤儿。读 `storage_key` 同时覆盖两种布局，且它仍严格是
+   * 「以数据库归属为准、不按前缀」（R-50），比推导更强。
+   *
+   * 键构造器仍然交付（TP-6-11），用于**写入侧**与 `content:find` 的前缀展示。
+   */
+  listExportObjectKeys(userId: string): Promise<readonly string[]>;
+  /**
+   * 转存知识 + 级联删除，同一事务（15.1、TP-4-22）。
+   *
+   * `beforeDelete` 在同一事务内、`DELETE FROM users` **之前**执行
+   * （TP-6-14）。抛错则整体回滚且行保留 —— 顺序不能反过来：
+   * 行先删则 `files[].storage_key` 随之消失，产物成为永久孤儿。
+   */
+  purgeUser(userId: string, beforeDelete?: () => Promise<void>): Promise<PurgeUserResult>;
 
   /** `travel_knowledge_rows` 指标的数据源（21.3） */
   countKnowledgeRows(): Promise<number>;
@@ -84,7 +106,31 @@ export function createRetentionRepository(pool: Pool): RetentionRepository {
       return rows.map((row) => ({ userId: row.id, anonExpiresAt: row.anon_expires_at }));
     },
 
-    async purgeUser(userId) {
+    async listExportObjectKeys(userId) {
+      /*
+       * `jsonb_array_elements` 展开 `files`，取每个产物的 `storage_key`。
+       *
+       * `files` 可以是空数组（FAILED 的导出没上传过任何对象），
+       * 因此用 `jsonb_array_elements` 而不是 `->0->>'storage_key'` ——
+       * 后者只取第一个，而 `ALL_DAYS` + PNG 会有 14 个。
+       *
+       * 过滤 NULL 与空串：P4 之前的行可能没有这个字段
+       * （`ExportArtifactSchema` 后来才要求它必填），而把空串当键传给
+       * DeleteObjects 会让整批请求被 S3 拒绝。
+       */
+      const { rows } = await pool.query<{ storage_key: string }>(
+        `SELECT DISTINCT f->>'storage_key' AS storage_key
+           FROM exports e
+           CROSS JOIN LATERAL jsonb_array_elements(e.files) AS f
+          WHERE e.user_id = $1
+            AND f->>'storage_key' IS NOT NULL
+            AND f->>'storage_key' <> ''`,
+        [userId],
+      );
+      return rows.map((row) => row.storage_key);
+    },
+
+    async purgeUser(userId, beforeDelete) {
       const client: PoolClient = await pool.connect();
       try {
         await client.query('BEGIN');
@@ -109,6 +155,19 @@ export function createRetentionRepository(pool: Pool): RetentionRepository {
               AND v.destination_place_id IS NOT NULL`,
           [userId],
         );
+
+        /*
+         * 对象存储的清理在**删行之前**（TP-6-14、15.1 / R-51）。
+         *
+         * 顺序不能反：行先删则 `exports.files[].storage_key` 随之消失，
+         * 而那是唯一能推出对象键的地方 —— 产物成为永久孤儿，
+         * 且因为 `anon/` 前缀禁挂生命周期规则（R-50），它们永远不会过期。
+         *
+         * 放在事务内：抛错则整体回滚、行保留、下一轮重试。
+         * 放在事务外（先删对象再开事务）的话，删对象成功而转存失败时
+         * 会得到「产物没了但行还在」—— 用户看到一个指向 404 的下载链接。
+         */
+        if (beforeDelete !== undefined) await beforeDelete();
 
         /*
          * 级联删除：`travel_requests` / `travel_plans` / `travel_plan_versions`

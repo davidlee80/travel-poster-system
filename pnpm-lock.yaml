@@ -215,6 +215,9 @@ importers:
       '@tps/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@tps/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
     devDependencies:
       '@types/node':
         specifier: ^24.10.1

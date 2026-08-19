@@ -303,6 +303,137 @@ describeIntegration('保留期清理（集成，需 PostgreSQL）', () => {
     });
   });
 
+  describe('导出产物对象键（TP-6-14，门禁 #38）', () => {
+    /** 给用户造一条带产物的导出行 */
+    async function seedExport(
+      userId: string,
+      planId: string,
+      versionId: string,
+      keys: readonly string[],
+    ): Promise<void> {
+      const exportId = randomUUID();
+      await pool.query(
+        `INSERT INTO exports
+           (id, user_id, plan_id, plan_version_id, template_id, format, scope,
+            day_numbers, idempotency_key, files)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'travel_infographic_v1',
+                 'PNG', 'ALL_DAYS', NULL, $5, $6::jsonb)`,
+        [
+          exportId,
+          userId,
+          planId,
+          versionId,
+          randomUUID(),
+          JSON.stringify(
+            keys.map((key, index) => ({
+              format: 'PNG',
+              day_number: index + 1,
+              url: `https://exports.test/${key}`,
+              byte_size: 1024,
+              expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+              storage_key: key,
+            })),
+          ),
+        ],
+      );
+    }
+
+    it('返回 files[].storage_key 里的全部键（R-53：覆盖两种键布局）', async () => {
+      const seeded = await seedAnonymous({ expiredDaysAgo: 45 });
+      /*
+       * 一新一旧：15.4 的 anon/ 布局与 P4 的扁平 exports/ 布局。
+       * 按 15.4 键构造器推导只能得到前者 —— 那正是 R-53 要修的漏洞
+       * （实施计划第七章明确存量对象不迁移，于是旧键永远删不掉）。
+       */
+      await seedExport(seeded.userId, seeded.planId, seeded.versionId, [
+        `anon/202608/${seeded.versionId}/exports/e1/day-01.png`,
+        'exports/legacy-export-id/day-01.png',
+      ]);
+
+      const keys = await retention.listExportObjectKeys(seeded.userId);
+
+      expect([...keys].sort()).toEqual(
+        [
+          'exports/legacy-export-id/day-01.png',
+          `anon/202608/${seeded.versionId}/exports/e1/day-01.png`,
+        ].sort(),
+      );
+    });
+
+    it('没有导出的用户返回空数组', async () => {
+      const seeded = await seedAnonymous({ expiredDaysAgo: 45 });
+      expect(await retention.listExportObjectKeys(seeded.userId)).toEqual([]);
+    });
+
+    it('只返回该用户的键（不串到别人名下）', async () => {
+      const mine = await seedAnonymous({ expiredDaysAgo: 45 });
+      const theirs = await seedAnonymous({ expiredDaysAgo: 45 });
+      await seedExport(mine.userId, mine.planId, mine.versionId, ['anon/a/mine.png']);
+      await seedExport(theirs.userId, theirs.planId, theirs.versionId, ['anon/b/theirs.png']);
+
+      expect(await retention.listExportObjectKeys(mine.userId)).toEqual(['anon/a/mine.png']);
+    });
+
+    it('beforeDelete 在 DELETE 之前执行，抛错则行保留', async () => {
+      const seeded = await seedAnonymous({ expiredDaysAgo: 45 });
+      await seedExport(seeded.userId, seeded.planId, seeded.versionId, ['anon/a/x.png']);
+
+      await expect(
+        retention.purgeUser(seeded.userId, () => Promise.reject(new Error('S3 5xx'))),
+      ).rejects.toThrow('S3 5xx');
+
+      const { rows } = await pool.query<{ count: string }>(
+        'SELECT count(*) AS count FROM users WHERE id = $1',
+        [seeded.userId],
+      );
+      expect(rows[0]!.count).toBe('1');
+    });
+
+    it('beforeDelete 成功时行被删除，且钩子能读到键（顺序正确）', async () => {
+      const seeded = await seedAnonymous({ expiredDaysAgo: 45 });
+      await seedExport(seeded.userId, seeded.planId, seeded.versionId, ['anon/a/x.png']);
+
+      let keysSeenInHook: readonly string[] = [];
+      await retention.purgeUser(seeded.userId, async () => {
+        // 钩子运行时行还在，因此仍能查到键 —— 这就是「删对象在删行之前」
+        keysSeenInHook = await retention.listExportObjectKeys(seeded.userId);
+      });
+
+      expect(keysSeenInHook).toEqual(['anon/a/x.png']);
+      const { rows } = await pool.query<{ count: string }>(
+        'SELECT count(*) AS count FROM users WHERE id = $1',
+        [seeded.userId],
+      );
+      expect(rows[0]!.count).toBe('0');
+    });
+
+    it('已归并（MERGED）的匿名行不进入清理路径，其 anon/ 对象因此不被删（门禁 #38 前半）', async () => {
+      /*
+       * R-50 的核心风险：归并只改数据库归属、对象零搬运，因此一个注册了
+       * 三年的用户名下仍可能有键在 anon/ 下的产物。findExpiredAnonymous
+       * 只收 ACTIVE / SUSPENDED，MERGED 行被排除 —— 这是回归断言：
+       * 哪天有人为了「清理干净」把 MERGED 加进谓词，这条会红。
+       */
+      const seeded = await seedAnonymous({ expiredDaysAgo: 45 });
+      await seedExport(seeded.userId, seeded.planId, seeded.versionId, ['anon/a/keep-me.png']);
+
+      const target = await users.createRegistered({
+        email: 'merged-target@example.com',
+        passwordHash: 'argon2-placeholder',
+        displayName: null,
+        dailyQuota: 5,
+        monthlyQuota: 20,
+      });
+      await pool.query(`UPDATE users SET status = 'MERGED', merged_into = $2 WHERE id = $1`, [
+        seeded.userId,
+        target.id,
+      ]);
+
+      const found = await retention.findExpiredAnonymous({ limit: 100, graceDays: 30 });
+      expect(found.map((row) => row.userId)).not.toContain(seeded.userId);
+    });
+  });
+
   describe('countKnowledgeRows', () => {
     it('返回当前行数（travel_knowledge_rows 指标的数据源）', async () => {
       expect(await retention.countKnowledgeRows()).toBe(0);
