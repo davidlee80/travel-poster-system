@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   bucketOf,
@@ -16,6 +16,20 @@ const KEYS = [
   'FEATURE_GENERATION_ROLLOUT_PERCENT',
   'FEATURE_ANONYMOUS_ENABLED',
 ] as const;
+
+/*
+ * **前后各清一次**，而不是只在 afterEach 清。
+ *
+ * 只清 afterEach 的话，第一条用例会被**外部环境**污染 ——
+ * `FEATURE_ANONYMOUS_ENABLED=true pnpm test` 会让「缺省全开」那条红，
+ * 而红的原因与代码无关。这是 P7 回切验证时真实撞到的：
+ * 把开关打开跑一遍回归，唯一失败的就是这条断言默认值的用例。
+ *
+ * 断言默认值的测试必须自己保证环境干净 —— 它验的恰恰是「什么都没配时」。
+ */
+beforeEach(() => {
+  for (const key of KEYS) delete process.env[key];
+});
 
 afterEach(() => {
   for (const key of KEYS) delete process.env[key];
