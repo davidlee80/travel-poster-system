@@ -303,6 +303,111 @@ describeIntegration('素材库仓储（集成，需 PostgreSQL）', () => {
     });
   });
 
+  describe('content_hash 指纹去重（R-47、TP-6-01/05）', () => {
+    const hash = 'a'.repeat(64);
+
+    it('相同 content_hash 第二次插入被数据库拒绝', async () => {
+      await repo.insertAsset(input({ contentHash: hash }));
+
+      /*
+       * 这里断言的是**数据库拒绝**，而不是仓储静默复用。
+       * 与 cache_key 的处理不同是有意的：cache_key 冲突意味着「同一请求
+       * 上下文已有产物，复用它」，而指纹冲突意味着「这份字节已在库里，
+       * 把标签并进去」——后者由 search-ingest 先查后插处理（TP-6-05），
+       * 这个索引是并发下的最后一道。让 insertAsset 也 DO NOTHING 会让
+       * 「先查」那一步的缺失变得不可见。
+       */
+      await expect(
+        repo.insertAsset(input({ contentHash: hash, storageUrl: 's3://dup.webp' })),
+      ).rejects.toMatchObject({ code: '23505' });
+    });
+
+    it('content_hash 为 null 的多行可共存（部分唯一索引）', async () => {
+      await repo.insertAsset(input());
+      await repo.insertAsset(input({ storageUrl: 's3://second.webp' }));
+
+      const { rows } = await pool.query<{ count: string }>(
+        'SELECT count(*) FROM assets WHERE content_hash IS NULL',
+      );
+      expect(rows[0]!.count).toBe('2');
+    });
+
+    it('findByContentHash 命中并带回状态与标签', async () => {
+      const { assetId } = await repo.insertAsset(input({ contentHash: hash }));
+
+      const found = await repo.findByContentHash(hash);
+      expect(found).toMatchObject({ assetId, status: 'ACTIVE' });
+      expect(found?.styleTags).toEqual(['bridge', 'canal']);
+    });
+
+    it('已下架素材的指纹**仍然**命中（否则合并分支会撞唯一索引）', async () => {
+      /*
+       * 与 findByCacheKey 相反：那一个过滤 status（下架等于没有），
+       * 这一个不过滤。理由是它的用途不是「找一张能用的图」而是
+       * 「这份字节在库里存在吗」——存在就不能再插。过滤掉下架行的话，
+       * 一张被人工下架的图会在下次搜索命中时试图重新入库，
+       * 撞上唯一索引后整个候选被判为失败，而正确行为是换下一个候选。
+       */
+      const { assetId } = await repo.insertAsset(input({ contentHash: hash }));
+      await pool.query(`UPDATE assets SET status = 'RETIRED' WHERE id = $1`, [assetId]);
+
+      const found = await repo.findByContentHash(hash);
+      expect(found).toMatchObject({ assetId, status: 'RETIRED' });
+    });
+
+    it('指纹不存在返回 null', async () => {
+      expect(await repo.findByContentHash('b'.repeat(64))).toBeNull();
+    });
+
+    it('mergeTags 把 style_tags 并成去重后的并集', async () => {
+      const { assetId } = await repo.insertAsset(input({ contentHash: hash }));
+
+      await repo.mergeTags({
+        assetId,
+        styleTags: ['canal', 'night', 'bridge'],
+        searchText: '拱宸 夜景',
+      });
+
+      const found = await repo.findByContentHash(hash);
+      // 排序后并集：原 bridge/canal + 新 night，canal 与 bridge 不重复
+      expect(found?.styleTags).toEqual(['bridge', 'canal', 'night']);
+    });
+
+    it('mergeTags 把 search_text 并成去重后的词并集', async () => {
+      const { assetId } = await repo.insertAsset(
+        input({ contentHash: hash, searchText: '拱宸 宸桥 杭州' }),
+      );
+
+      await repo.mergeTags({ assetId, styleTags: [], searchText: '杭州 运河' });
+
+      const { rows } = await pool.query<{ search_text: string }>(
+        'SELECT search_text FROM assets WHERE id = $1',
+        [assetId],
+      );
+      // 杭州只出现一次；顺序归一为字典序，使合并结果与调用次序无关
+      expect(rows[0]!.search_text.split(' ').sort()).toEqual(
+        ['宸桥', '拱宸', '杭州', '运河'].sort(),
+      );
+      expect(rows[0]!.search_text.split(' ')).toHaveLength(4);
+    });
+
+    it('mergeTags 不改动素材的任何其他列', async () => {
+      const { assetId } = await repo.insertAsset(input({ contentHash: hash }));
+      const before = await pool.query(
+        'SELECT storage_url, quality_score, license_type, status FROM assets WHERE id = $1',
+        [assetId],
+      );
+
+      await repo.mergeTags({ assetId, styleTags: ['night'], searchText: '夜景' });
+
+      const after = await pool.query(
+        'SELECT storage_url, quality_score, license_type, status FROM assets WHERE id = $1',
+        [assetId],
+      );
+      expect(after.rows[0]).toEqual(before.rows[0]);
+    });
+  });
+
   describe('cache_key 命中（19.4）', () => {
     it('精确键命中返回素材', async () => {
       const cacheKey = 'hero:v1:cn-hangzhou:canal_culture:chinese_travel_editorial:16x6';

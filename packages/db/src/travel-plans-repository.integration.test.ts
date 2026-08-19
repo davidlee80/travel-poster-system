@@ -1,6 +1,8 @@
 import type { Pool } from 'pg';
+import { InMemoryExportStorage, exportObjectKeyFor } from '@tps/storage';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { createRetentionRepository, type RetentionRepository } from './retention.js';
 import { migrate } from './migrate.js';
 import { migrationsDirectory } from './migrations-dir.js';
 import { createPool } from './pool.js';
@@ -30,6 +32,7 @@ describeIntegration('计划仓储（集成，需 PostgreSQL）', () => {
   let pool: Pool;
   let repository: TravelPlansRepository;
   let users: UsersRepository;
+  let retention: RetentionRepository;
 
   beforeAll(async () => {
     pool = createPool({
@@ -42,6 +45,7 @@ describeIntegration('计划仓储（集成，需 PostgreSQL）', () => {
     await migrate(pool, migrationsDirectory());
     repository = createTravelPlansRepository(pool);
     users = createUsersRepository(pool);
+    retention = createRetentionRepository(pool);
   });
 
   afterAll(async () => {
@@ -773,6 +777,85 @@ describeIntegration('计划仓储（集成，需 PostgreSQL）', () => {
 
       const anon = await users.findById(anonId);
       expect(anon).toMatchObject({ status: 'MERGED', merged_into: targetId });
+    });
+
+    it('门禁 #37 后半：归并零搬运 —— 键仍在 anon/ 下，对象存储操作计数为 0', async () => {
+      /*
+       * R-50：「升级 / 归并只改数据库归属、不搬对象存储文件。」
+       *
+       * 「零」只能靠**操作计数**断言：一次「拷到新键再删旧键」的搬运结束后，
+       * 对象也只在一个地方，从最终状态看不出中间发生过什么。
+       * 因此这里用 InMemoryExportStorage 的 counts —— 归并前后 put 与 delete
+       * 的增量必须都是 0。
+       *
+       * 由此得出的硬约束是 R-50 的另一半（TP-6-14 已实现）：一切清理以数据库
+       * 归属为准，禁止按路径前缀清理 —— 因为 `anon/` 前缀下混着这些
+       * 已归并用户的长期数据。
+       */
+      const { anonId, planId } = await anonymousWithData();
+
+      // 造一个键在 anon/ 空间的产物对象
+      const version = await pool.query<{ id: string; created_at: Date }>(
+        'SELECT id, created_at FROM travel_plan_versions WHERE plan_id = $1',
+        [planId],
+      );
+      const contentId = version.rows[0]!.id;
+      const anonKey = exportObjectKeyFor(
+        {
+          userType: 'ANONYMOUS',
+          userId: anonId,
+          contentId,
+          contentCreatedAt: version.rows[0]!.created_at,
+        },
+        'export-1',
+        'day-01.png',
+      );
+
+      const storage = new InMemoryExportStorage();
+      await storage.put({ key: anonKey, body: new Uint8Array([1]), contentType: 'image/png' });
+      await pool.query(`UPDATE exports SET files = $2::jsonb WHERE user_id = $1`, [
+        anonId,
+        JSON.stringify([
+          {
+            format: 'PNG',
+            day_number: 1,
+            url: `https://exports.test/${anonKey}`,
+            byte_size: 1,
+            expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+            storage_key: anonKey,
+          },
+        ]),
+      ]);
+
+      const before = { ...storage.counts };
+      const targetId = await registeredUser('zero-move@example.com');
+      await users.mergeAnonymousInto(anonId, targetId);
+
+      // 1) 对象存储一次都没被碰过
+      expect(storage.counts.put).toBe(before.put);
+      expect(storage.counts.delete).toBe(before.delete);
+
+      // 2) 键仍在 anon/ 下 —— 没有重命名
+      expect(anonKey.startsWith('anon/')).toBe(true);
+      expect(storage.objects.has(anonKey)).toBe(true);
+
+      // 3) 归属已改到注册账号，因此新归属可以按同一个键签发预签名
+      const keys = await retention.listExportObjectKeys(targetId);
+      expect(keys).toEqual([anonKey]);
+      expect(await retention.listExportObjectKeys(anonId)).toEqual([]);
+
+      // 4) 升级后的新产物会走 users/ 前缀（旧产物留在 anon/）
+      const newKey = exportObjectKeyFor(
+        {
+          userType: 'REGISTERED',
+          userId: targetId,
+          contentId,
+          contentCreatedAt: version.rows[0]!.created_at,
+        },
+        'export-2',
+        'day-01.png',
+      );
+      expect(newKey.startsWith(`users/${targetId}/`)).toBe(true);
     });
 
     it('TP-2-27：idempotency_key 保持原值不重算', async () => {

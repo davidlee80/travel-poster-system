@@ -23,4 +23,6 @@ export {
   type ExportStorage,
 } from './exports-storage.js';
 
+export { contentPrefix, exportObjectKeyFor, type ContentSpace } from './content-keys.js';
+
 export { loadAssetsStorageConfig } from './config.js';

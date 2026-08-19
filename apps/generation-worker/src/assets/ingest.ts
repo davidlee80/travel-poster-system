@@ -59,10 +59,19 @@ export interface IngestAssetInput {
   readonly cacheKey: string | null;
   /** AI 生成物必填（二十章、迁移 0005 的 CHECK） */
   readonly generationMetadata: unknown;
+  /** 搜索入库图必填（9.6、迁移 0008 的 CHECK）。`SourceMetadata` 形状 */
+  readonly sourceMetadata?: unknown;
   /** 该素材面向的角色与比例，决定 11.2 的校验口径 */
   readonly role: AssetRole;
   readonly aspectRatio: AspectRatio;
   readonly minWidth: number;
+  /**
+   * 原图字节的 SHA-256（R-47）。只有 9.6 的搜索入库带它 ——
+   * 平台自有素材与 AI 生成物不参与指纹去重（见迁移 0007）。
+   */
+  readonly contentHash?: string;
+  /** 质量分下限（9.6：搜索入库低于 0.3 不入库）。省略即不判定 */
+  readonly minQualityScore?: number;
 }
 
 export interface IngestDeps {
@@ -97,6 +106,7 @@ export async function ingestAsset(
   const processed = await processImage(input.bytes, {
     aspectRatio: input.aspectRatio,
     minWidth: input.minWidth,
+    ...(input.minQualityScore === undefined ? {} : { minQualityScore: input.minQualityScore }),
   });
 
   if (processed.kind === 'rejected') {
@@ -179,6 +189,8 @@ export async function ingestAsset(
     embedding,
     cacheKey: input.cacheKey,
     generationMetadata: input.generationMetadata,
+    ...(input.contentHash === undefined ? {} : { contentHash: input.contentHash }),
+    ...(input.sourceMetadata === undefined ? {} : { sourceMetadata: input.sourceMetadata }),
   });
 
   if (!saved.created) {

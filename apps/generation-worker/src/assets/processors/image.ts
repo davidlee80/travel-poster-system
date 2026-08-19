@@ -39,6 +39,14 @@ const WEBP_QUALITY = 82;
 export interface ProcessImageConstraints {
   readonly aspectRatio: AspectRatio;
   readonly minWidth: number;
+  /**
+   * 质量分下限（9.6：搜索入库低于 0.3 不入库）。省略即不判定这一条。
+   *
+   * 省略时不判定而不是取 0：0 也是一个「所有图都能过」的下限，
+   * 但它把「这条门禁不适用于本来源」表达成了「门禁的阈值恰好是最松的」，
+   * 而后者会在有人调阈值时被误当成可以统一提高的配置。
+   */
+  readonly minQualityScore?: number;
 }
 
 export interface ProcessedImage {
@@ -65,7 +73,20 @@ export type ProcessImageRejection =
       readonly actual: number;
       readonly required: number;
       readonly deviationLog2: number;
-    };
+    }
+  /**
+   * 4：质量分低于调用方给的下限（9.6 的搜索入库门禁，TP-6-04）。
+   *
+   * 这一条与前三条不同 —— 它不是 11.2 的固有校验，而是**按来源可配的**门禁：
+   * 平台自有素材是人挑的、AI 生成物是按需求定制的，两者都没有下限；
+   * 只有搜索结果需要一道机器可判定的把关（9.6：「人工只保留事后下架」）。
+   * 因此 `processImage` 只在 `minQualityScore` 被显式传入时才判定这一条。
+   *
+   * 放在这个联合里而不是让调用方自己比较：拒收后的处置（换下一个候选、
+   * 不上传、不写库）与前三条完全相同，分成两处会让「拒收但已经上传了对象」
+   * 成为可能 —— 那是一份没有任何行指向的孤儿文件。
+   */
+  | { readonly reason: 'QUALITY_TOO_LOW'; readonly score: number; readonly floor: number };
 
 export type ProcessImageResult =
   | { readonly kind: 'ok'; readonly image: ProcessedImage }
@@ -136,6 +157,22 @@ export async function processImage(
     width: gray.info.width,
     height: gray.info.height,
   });
+
+  /*
+   * ── 3.5 质量下限（9.6 的搜索入库门禁）──
+   *
+   * 位置在 WebP 转码**之前**：转码与缩略图是这条流水线里最贵的两步
+   * （两次完整的解码+编码），而低于下限的图注定不入库。
+   * 放到之后判定只是把 CPU 花在必然被丢弃的候选上 ——
+   * 一次搜索最多试几个候选，但 14 天任务有几十个槽位。
+   */
+  const floor = constraints.minQualityScore;
+  if (floor !== undefined && quality.score < floor) {
+    return {
+      kind: 'rejected',
+      rejection: { reason: 'QUALITY_TOO_LOW', score: quality.score, floor },
+    };
+  }
 
   // ── 4. WebP（必要时缩小，不放大）──
   const stored = sharp(input).resize({

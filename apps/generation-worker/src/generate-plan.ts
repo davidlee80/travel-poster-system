@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import type { TravelPlansRepository } from '@tps/db';
 import type { EmbeddingClient, LlmClient } from '@tps/llm';
 import {
@@ -33,9 +31,10 @@ import {
   type TravelPlanLlmOutput,
 } from '@tps/schemas';
 import type { GenerationJobPayload } from '@tps/queue';
-import type { Logger, UserType } from '@tps/shared';
+import { uuidv7, type Logger, type UserType } from '@tps/shared';
 
 import type { AiLayerDeps } from './assets/resolve-assets.js';
+import type { LicensedSourceLayerDeps } from './assets/resolvers/licensed-source.js';
 import {
   JOB_TIMEOUT_MS,
   createJobDeadline,
@@ -113,7 +112,7 @@ export interface GeneratePlanDeps {
    * `logger` 由本模块注入（带 job_id / user_id 的子 logger），因此这里排除它。
    * `ai` 同样排除：它含每任务一个实例的预算对象，见 `aiAssets`。
    */
-  readonly presentation?: Omit<BuildPresentationDeps, 'logger' | 'ai'>;
+  readonly presentation?: Omit<BuildPresentationDeps, 'logger' | 'ai' | 'licensedSource'>;
 
   /**
    * AI 兜底层的**工厂**（TP-4-02/03/17）。
@@ -126,6 +125,20 @@ export interface GeneratePlanDeps {
    * 缺省时降级链没有第 1 级（等价于 21.4 的全局熔断已打开）。
    */
   readonly aiAssets?: (userType: UserType) => AiLayerDeps;
+
+  /**
+   * 授权图源搜索层的**工厂**（TP-6-03/06）。
+   *
+   * 与 `aiAssets` 同样是工厂：9.6 的单任务 8 次与连续失败 2 次都是每任务
+   * 状态，共享实例的表现是「第 2 个任务开始一次搜索都不发」——
+   * 计数从来没被重置过。
+   *
+   * 不带 `userType` 参数：9.6 规定搜索额度匿名与注册同额（命中入库为全平台
+   * 共享资产），因此这个工厂不需要身份。
+   *
+   * 缺省时降级链没有搜索层（等价于 9.6 的全局熔断已打开）。
+   */
+  readonly searchAssets?: () => LicensedSourceLayerDeps;
 }
 
 export type JobFailureCode = PlanErrorCode | 'JOB_TIMEOUT' | 'JOB_QUEUE_TIMEOUT';
@@ -591,8 +604,14 @@ export async function generatePlan(
    * `plan_version_id`（六章的 TravelPlan 三个 ID 都是必填）。
    * 等插入后再补的话，库里会短暂存在一份 `TravelPlanSchema` 读不回来的
    * 计划 —— 而 13.3 正是用它解析后返回。
+   *
+   * **UUIDv7 而不是 v4**（R-48，TP-6-10）：这个 ID 同时是 15.4 的
+   * `content_id` —— 该次生成的全部产物（展示数据、素材绑定、导出文件、
+   * 存储键、日志与 Trace）都以它为锚点。时间有序换来两件事：
+   * 15.4 的存储路径可以从 ID 派生年月而不引入第二个时间来源，
+   * 13.11 的时间范围检索可以在主键上做范围扫描而不需要新索引。
    */
-  const versionId = randomUUID();
+  const versionId = uuidv7();
 
   /*
    * 投影与向量都由**最终落库的**计划算出。
@@ -718,8 +737,14 @@ export async function generatePlan(
 
     await step('RESOLVING_ASSETS');
     const ai = deps.aiAssets?.(context.userType);
+    const licensedSource = deps.searchAssets?.();
     const result = await buildAndSavePresentations(
-      { ...presentation, logger: log, ...(ai === undefined ? {} : { ai }) },
+      {
+        ...presentation,
+        logger: log,
+        ...(ai === undefined ? {} : { ai }),
+        ...(licensedSource === undefined ? {} : { licensedSource }),
+      },
       plan,
     );
 

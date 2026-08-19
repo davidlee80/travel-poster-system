@@ -62,6 +62,14 @@ export interface ExportRow {
  */
 export interface ExportJobRow extends ExportRow {
   readonly userType: 'ANONYMOUS' | 'REGISTERED';
+  /**
+   * 计划版本行的创建时刻（TP-6-12）。
+   *
+   * 15.4 的路径里 `yyyyMM` 由 `content_id`（UUIDv7）派生，这一列只在
+   * ID 是存量 v4 时作为回退（R-53，见 `@tps/storage` 的 `contentPrefix`）。
+   * 与 `userType` 同一处理：join 一次拿到，不放进队列载荷。
+   */
+  readonly planVersionCreatedAt: Date;
 }
 
 export interface FinishExportInput {
@@ -195,10 +203,11 @@ export function createExportsRepository(pool: Pool): ExportsRepository {
        * 刻意的（避免快照与库里的行分歧）。而这次 join 是单行主键查询，
        * 与本来就要做的 `findById` 合并成一条语句，没有额外往返。
        */
-      const { rows } = await pool.query<Row & { user_type: string }>(
-        `SELECT ${COLUMNS_PREFIXED}, u.user_type
+      const { rows } = await pool.query<Row & { user_type: string; plan_version_created_at: Date }>(
+        `SELECT ${COLUMNS_PREFIXED}, u.user_type, v.created_at AS plan_version_created_at
            FROM exports e
            JOIN users u ON u.id = e.user_id
+           JOIN travel_plan_versions v ON v.id = e.plan_version_id
           WHERE e.id = $1`,
         [exportId],
       );
@@ -207,6 +216,7 @@ export function createExportsRepository(pool: Pool): ExportsRepository {
       return {
         ...toRow(row),
         userType: row.user_type === 'REGISTERED' ? 'REGISTERED' : 'ANONYMOUS',
+        planVersionCreatedAt: row.plan_version_created_at,
       };
     },
 

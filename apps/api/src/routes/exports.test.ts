@@ -88,7 +88,11 @@ class FakeExports implements ExportsRepository {
    */
   findById(exportId: string): Promise<ExportJobRow | null> {
     const row = this.rows.get(exportId);
-    return Promise.resolve(row === undefined ? null : { ...row, userType: 'REGISTERED' });
+    return Promise.resolve(
+      row === undefined
+        ? null
+        : { ...row, userType: 'REGISTERED', planVersionCreatedAt: row.createdAt },
+    );
   }
 
   markRendering(): Promise<boolean> {
@@ -521,5 +525,32 @@ describe('13.6 GET /exports/{export_id}', () => {
 
     expect(response.statusCode).toBe(404);
     expect(response.json<{ error: { code: string } }>().error.code).toBe('EXPORT_NOT_FOUND');
+  });
+
+  it('匿名 A 拿不到匿名 B 的产物签名，且与路径前缀无关（15.4，门禁 #37）', async () => {
+    /*
+     * 15.4：「通用空间只是存储组织方式，不是可见性边界。对外访问一律经
+     * 13.6 的预签名签发，签发前按 13.0 校验 `user_id`。」
+     *
+     * 上一条用例已经覆盖了同一件事（两个身份都是匿名），这一条把它与
+     * **门禁 #37 的口径**显式对上，并断言隔离发生在**签名签发之前** ——
+     * 响应体里不该出现任何 URL，哪怕是过期的。两个匿名用户的产物都在
+     * `anon/` 前缀下，因此路径本身提供不了任何隔离；漏了这道校验的表现是
+     * 「拿到别人的 PDF」而不是「拿到一个无效链接」。
+     */
+    const a = await anonymousCookie();
+    h().plans.ownerId = a.userId;
+    const exportId = await created(a.cookie);
+
+    const b = await anonymousCookie();
+    const response = await h().app.inject({
+      method: 'GET',
+      url: `/api/v1/exports/${exportId}`,
+      headers: { cookie: b.cookie },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.body).not.toContain('anon/');
+    expect(response.body).not.toContain('http');
   });
 });

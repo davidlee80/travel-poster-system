@@ -115,6 +115,14 @@ export const METRICS_CATALOG: readonly CatalogEntry[] = [
     note: '设计稿写 status；实现统一用 outcome —— status 在 travel_job_total 里表示任务状态，同一个词指两件事会让告警表达式写错（R-39）',
   },
   {
+    name: 'travel_asset_search_total',
+    kind: 'counter',
+    labels: ['role', 'outcome'],
+    owner: 'generation-worker',
+    source: 'supplementary',
+    note: 'V1.7 的搜索层（9.6）在 21.3 的指标表里没有对应项。补它的理由与 P5 的六个缺口同一条：配额与熔断的效果不可观测等于没有 —— resolution_total 看得出多少槽位走了搜索命中，看不出配额挡掉了多少次、超时占比与 license 缺失率。无 user_type：搜索额度匿名与注册同额',
+  },
+  {
     name: 'travel_asset_match_score',
     kind: 'histogram',
     labels: ['role'],

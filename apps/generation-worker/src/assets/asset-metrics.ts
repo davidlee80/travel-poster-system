@@ -49,6 +49,31 @@ export const assetResolutionDuration = createHistogram({
 });
 
 /**
+ * 授权图源搜索结局（TP-6-03/06，设计稿 9.6）。
+ *
+ * 21.3 的指标表里没有这一项 —— V1.7 新增搜索层时需求侧只写了配额与熔断，
+ * 没有补指标。补它的理由与 P5 发现的六个指标缺口同一条：**熔断与配额的
+ * 效果不可观测就等于没有**。`travel_asset_resolution_total{strategy}` 能看出
+ * 有多少槽位走了 `licensed_source_match`，但看不出：
+ *
+ * ```text
+ * skipped        配额/熔断挡掉了多少次（9.6 的三条限制到底有没有生效）
+ * timeout        5 秒超时占比（决定要不要下调超时或换图源）
+ * rejected       候选被入库门禁丢弃的比例（license 缺失率是选图源的依据）
+ * deduplicated   指纹命中率（R-47 的去重收益，也是「搜索是否在重复劳动」）
+ * ```
+ *
+ * 没有 `user_type`：9.6 的搜索额度匿名与注册同额，加这个标签只会把
+ * 基数翻倍而没有任何查询会按它分组（与 `travel_ai_image_total` 相反 ——
+ * 那里 TP-4-17 的验收断言就是按 `user_type` 表达的）。
+ */
+export const assetSearchTotal = createCounter({
+  name: 'travel_asset_search_total',
+  help: '授权图源搜索结局（按角色与结局）',
+  labelNames: ['role', 'outcome'],
+});
+
+/**
  * AI 图片生成量（21.3 的 `travel_ai_image_total`，TP-4-17 的验证依据）。
  *
  * `user_type` 是 21.3 的 R-13 通用维度，这里是它最重要的用途：

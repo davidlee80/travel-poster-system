@@ -94,6 +94,33 @@ export const GenerationMetadataSchema = z.object({
 });
 export type GenerationMetadata = z.infer<typeof GenerationMetadataSchema>;
 
+/**
+ * 搜索入库图的来源元数据（9.6 / R-46，迁移 0008 的 `assets.source_metadata`）。
+ *
+ * 与 `GenerationMetadataSchema` 对称：数据库的 CHECK 保证「有」
+ * （`LICENSED_SOURCE ⇒ 非空`），这个 schema 保证「全」。
+ *
+ * 9.6 逐项点名了四类内容：provider、original_url、检索词、
+ * license 原文与到期日。**四项全是必填**（到期日可为 null 但键必须在）——
+ * 少任何一项，「素材可追踪来源」（验收标准 12）对搜索图就是空话，
+ * 版权争议时也无从举证。
+ */
+export const SourceMetadataSchema = z.object({
+  /** 图源名，必须来自 `IMAGE_SEARCH_PROVIDERS` 白名单 */
+  provider: NonEmptyStringSchema,
+  /** 图源上的页面地址（不是下载直链 —— 后者会过期，举证要的是可访问的出处） */
+  original_url: NonEmptyStringSchema,
+  /** 触发本次入库的检索词。排查「这张图为什么被挂到这个 POI 下」的起点 */
+  search_query: NonEmptyStringSchema,
+  /** 图源返回的授权类型原文 */
+  license: NonEmptyStringSchema,
+  /** ISO 8601 或 null（永久授权）。同时写入 `assets.license_expires_at` */
+  license_expires_at: z.string().nullable(),
+  /** ISO 8601。入库时刻 */
+  retrieved_at: NonEmptyStringSchema,
+});
+export type SourceMetadata = z.infer<typeof SourceMetadataSchema>;
+
 // ── 14.3 的请求与响应 ───────────────────────────────────────
 
 /**

@@ -89,6 +89,42 @@ export interface InsertAssetInput {
   readonly embedding: readonly number[] | null;
   readonly cacheKey: string | null;
   readonly generationMetadata: unknown;
+  /**
+   * 原图字节的 SHA-256（R-47，迁移 0007）。
+   *
+   * 只有 9.6 的搜索入库会带它 —— 平台自有素材与 AI 生成物省略即写 `NULL`，
+   * 不参与指纹去重（理由见迁移 0007 的头部注释）。
+   */
+  readonly contentHash?: string;
+  /**
+   * 搜索入库图的来源元数据（9.6 / R-46，迁移 0008）。
+   *
+   * `LICENSED_SOURCE` 必填 —— 数据库有 `assets_licensed_source_metadata_check`
+   * 兜着「有」，`SourceMetadataSchema` 在写入前保证「全」（与 AI 侧
+   * `generation_metadata` + `GenerationMetadataSchema` 的分工相同）。
+   */
+  readonly sourceMetadata?: unknown;
+}
+
+/**
+ * 指纹查询的返回形态（TP-6-05）。
+ *
+ * 刻意**不复用** `AssetCandidateRow`：那个类型是给评分用的，带着宽高、
+ * 余弦、授权文本等十几个列，而合并分支只需要「是哪一行、能不能用、
+ * 现有标签是什么」。返回大对象会让调用方看不出这条路径实际依赖哪几个字段。
+ */
+export interface AssetFingerprintRow {
+  readonly assetId: string;
+  /** `ACTIVE` / `RETIRED`（R-30）。下架行也会被返回，见 `findByContentHash` */
+  readonly status: string;
+  readonly styleTags: readonly string[];
+  readonly searchText: string | null;
+}
+
+export interface MergeTagsInput {
+  readonly assetId: string;
+  readonly styleTags: readonly string[];
+  readonly searchText: string;
 }
 
 export interface InsertVariantInput {
@@ -105,6 +141,38 @@ export interface AssetsRepository {
   findCandidates(query: FindCandidatesQuery): Promise<readonly AssetCandidateRow[]>;
   /** 19.4：精确键命中，不重算评分 */
   findByCacheKey(cacheKey: string): Promise<AssetCandidateRow | null>;
+  /**
+   * 按主键读回一行（TP-6-03）。
+   *
+   * 用途是「刚入库、要立刻拿它构造 `ResolvedAsset`」，而落库后的尺寸、
+   * 比例与对象 URL 都只有数据库知道（11.2 会缩图与转码）。
+   *
+   * 不能用 `findCandidates` 代替：那个方法在三个预过滤维度全空时**刻意返回
+   * 零行**（避免全表扫描，见 `assets-repository.integration.test.ts`），
+   * 而这里只有一个 ID。也不能一律用 `findByCacheKey` —— 缓存键可以是 null
+   * （美食槽位缺菜名时 19.2 算不出键）。
+   *
+   * 与 `findByCacheKey` 一样过滤 `status` 与授权到期：读回来是为了**用**，
+   * 一行刚入库就已下架只可能是并发的人工下架，此时不该拿它渲染。
+   */
+  findById(assetId: string): Promise<AssetCandidateRow | null>;
+  /**
+   * 按内容指纹查已有素材（R-47 的去重分支入口）。
+   *
+   * **不过滤 `status`**，与 `findByCacheKey` 相反。它回答的不是「找一张能用的
+   * 图」而是「这份字节在库里存在吗」—— 存在就不能再插（`assets_content_hash_uk`）。
+   * 过滤掉下架行会让一张被人工下架的图在下次搜索命中时试图重新入库，
+   * 撞唯一索引后该候选被判为失败；而正确行为是识别出它已下架、换下一个候选。
+   */
+  findByContentHash(contentHash: string): Promise<AssetFingerprintRow | null>;
+  /**
+   * 标签并集合并（R-47）：同一张图从第二个上下文再次被搜到时，
+   * 把新上下文的风格标签与检索词并进已有行，而不是新增一行。
+   *
+   * 只动 `style_tags` 与 `search_text` 两列 —— 其余列描述的是**那一份字节**
+   * （尺寸、质量分、授权、对象键），与它被哪些词命中无关。
+   */
+  mergeTags(input: MergeTagsInput): Promise<void>;
   /**
    * 入库。同 `cache_key` 已存在时返回既有素材而不是抛错 ——
    * 13.8 的 `lock:asset:{cache_key}` 是第一道防线，这里是最后一道
@@ -229,6 +297,76 @@ export function createAssetsRepository(pool: Pool): AssetsRepository {
       return row === undefined ? null : toCandidate(row);
     },
 
+    async findById(assetId) {
+      const { rows } = await pool.query<CandidateSqlRow>(
+        // 与 findByCacheKey 同一组谓词，只换查询键：读回来是为了用
+        `SELECT ${CANDIDATE_COLUMNS}, NULL::float8 AS cosine
+           FROM assets a
+          WHERE a.id = $1::uuid
+            AND a.status = 'ACTIVE'
+            AND (a.license_expires_at IS NULL OR a.license_expires_at > NOW())`,
+        [assetId],
+      );
+
+      const row = rows[0];
+      return row === undefined ? null : toCandidate(row);
+    },
+
+    async findByContentHash(contentHash) {
+      const { rows } = await pool.query<{
+        id: string;
+        status: string;
+        style_tags: string[];
+        search_text: string | null;
+      }>(
+        // 无 status 谓词是有意的，见接口上的说明
+        `SELECT id, status, style_tags, search_text
+           FROM assets
+          WHERE content_hash = $1`,
+        [contentHash],
+      );
+
+      const row = rows[0];
+      return row === undefined
+        ? null
+        : {
+            assetId: row.id,
+            status: row.status,
+            styleTags: row.style_tags,
+            searchText: row.search_text,
+          };
+    },
+
+    async mergeTags(input) {
+      /*
+       * 并集在 SQL 里做而不是「读出来、在 TypeScript 里合、写回去」：
+       * 后者是读-改-写，两个槽位同时命中同一份字节时会互相覆盖对方的标签
+       * （14 天任务里这不是理论情况 —— 同城多天很容易搜到同一张图）。
+       *
+       * 两列都归一为**字典序**：合并结果因此与调用次序无关，
+       * 否则同一批标签按不同顺序合进来会得到不同的行，diff 与断言都不稳定。
+       * 顺序对两列的用途都无影响（`style_tags` 参与评分是按集合，
+       * `search_text` 进的是 `to_tsvector`）。
+       */
+      await pool.query(
+        `UPDATE assets
+            SET style_tags = COALESCE((
+                  SELECT jsonb_agg(DISTINCT tag ORDER BY tag)
+                    FROM jsonb_array_elements_text(style_tags || $2::jsonb) AS tag
+                   WHERE tag <> ''
+                ), '[]'::jsonb),
+                search_text = (
+                  SELECT string_agg(DISTINCT word, ' ' ORDER BY word)
+                    FROM unnest(
+                           string_to_array(
+                             trim(COALESCE(search_text, '') || ' ' || $3), ' ')) AS word
+                   WHERE word <> ''
+                )
+          WHERE id = $1`,
+        [input.assetId, JSON.stringify(input.styleTags), input.searchText],
+      );
+    },
+
     async insertAsset(input) {
       const { rows } = await pool.query<{ id: string }>(
         `INSERT INTO assets (
@@ -236,9 +374,10 @@ export function createAssetsRepository(pool: Pool): AssetsRepository {
            destination_place_id, title, original_url, storage_url, thumbnail_url,
            mime_type, width, height, aspect_ratio, style_tags, search_text,
            license_type, attribution_text, license_expires_at, quality_score,
-           embedding, cache_key, generation_metadata)
+           embedding, cache_key, generation_metadata, content_hash, source_metadata)
          VALUES ($24::uuid, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                 $15::jsonb, $16, $17, $18, $19, $20, $21::vector, $22, $23::jsonb)
+                 $15::jsonb, $16, $17, $18, $19, $20, $21::vector, $22, $23::jsonb, $25,
+                 $26::jsonb)
          ON CONFLICT (cache_key) WHERE cache_key IS NOT NULL DO NOTHING
          RETURNING id`,
         [
@@ -266,6 +405,10 @@ export function createAssetsRepository(pool: Pool): AssetsRepository {
           input.cacheKey,
           input.generationMetadata === null ? null : JSON.stringify(input.generationMetadata),
           input.assetId,
+          input.contentHash ?? null,
+          input.sourceMetadata === undefined || input.sourceMetadata === null
+            ? null
+            : JSON.stringify(input.sourceMetadata),
         ],
       );
 
