@@ -1,0 +1,1248 @@
+/*
+ * 采集界面的样式（TP-8-07），取自需求采集原型。
+ *
+ * ## 全部选择器挂在 `.planner` 之下 —— 这不是洁癖
+ *
+ * `globals.css` 由**根** layout 引入，而 `/render/**` 的信息图页面是它的后代。
+ * 原型原文把设计令牌写在 `:root`、把背景与字体写在 `body`，照搬过来的后果是：
+ *
+ *   - `body { background: #f5f7fb }` → 导出 PNG 的底色从白变灰，
+ *     `apps/render-worker/__visual__` 的基线整片失配
+ *   - `body { font-family: Inter, "PingFang SC"… }` → 绕过 `@tps/fonts` 的
+ *     自托管子集，渲染容器里没有 Inter，字形回退到 Noto 而基线按子集拍的
+ *
+ * 两者都不会报错，只会让导出产物悄悄变样。因此：令牌挂 `.planner`，
+ * 背景挂 `.planner`，**不新增任何 `body` / `:root` / 元素选择器规则**。
+ *
+ * 视觉基线是这条约束的自动化守卫（`pnpm test:visual`）。它失配时的正确反应是
+ * 回来收紧作用域，而不是 `visual:update` 覆盖基线 ——
+ * 后者把回归悄悄变成了新基线。
+ */
+
+.planner {
+  --primary: #246bfd;
+  --primary-dark: #1855d1;
+  --primary-light: #edf4ff;
+  --success: #138657;
+  --success-light: #eaf8f1;
+  --warning: #ad6500;
+  --warning-light: #fff5e4;
+  --danger: #c73d3d;
+  --danger-light: #fff0f0;
+  --ink: #172033;
+  --muted: #687386;
+  --line: #e2e7ef;
+  --surface: #fff;
+  --canvas: #f5f7fb;
+  --shadow: 0 10px 34px rgb(24 39 75 / 8%);
+  --radius-lg: 18px;
+  --radius-md: 12px;
+
+  min-height: 100vh;
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+.planner *,
+.planner *::before,
+.planner *::after {
+  box-sizing: border-box;
+}
+
+.planner button,
+.planner input,
+.planner select,
+.planner textarea {
+  font: inherit;
+}
+
+.planner button {
+  cursor: pointer;
+}
+
+.planner :focus-visible {
+  outline: 3px solid rgb(36 107 253 / 18%);
+  outline-offset: 2px;
+}
+
+/* ── 顶栏 ─────────────────────────────────────────────────── */
+
+.planner-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 68px;
+  padding: 0 26px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 15% 0, rgb(255 255 255 / 18%), transparent 30%),
+    linear-gradient(135deg, #155de0, #3882ff);
+  box-shadow: 0 6px 20px rgb(25 78 180 / 18%);
+}
+
+.planner-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.planner-brand__logo {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 15%);
+  font-size: 20px;
+}
+
+.planner-brand strong {
+  display: block;
+  font-size: 17px;
+}
+
+.planner-brand small {
+  display: block;
+  margin-top: 2px;
+  color: rgb(255 255 255 / 80%);
+  font-size: 12px;
+}
+
+.planner-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+/* ── 按钮 ─────────────────────────────────────────────────── */
+
+.planner-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--ink);
+  background: #fff;
+  font-weight: 700;
+  transition: 0.18s ease;
+}
+
+.planner-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 7px 18px rgb(25 45 85 / 12%);
+}
+
+.planner-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.planner-button--primary {
+  color: #fff;
+  background: var(--primary);
+}
+
+.planner-button--primary:hover:not(:disabled) {
+  background: var(--primary-dark);
+}
+
+.planner-button--light {
+  color: #fff;
+  border: 1px solid rgb(255 255 255 / 28%);
+  background: rgb(255 255 255 / 13%);
+}
+
+.planner-button--large {
+  width: 100%;
+  min-height: 50px;
+  font-size: 15px;
+}
+
+.planner-menu-button {
+  display: none;
+}
+
+/* ── 三栏布局 ─────────────────────────────────────────────── */
+
+.planner-workspace {
+  display: grid;
+  grid-template-columns: 225px minmax(560px, 1fr) 330px;
+  gap: 18px;
+  max-width: 1600px;
+  min-height: calc(100vh - 68px);
+  margin: 0 auto;
+  padding: 18px;
+}
+
+.planner-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.planner-left,
+.planner-right {
+  position: sticky;
+  top: 86px;
+  align-self: start;
+  max-height: calc(100vh - 104px);
+  overflow: auto;
+}
+
+.planner-left {
+  padding: 14px;
+}
+
+.planner-main {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.planner-card {
+  padding: 22px;
+  scroll-margin-top: 88px;
+}
+
+/* ── 左栏：步骤与完成度 ───────────────────────────────────── */
+
+.planner-left__heading {
+  padding: 8px 9px 14px;
+}
+
+.planner-left__heading strong {
+  font-size: 15px;
+}
+
+.planner-left__heading p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.planner-steps {
+  display: grid;
+  gap: 5px;
+}
+
+.planner-steps button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 46px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 11px;
+  color: #586375;
+  background: transparent;
+  text-align: left;
+}
+
+.planner-steps button:hover,
+.planner-steps button.is-active {
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.planner-steps button.is-active {
+  font-weight: 750;
+}
+
+.planner-steps__index {
+  display: grid;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  margin-right: 9px;
+  place-items: center;
+  border-radius: 8px;
+  background: #edf0f5;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.planner-steps button.is-active .planner-steps__index {
+  color: #fff;
+  background: var(--primary);
+}
+
+.planner-steps__dot {
+  position: relative;
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  margin-left: auto;
+  border: 1px solid #cbd3df;
+  border-radius: 50%;
+  background: transparent;
+  opacity: 0;
+  transition: 0.2s ease;
+}
+
+.planner-steps button.is-edited .planner-steps__dot {
+  border-color: var(--primary);
+  background: var(--primary);
+  opacity: 1;
+  box-shadow: 0 0 0 4px rgb(36 107 253 / 10%);
+}
+
+.planner-steps button.is-complete .planner-steps__dot {
+  width: 16px;
+  height: 16px;
+  border-color: var(--success);
+  background: var(--success);
+  opacity: 1;
+  box-shadow: 0 0 0 4px rgb(19 134 87 / 10%);
+}
+
+.planner-steps button.is-complete .planner-steps__dot::after {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  content: '✓';
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.planner-progress {
+  margin-top: 18px;
+  padding: 13px;
+  border-radius: 12px;
+  background: #f7f9fc;
+}
+
+.planner-progress__head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.planner-progress__head strong {
+  color: var(--primary);
+}
+
+.planner-progress__track {
+  height: 8px;
+  margin: 9px 0;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #e4e9f1;
+}
+
+.planner-progress__value {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary), #73a4ff);
+  transition: width 0.3s ease;
+}
+
+.planner-progress__value.is-complete {
+  background: linear-gradient(90deg, var(--success), #5bca94);
+}
+
+.planner-progress__hint,
+.planner-progress__detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.planner-progress__detail {
+  margin-top: 7px;
+  font-size: 10px;
+}
+
+/* ── 卡片与表单 ───────────────────────────────────────────── */
+
+.planner-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.planner-card__title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.planner-card__desc {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.planner-card__badge {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-radius: 99px;
+  color: var(--primary);
+  background: var(--primary-light);
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.planner-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.planner-grid--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.planner-field {
+  min-width: 0;
+}
+
+.planner-field--full {
+  grid-column: 1 / -1;
+}
+
+.planner-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.planner-label__opt {
+  color: #98a1af;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.planner-input,
+.planner-select,
+.planner-textarea {
+  width: 100%;
+  border: 1px solid #dce2eb;
+  border-radius: 10px;
+  color: var(--ink);
+  background: #fff;
+}
+
+.planner-input,
+.planner-select {
+  height: 44px;
+  padding: 0 12px;
+}
+
+.planner-input:disabled,
+.planner-select:disabled {
+  color: #9aa2ae;
+  background: #f5f7fa;
+  cursor: not-allowed;
+}
+
+.planner-textarea {
+  min-height: 112px;
+  padding: 12px;
+  line-height: 1.7;
+  resize: vertical;
+}
+
+.planner-input:focus,
+.planner-select:focus,
+.planner-textarea:focus {
+  border-color: var(--primary);
+}
+
+.planner-route {
+  display: grid;
+  grid-template-columns: 1fr 36px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.planner-route__arrow {
+  color: var(--primary);
+  text-align: center;
+  font-size: 20px;
+}
+
+.planner-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin-top: 12px;
+}
+
+.planner-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #505b6c;
+  font-size: 13px;
+}
+
+.planner-check input {
+  accent-color: var(--primary);
+}
+
+.planner-check--disabled {
+  color: #9aa2ae;
+}
+
+.planner-v2 {
+  padding: 2px 6px;
+  border: 1px solid #d7deea;
+  border-radius: 6px;
+  color: #8b94a4;
+  background: #f4f6fa;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.planner-hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.planner-subsection {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.planner-subsection__title {
+  margin: 0 0 13px;
+  font-size: 15px;
+}
+
+.planner-subsection__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.planner-subsection__head strong {
+  font-size: 14px;
+}
+
+.planner-subsection__head span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.planner-subpanel {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 12px;
+  background: #f8faff;
+}
+
+/* ── 三态标签 ─────────────────────────────────────────────── */
+
+.planner-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.planner-tag {
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid #dfe4ec;
+  border-radius: 99px;
+  color: #4f5968;
+  background: #fff;
+  font-size: 13px;
+  transition: 0.15s ease;
+}
+
+.planner-tag:hover {
+  color: var(--primary);
+  border-color: #9ab8f8;
+  background: #f8faff;
+}
+
+.planner-tag--prefer {
+  color: var(--primary);
+  border-color: #9ab8f8;
+  background: var(--primary-light);
+  font-weight: 700;
+}
+
+.planner-tag--require {
+  color: var(--success);
+  border-color: #86c9aa;
+  background: var(--success-light);
+  font-weight: 700;
+}
+
+.planner-tag--exclude {
+  color: var(--danger);
+  border-color: #e5a1a1;
+  background: var(--danger-light);
+  text-decoration: line-through;
+}
+
+.planner-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.planner-legend__item {
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.planner-legend__item--prefer {
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.planner-legend__item--require {
+  color: var(--success);
+  background: var(--success-light);
+}
+
+.planner-legend__item--exclude {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+/* ── 同行人计数 ───────────────────────────────────────────── */
+
+.planner-travelers {
+  display: grid;
+  gap: 10px;
+}
+
+.planner-traveler {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.planner-traveler__info {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.planner-traveler__icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--primary-light);
+  font-size: 18px;
+}
+
+.planner-traveler__info strong,
+.planner-traveler__info small {
+  display: block;
+}
+
+.planner-traveler__info small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.planner-counter {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.planner-counter button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--primary);
+  background: #fff;
+  font-size: 18px;
+}
+
+.planner-counter span {
+  min-width: 22px;
+  text-align: center;
+  font-weight: 750;
+}
+
+/* ── 预算 ─────────────────────────────────────────────────── */
+
+.planner-tiers {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.planner-tier {
+  position: relative;
+  display: flex;
+  min-height: 170px;
+  padding: 15px 10px;
+  flex-direction: column;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--ink);
+  background: #fff;
+  text-align: center;
+  transition: 0.18s ease;
+}
+
+.planner-tier:hover {
+  border-color: #9ab8f8;
+  background: #f8faff;
+  transform: translateY(-2px);
+}
+
+.planner-tier.is-active {
+  color: var(--primary);
+  border: 2px solid var(--primary);
+  background: var(--primary-light);
+}
+
+.planner-tier.is-active::after {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--primary);
+  content: '✓';
+  font-size: 11px;
+}
+
+.planner-tier--custom {
+  border-style: dashed;
+}
+
+.planner-tier__icon {
+  margin-bottom: 8px;
+  font-size: 24px;
+}
+
+.planner-tier__name,
+.planner-tier__price {
+  font-weight: 800;
+}
+
+.planner-tier__price {
+  margin-top: 7px;
+  color: var(--primary);
+  font-size: 14px;
+}
+
+.planner-tier__unit,
+.planner-tier__desc {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.planner-tier__desc {
+  margin-top: 9px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.planner-budget-summary {
+  display: grid;
+  grid-template-columns: 0.9fr 1.3fr;
+  gap: 17px;
+  margin-top: 20px;
+  padding: 18px;
+  border-radius: 14px;
+  background: #f7f9fd;
+}
+
+.planner-budget-summary__label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.planner-budget-summary__value {
+  display: block;
+  margin-top: 6px;
+  color: var(--primary-dark);
+  font-size: 23px;
+}
+
+.planner-budget-summary__badge {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 5px 9px;
+  border-radius: 99px;
+  color: var(--primary);
+  background: #fff;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.planner-budget-total {
+  display: grid;
+  grid-template-columns: 0.7fr 0.7fr 1.3fr;
+  gap: 8px;
+}
+
+.planner-budget-total > div {
+  display: flex;
+  padding: 13px;
+  flex-direction: column;
+  justify-content: center;
+  border-radius: 11px;
+  background: #fff;
+}
+
+.planner-budget-total span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.planner-budget-total strong {
+  margin-top: 6px;
+  font-size: 15px;
+}
+
+.planner-budget-total > div:last-child strong {
+  color: var(--primary);
+}
+
+.planner-budget-custom {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.planner-range {
+  width: 100%;
+  margin-top: 10px;
+  accent-color: var(--primary);
+}
+
+/* ── 节奏与路线 ───────────────────────────────────────────── */
+
+.planner-pace__head,
+.planner-pace__scale {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.planner-pace__head strong {
+  color: var(--ink);
+}
+
+.planner-pace__scale {
+  margin-top: 4px;
+  font-size: 10px;
+}
+
+.planner-routes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.planner-route-card {
+  padding: 13px 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 13px;
+  text-align: center;
+}
+
+.planner-route-card:hover,
+.planner-route-card.is-active {
+  color: var(--primary);
+  border-color: #9ab8f8;
+  background: var(--primary-light);
+}
+
+.planner-route-card__glyph {
+  display: block;
+  min-height: 27px;
+  margin-bottom: 6px;
+  font-size: 18px;
+}
+
+/* ── 第 7 步 ──────────────────────────────────────────────── */
+
+.planner-custom__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.planner-count {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.planner-count--over {
+  color: var(--warning);
+  font-weight: 700;
+}
+
+/* ── 右栏：摘要 ───────────────────────────────────────────── */
+
+.planner-right {
+  padding: 17px;
+}
+
+.planner-right__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.planner-right__head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.planner-right__count {
+  padding: 4px 8px;
+  border-radius: 99px;
+  color: var(--primary);
+  background: var(--primary-light);
+  font-size: 11px;
+}
+
+.planner-condition-group {
+  margin-top: 16px;
+}
+
+.planner-condition-group__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.planner-condition-group__head span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.planner-condition-list {
+  display: grid;
+  gap: 7px;
+}
+
+.planner-condition {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  align-items: start;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #edf0f4;
+  border-radius: 10px;
+  background: #fbfcfe;
+}
+
+.planner-condition__dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.planner-condition--require .planner-condition__dot {
+  background: var(--success);
+}
+
+.planner-condition--exclude .planner-condition__dot {
+  background: var(--danger);
+}
+
+.planner-condition__text {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.planner-condition__remove {
+  border: 0;
+  color: #a1a8b4;
+  background: transparent;
+}
+
+.planner-condition-empty {
+  margin: 0;
+  padding: 10px;
+  border-radius: 9px;
+  color: #9aa2ae;
+  background: #fafbfc;
+  font-size: 12px;
+  text-align: center;
+}
+
+.planner-conflict {
+  margin-top: 17px;
+  padding: 12px;
+  border: 1px solid #f1ce9b;
+  border-radius: 11px;
+  background: var(--warning-light);
+}
+
+.planner-conflict__title {
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.planner-conflict p {
+  margin: 6px 0 0;
+  color: #7e6749;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.planner-estimate {
+  margin-top: 17px;
+  padding: 14px;
+  border-radius: 13px;
+  background: #f6f8fc;
+}
+
+.planner-estimate h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.planner-estimate__grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.planner-estimate__grid > div {
+  padding: 10px;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.planner-estimate__grid strong,
+.planner-estimate__grid span {
+  display: block;
+}
+
+.planner-estimate__grid strong {
+  color: var(--primary-dark);
+  font-size: 13px;
+}
+
+.planner-estimate__grid span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.planner-right__actions {
+  display: grid;
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.planner-right__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* ── 生成状态 ─────────────────────────────────────────────── */
+
+.planner-status {
+  margin-top: 12px;
+}
+
+.planner-status__bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #e4e9f1;
+}
+
+.planner-status__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary), #73a4ff);
+  transition: width 0.3s ease;
+}
+
+.planner-status p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.planner-status--error p {
+  color: var(--danger);
+}
+
+.planner-status--done p {
+  color: var(--success);
+}
+
+.planner-mobile-summary {
+  display: none;
+}
+
+/* ── 断点。四档与原型一致 ─────────────────────────────────── */
+
+@media (width <= 1250px) {
+  .planner-workspace {
+    grid-template-columns: 210px minmax(520px, 1fr);
+  }
+
+  .planner-right {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 70;
+    width: min(380px, 94vw);
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 18px 0 0 18px;
+    transform: translateX(105%);
+    transition: 0.24s;
+  }
+
+  .planner-right.is-open {
+    transform: none;
+  }
+
+  .planner-mobile-summary {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 60;
+    display: inline-flex;
+  }
+
+  .planner-tiers {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .planner-budget-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (width <= 860px) {
+  .planner-brand small {
+    display: none;
+  }
+
+  .planner-menu-button {
+    display: inline-flex;
+  }
+
+  .planner-workspace {
+    display: block;
+    padding: 12px;
+  }
+
+  .planner-left {
+    position: static;
+    display: none;
+    max-height: none;
+    margin-bottom: 12px;
+  }
+
+  .planner-left.is-open {
+    display: block;
+  }
+
+  .planner-grid,
+  .planner-grid--three {
+    grid-template-columns: 1fr;
+  }
+
+  .planner-routes {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .planner-main {
+    gap: 12px;
+  }
+}
+
+@media (width <= 680px) {
+  .planner-tiers {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .planner-budget-total {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .planner-budget-total > div:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .planner-custom__foot {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (width <= 480px) {
+  .planner-route {
+    grid-template-columns: 1fr;
+  }
+
+  .planner-route__arrow {
+    transform: rotate(90deg);
+  }
+
+  .planner-tiers {
+    grid-template-columns: 1fr;
+  }
+}

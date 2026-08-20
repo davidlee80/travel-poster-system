@@ -2,6 +2,11 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { FontFaces } from '@/components/FontFaces';
 import './globals.css';
+/*
+ * P8：采集界面的样式。放在 globals.css **之后** —— 它的选择器全部挂在
+ * `.planner` 之下，因此不会覆盖 globals 的任何规则；顺序只影响可读性。
+ */
+import './planner.css';
 
 export const metadata: Metadata = {
   title: '旅行计划信息图',

@@ -494,3 +494,28 @@ body {
   font-size: 13px;
   color: #6a6a6a;
 }
+
+/* ── 身份面板的浮层容器（P8 / TP-8-07）────────────────────── */
+
+/*
+ * 采集界面自己占满三栏，登录入口浮在右上角。
+ *
+ * 放在 globals.css 而不是 planner.css：它不是 `.planner` 的后代
+ * （见 app/page.tsx 的说明），而 planner.css 里的选择器一律以 `.planner` 开头。
+ */
+.home-auth {
+  position: fixed;
+  top: 14px;
+  right: 26px;
+  z-index: 50;
+  width: min(260px, 46vw);
+}
+
+@media (max-width: 860px) {
+  /* 窄屏顶栏只剩品牌与菜单按钮，登录面板改为跟随内容流在最上方 */
+  .home-auth {
+    position: static;
+    width: auto;
+    margin: 12px 12px 0;
+  }
+}
