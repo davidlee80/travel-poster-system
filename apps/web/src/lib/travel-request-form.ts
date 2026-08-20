@@ -18,6 +18,59 @@ import {
  * 抽出来之后它是可穷举的纯逻辑。
  */
 
+/**
+ * 标签的三态。不在映射里 = 未选。
+ *
+ * 用三态枚举而不是两个布尔（selected / excluded）：两个布尔有四种组合，
+ * 其中「既选中又排除」是无意义状态，而它一定会在某次重构里被构造出来。
+ */
+export type ConditionStance = 'PREFER' | 'REQUIRE' | 'EXCLUDE';
+
+/**
+ * code → 态。用 `Record` 而不是 `Map`：它要进 React state 并被结构化克隆。
+ */
+export type ConditionSelection = Readonly<Partial<Record<ConditionCode, ConditionStance>>>;
+
+/**
+ * 一个三态选择 → 契约里的一条条件。
+ *
+ * | 界面态 | 颜色       | `mode`   | `value` |
+ * | ------ | ---------- | -------- | ------- |
+ * | 偏好   | 蓝         | `SHOULD` | `true`  |
+ * | 必须   | 绿         | `MUST`   | `true`  |
+ * | 不要   | 红删除线   | `MUST`   | `false` |
+ *
+ * ## 「不要」为什么是 MUST 而不是 SHOULD
+ *
+ * 用户明确排除某项时那是硬约束 —— V-30 会校验它。用 `SHOULD` 的话它只进
+ * 命中率统计（见 plan-rules 的 should 分支），于是一个「不要夜生活」却排了
+ * 酒吧的计划会照常放行。「尽量不要」这一态原型里没有，本轮也不造。
+ *
+ * ## P8 之前这一整条通道是不存在的
+ *
+ * 旧实现恒传 `value: true`，也就是说 5.1 契约里能表达的「必须不要 X」
+ * 在前端根本发不出去。这不是新功能而是补一个缺口。
+ */
+export function conditionToContract(
+  code: ConditionCode,
+  stance: ConditionStance,
+): { readonly code: ConditionCode; readonly mode: 'MUST' | 'SHOULD'; readonly value: boolean } {
+  if (stance === 'EXCLUDE') {
+    return { code, mode: 'MUST', value: false };
+  }
+
+  /*
+   * 无障碍与饮食即使只点了一次（PREFER）也发 MUST：轮椅通行与食物过敏
+   * 不是偏好，降级成 SHOULD 后 V-30 不再校验，而计划看起来完全正常。
+   */
+  const domainIsHard = MUST_BY_DEFAULT_DOMAINS.includes(conditionDomain(code));
+  return {
+    code,
+    mode: stance === 'REQUIRE' || domainIsHard ? 'MUST' : 'SHOULD',
+    value: true,
+  };
+}
+
 export interface TravelRequestFormState {
   readonly origin: string;
   readonly destination: string;
@@ -30,7 +83,7 @@ export interface TravelRequestFormState {
   readonly budgetMin: number;
   readonly budgetMax: number;
   readonly paceLevel: PaceLevel;
-  readonly conditions: readonly ConditionCode[];
+  readonly conditions: ConditionSelection;
   readonly customText: string;
 }
 
@@ -46,7 +99,7 @@ export const INITIAL_FORM_STATE: TravelRequestFormState = {
   budgetMin: 500,
   budgetMax: 1_200,
   paceLevel: 'BALANCED',
-  conditions: [],
+  conditions: {},
   customText: '',
 };
 
@@ -135,14 +188,15 @@ export function buildTravelRequest(
     pace: { level: state.paceLevel },
 
     /*
-     * 5.1：`mode` 决定是硬约束还是软约束，而 V-30 只校验前者。
-     * 无障碍与饮食默认为 MUST —— 轮椅通行与食物过敏不是偏好。
+     * 三态 → 契约，映射逻辑全在 `conditionToContract` 里（可穷举单测）。
+     *
+     * `flatMap` + 空数组而不是 `filter` + `map`：`Partial<Record<…>>` 在
+     * `exactOptionalPropertyTypes` 下取值类型含 undefined，两步写法要么多一次
+     * 类型断言，要么被 `noUncheckedIndexedAccess` 拦住。
      */
-    conditions: state.conditions.map((code) => ({
-      code,
-      mode: MUST_BY_DEFAULT_DOMAINS.includes(conditionDomain(code)) ? 'MUST' : 'SHOULD',
-      value: true,
-    })),
+    conditions: Object.entries(state.conditions).flatMap(([code, stance]) =>
+      stance === undefined ? [] : [conditionToContract(code as ConditionCode, stance)],
+    ),
 
     custom_requirements: { raw_text: state.customText.trim() },
   };

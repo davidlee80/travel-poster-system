@@ -1,10 +1,12 @@
-import { TravelRequestUISchema, conditionDomain, type ConditionCode } from '@tps/schemas';
+import { TravelRequestUISchema, conditionDomain } from '@tps/schemas';
 import { describe, expect, it } from 'vitest';
 
 import {
   INITIAL_FORM_STATE,
   buildTravelRequest,
+  conditionToContract,
   missingRequiredFields,
+  type ConditionSelection,
   type TravelRequestFormState,
 } from './travel-request-form.js';
 
@@ -101,12 +103,12 @@ describe('请求体构造', () => {
      * 勾了轮椅却发 SHOULD 的话，生成的计划可能根本无法使用，
      * 而界面上两者都只是一个勾。
      */
-    const conditions: ConditionCode[] = [
-      'accessibility.wheelchair',
-      'diet.halal',
-      'interest.history_culture',
-      'transport.public_transit',
-    ];
+    const conditions: ConditionSelection = {
+      'accessibility.wheelchair': 'PREFER',
+      'diet.halal': 'PREFER',
+      'interest.history_culture': 'PREFER',
+      'transport.public_transit': 'PREFER',
+    };
     const request = resolved(filled({ conditions }));
 
     const modeByCode = Object.fromEntries(
@@ -126,14 +128,17 @@ describe('请求体构造', () => {
   it('每个域的默认 mode 与 MUST_BY_DEFAULT_DOMAINS 一致', () => {
     const request = resolved(
       filled({
-        conditions: [
-          'interest.nature',
-          'transport.self_drive',
-          'accommodation.elevator',
-          'accessibility.stroller',
-          'diet.no_spicy',
-          'schedule.no_late_night',
-        ],
+        // 全部按「偏好」点一次 —— 域的默认 mode 就是这一态下的表现
+        conditions: {
+          'interest.nature': 'PREFER',
+          'transport.self_drive': 'PREFER',
+          'accommodation.elevator': 'PREFER',
+          'accessibility.stroller': 'PREFER',
+          'diet.no_spicy': 'PREFER',
+          'schedule.no_late_night': 'PREFER',
+          // P8 新增的 budget 域：花钱侧重是偏好，不该被当成硬约束
+          'budget.lodging_quality': 'PREFER',
+        },
       }),
     );
 
@@ -203,5 +208,95 @@ describe('提交前的本地检查', () => {
 
     const badBudget = filled({ budgetMin: 9_000, budgetMax: 100 });
     expect(missingRequiredFields(badBudget)).toEqual([]);
+  });
+});
+
+// ── P8 增量 3：三态条件 ─────────────────────────────────────
+
+describe('P8：三态条件（偏好 / 必须 / 不要）', () => {
+  it('三态各自映射到正确的 mode/value 组合', () => {
+    expect(conditionToContract('interest.food', 'PREFER')).toEqual({
+      code: 'interest.food',
+      mode: 'SHOULD',
+      value: true,
+    });
+    expect(conditionToContract('interest.food', 'REQUIRE')).toEqual({
+      code: 'interest.food',
+      mode: 'MUST',
+      value: true,
+    });
+    expect(conditionToContract('accommodation.shared_dorm', 'EXCLUDE')).toEqual({
+      code: 'accommodation.shared_dorm',
+      mode: 'MUST',
+      value: false,
+    });
+  });
+
+  it('无障碍与饮食在 PREFER 态下仍然是 MUST', () => {
+    /*
+     * MUST_BY_DEFAULT_DOMAINS 的语义是「这个域的条件不是偏好」。
+     * 用户在界面上只点了一次（蓝色）也不能把轮椅需求降级成 SHOULD ——
+     * 降级后 V-30 不再校验它，而计划看起来完全正常。
+     */
+    expect(conditionToContract('accessibility.wheelchair', 'PREFER').mode).toBe('MUST');
+    expect(conditionToContract('diet.allergy_seafood', 'PREFER').mode).toBe('MUST');
+    // P8 新增的安全座椅落在 accessibility 域，因此继承同一条规则
+    expect(conditionToContract('accessibility.child_car_seat', 'PREFER').mode).toBe('MUST');
+  });
+
+  it('EXCLUDE 在任何域都是 MUST + value:false', () => {
+    /*
+     * 「不要」用 MUST 而不是 SHOULD：用户明确排除某项时那是硬约束，
+     * V-30 会校验它。用 SHOULD 的话它只进命中率统计，
+     * 而一个「不要夜生活」却排了酒吧的计划会照常放行。
+     */
+    for (const code of [
+      'interest.nightlife',
+      'accessibility.wheelchair',
+      'budget.lodging_quality',
+    ] as const) {
+      expect(conditionToContract(code, 'EXCLUDE')).toMatchObject({ mode: 'MUST', value: false });
+    }
+  });
+
+  it('buildTravelRequest 把三态选择映射成契约数组，未选的不出现', () => {
+    const request = resolved(
+      filled({
+        conditions: {
+          'interest.food': 'PREFER',
+          'accommodation.elevator': 'REQUIRE',
+          'accommodation.shared_dorm': 'EXCLUDE',
+        },
+      }),
+    );
+
+    expect(request.conditions).toHaveLength(3);
+    expect(request.conditions).toContainEqual({
+      code: 'accommodation.shared_dorm',
+      mode: 'MUST',
+      value: false,
+    });
+    expect(request.conditions).toContainEqual({
+      code: 'accommodation.elevator',
+      mode: 'MUST',
+      value: true,
+    });
+    expect(request.conditions).toContainEqual({
+      code: 'interest.food',
+      mode: 'SHOULD',
+      value: true,
+    });
+  });
+
+  it('「不要」这一态在 P8 之前根本发不出去', () => {
+    /*
+     * 回归守卫：`buildTravelRequest` 曾经恒传 `value: true`，也就是说 5.1
+     * 契约里能表达的「必须不要 X」在前端没有任何通道。
+     *
+     * 断言「至少有一条 value 为 false」而不是断言具体某条：
+     * 这一条守的是通道存在，而不是某个 code 的行为。
+     */
+    const request = resolved(filled({ conditions: { 'interest.nightlife': 'EXCLUDE' } }));
+    expect(request.conditions.some((condition) => condition.value === false)).toBe(true);
   });
 });

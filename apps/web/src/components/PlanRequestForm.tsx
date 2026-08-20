@@ -18,6 +18,7 @@ import {
   buildTravelRequest,
   missingRequiredFields,
   newClientRequestId,
+  type ConditionStance,
   type TravelRequestFormState,
 } from '@/lib/travel-request-form';
 
@@ -33,6 +34,26 @@ const PACE_LABEL: Record<PaceLevel, string> = {
   RELAXED: '轻松（每天 2～3 个景点）',
   BALANCED: '适中（每天 3～4 个景点）',
   PACKED: '紧凑（每天 4～6 个景点）',
+};
+
+/**
+ * 三态的点击循环。`'NONE'` 是「未选」的键，`undefined` 是「回到未选」。
+ *
+ * 写成表而不是 if 链：四个转移全在一处，加一态时漏改是编译错误
+ * （`Record` 要求键齐备）。
+ */
+const NEXT_STANCE: Record<ConditionStance | 'NONE', ConditionStance | undefined> = {
+  NONE: 'PREFER',
+  PREFER: 'REQUIRE',
+  REQUIRE: 'EXCLUDE',
+  EXCLUDE: undefined,
+};
+
+/** 三态在界面上的文字。增量 5 会换成原型的三色标签 */
+const STANCE_LABEL: Record<ConditionStance, string> = {
+  PREFER: '偏好',
+  REQUIRE: '必须',
+  EXCLUDE: '不要',
 };
 
 /** 轮询间隔。21.2 的 T1 目标是 75 秒内出文字版计划，2 秒足够跟上进度条 */
@@ -83,13 +104,22 @@ export function PlanRequestForm(): React.ReactElement {
     [],
   );
 
-  const toggleCondition = useCallback((code: ConditionCode) => {
-    setState((current) => ({
-      ...current,
-      conditions: current.conditions.includes(code)
-        ? current.conditions.filter((entry) => entry !== code)
-        : [...current.conditions, code],
-    }));
+  /**
+   * 三态循环：未选 → 偏好 → 必须 → 不要 → 未选。
+   *
+   * P8：`conditions` 从 `ConditionCode[]` 改成三态映射（见
+   * `lib/travel-request-form.ts` 的 `ConditionSelection`）。这里先给出与
+   * 新类型相容的最小实现 —— 原型的三色标签界面在增量 5 整体替换，
+   * 那时这个组件会被 `components/planner/` 下的一组组件取代。
+   */
+  const cycleCondition = useCallback((code: ConditionCode) => {
+    setState((current) => {
+      const next = NEXT_STANCE[current.conditions[code] ?? 'NONE'];
+      const conditions = { ...current.conditions };
+      if (next === undefined) delete conditions[code];
+      else conditions[code] = next;
+      return { ...current, conditions };
+    });
   }, []);
 
   const timezone = useMemo(() => browserTimezone(), []);
@@ -302,16 +332,21 @@ export function PlanRequestForm(): React.ReactElement {
           <div key={domain} className="request-form__condition-group">
             <h3>{CONDITION_DOMAIN_LABEL[domain]}</h3>
             <div className="request-form__checks">
-              {CONDITION_CODES_BY_DOMAIN[domain].map((code) => (
-                <label key={code} className="request-form__check">
-                  <input
-                    type="checkbox"
-                    checked={state.conditions.includes(code)}
-                    onChange={() => toggleCondition(code)}
-                  />
-                  <span>{CONDITION_LABEL[code]}</span>
-                </label>
-              ))}
+              {CONDITION_CODES_BY_DOMAIN[domain].map((code) => {
+                const stance = state.conditions[code];
+                return (
+                  <button
+                    key={code}
+                    type="button"
+                    className="request-form__check"
+                    aria-pressed={stance !== undefined}
+                    onClick={() => cycleCondition(code)}
+                  >
+                    {CONDITION_LABEL[code]}
+                    {stance === undefined ? null : <em>（{STANCE_LABEL[stance]}）</em>}
+                  </button>
+                );
+              })}
             </div>
           </div>
         ))}
