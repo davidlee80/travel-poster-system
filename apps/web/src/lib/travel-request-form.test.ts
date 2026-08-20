@@ -29,6 +29,22 @@ function filled(overrides: Partial<TravelRequestFormState> = {}): TravelRequestF
   };
 }
 
+/**
+ * 构造 → 过一遍 schema → 拿解析后的请求。
+ *
+ * P8 之后 `buildTravelRequest` 返回的是 `z.input` 形态（附加字段可缺省），
+ * 因此「默认值是什么」这类断言必须看解析结果而不是构造结果。
+ *
+ * 顺带它比单独断言 `safeParse().success` 更强：每一条用到它的用例都同时
+ * 证明了「这个表单状态构造出的请求是合法的」。
+ */
+function resolved(state: TravelRequestFormState) {
+  const result = TravelRequestUISchema.safeParse(buildTravelRequest(state, options));
+  if (!result.success)
+    throw new Error(`构造出的请求不合法：${JSON.stringify(result.error.issues)}`);
+  return result.data;
+}
+
 describe('请求体构造', () => {
   it('产物满足 TravelRequestUISchema', () => {
     expect(TravelRequestUISchema.safeParse(buildTravelRequest(filled(), options)).success).toBe(
@@ -47,11 +63,29 @@ describe('请求体构造', () => {
     /*
      * 写成表单项会让用户能填出必然被 N-09 / N-10 拒绝的请求 ——
      * 而那两条错误的文案是「暂不支持」，用户会觉得系统坏了。
+     *
+     * P8：前端**不再**硬填这三项，改由 schema 的默认值保证。断言因此看的是
+     * 解析后的值 —— 前端少发一个字段与后端默认值给错，效果完全不同。
      */
-    const request = buildTravelRequest(filled(), options);
+    const request = resolved(filled());
     expect(request.trip.dates.flexibility_days).toBe(0);
     expect(request.trip.destination.allow_multiple_destinations).toBe(false);
     expect(request.trip.destination.mode).toBe('FIXED');
+  });
+
+  it('前端不再发送与默认值相同的样板字段', () => {
+    /*
+     * 反向断言：这七个字段的值与 schema 默认值逐字相同，前端再写一遍只会
+     * 让两处漂移。删掉之后必须真的没发出去，否则这次简化等于没做。
+     */
+    const request = buildTravelRequest(filled(), options);
+    expect(request.locale).toBeUndefined();
+    expect(request.budget.currency).toBeUndefined();
+    expect(request.budget.included_items).toBeUndefined();
+    expect(request.output_preferences).toBeUndefined();
+    expect(request.trip.destination.mode).toBeUndefined();
+    expect(request.trip.destination.allow_multiple_destinations).toBeUndefined();
+    expect(request.trip.dates.flexibility_days).toBeUndefined();
   });
 
   it('儿童按年龄数组展开，长者只记人数', () => {
@@ -73,7 +107,7 @@ describe('请求体构造', () => {
       'interest.history_culture',
       'transport.public_transit',
     ];
-    const request = buildTravelRequest(filled({ conditions }), options);
+    const request = resolved(filled({ conditions }));
 
     const modeByCode = Object.fromEntries(
       request.conditions.map((condition) => [condition.code, condition.mode]),
@@ -86,11 +120,11 @@ describe('请求体构造', () => {
 
   it('未勾选任何条件时 conditions 为空数组', () => {
     // undefined 会让 schema 拒绝整个请求
-    expect(buildTravelRequest(filled(), options).conditions).toEqual([]);
+    expect(resolved(filled()).conditions).toEqual([]);
   });
 
   it('每个域的默认 mode 与 MUST_BY_DEFAULT_DOMAINS 一致', () => {
-    const request = buildTravelRequest(
+    const request = resolved(
       filled({
         conditions: [
           'interest.nature',
@@ -101,7 +135,6 @@ describe('请求体构造', () => {
           'schedule.no_late_night',
         ],
       }),
-      options,
     );
 
     for (const condition of request.conditions) {
@@ -111,9 +144,9 @@ describe('请求体构造', () => {
     }
   });
 
-  it('币种固定 CNY，included_items 非空', () => {
-    // included_items 空数组会被 schema 拒绝（min(1)）
-    const request = buildTravelRequest(filled(), options);
+  it('币种默认 CNY，included_items 默认非空', () => {
+    // P8：两者都由 schema 填默认值。included_items 显式传空数组仍被拒（min(1)）
+    const request = resolved(filled());
     expect(request.budget.currency).toBe('CNY');
     expect(request.budget.included_items.length).toBeGreaterThan(0);
   });
@@ -135,9 +168,9 @@ describe('请求体构造', () => {
      * 前端悄悄截断会让「系统替你删了一半需求」这件事永远没人知道。
      */
     const long = '博'.repeat(800);
-    expect(
-      buildTravelRequest(filled({ customText: ` ${long} ` }), options).custom_requirements.raw_text,
-    ).toHaveLength(800);
+    expect(resolved(filled({ customText: ` ${long} ` })).custom_requirements.raw_text).toHaveLength(
+      800,
+    );
   });
 });
 

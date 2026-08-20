@@ -226,3 +226,123 @@ describe('schema 该拦的结构错误', () => {
     expect(parsed.success && 'experimental_flag' in parsed.data).toBe(false);
   });
 });
+
+// ── P8：必填集收缩到 11 个字段 ────────────────────────────────
+
+/**
+ * 只带 11 个必填字段的请求。
+ *
+ * 这是「前端可任意替换」的最低门槛：任何 HTML 模板只要凑出这 11 项就能生成计划，
+ * 其余 56 个附加项由 schema 填默认值（判定过程见 docs/前端字段清单.md）。
+ */
+function minimal(): Record<string, any> {
+  return {
+    schema_version: SCHEMA_VERSIONS.travelRequestUi,
+    client_request_id: 'minimal-1',
+    timezone: 'Asia/Shanghai',
+    trip: {
+      origin: { text: '上海' },
+      destination: { text: '杭州' },
+      dates: { start_date: '2026-04-10', end_date: '2026-04-12' },
+    },
+    travelers: { adults: 2 },
+    budget: { basis: 'PER_PERSON_PER_DAY', min: 300, max: 800 },
+  };
+}
+
+describe('P8：最小必填集（11 个字段）', () => {
+  it('最小请求通过校验', () => {
+    const result = TravelRequestUISchema.safeParse(minimal());
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+
+  it('缺省项被填成默认值，下游拿到的形状与全量请求一致', () => {
+    /*
+     * 用 `.default()` 而不是 `.optional()` 的全部理由都在这条断言里：
+     * 下游（normalize.ts）直接读 `ui.travelers.children.length`，
+     * 改成 optional 会让那一行在运行期炸，而不是编译期。
+     */
+    const parsed = TravelRequestUISchema.parse(minimal());
+
+    expect(parsed.locale).toBe('zh-CN');
+    expect(parsed.trip.destination.mode).toBe('FIXED');
+    expect(parsed.trip.destination.allow_multiple_destinations).toBe(false);
+    expect(parsed.trip.dates.flexibility_days).toBe(0);
+    expect(parsed.travelers.children).toEqual([]);
+    expect(parsed.travelers.seniors).toEqual([]);
+    expect(parsed.budget.currency).toBe('CNY');
+    expect(parsed.budget.included_items).toEqual([
+      'ACCOMMODATION',
+      'MEALS',
+      'LOCAL_TRANSPORT',
+      'TICKETS',
+    ]);
+    expect(parsed.pace).toEqual({});
+    expect(parsed.conditions).toEqual([]);
+    expect(parsed.custom_requirements.raw_text).toBe('');
+    expect(parsed.output_preferences).toEqual({
+      language: 'zh-CN',
+      template_id: 'travel_infographic_v1',
+      generate_png: true,
+      generate_pdf: true,
+    });
+  });
+
+  it('11 个必填字段各缺一个都被拒，且 issue 的 path 指向它', () => {
+    /*
+     * 逐个删而不是只测一个：默认值加错位置的典型症状是「本该必填的字段也被
+     * 填了默认值」—— 那时请求照常通过，而生成用的是猜的值，没有任何报错。
+     *
+     * 断言 path 而不只断言失败：13.7 要求错误能定位到表单项，
+     * 而 `error.issues[].path` 正是 API 层 `field` 的来源。
+     */
+    const paths: readonly (readonly string[])[] = [
+      ['schema_version'],
+      ['client_request_id'],
+      ['timezone'],
+      ['trip', 'origin', 'text'],
+      ['trip', 'destination', 'text'],
+      ['trip', 'dates', 'start_date'],
+      ['trip', 'dates', 'end_date'],
+      ['travelers', 'adults'],
+      ['budget', 'basis'],
+      ['budget', 'min'],
+      ['budget', 'max'],
+    ];
+
+    expect(paths, '必填集是 11 个字段').toHaveLength(11);
+
+    for (const path of paths) {
+      const broken = minimal();
+      let cursor: Record<string, any> = broken;
+      for (const key of path.slice(0, -1)) cursor = cursor[key] as Record<string, any>;
+      delete cursor[path[path.length - 1]!];
+
+      const result = TravelRequestUISchema.safeParse(broken);
+      expect(result.success, `删掉 ${path.join('.')} 后仍然通过了校验`).toBe(false);
+      if (!result.success) {
+        const target = path.join('.');
+        expect(
+          result.error.issues.some((issue) => issue.path.join('.') === target),
+          `${target} 的错误没有指向它自己：${JSON.stringify(result.error.issues)}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('全量请求仍然合法（放宽是向后兼容的）', () => {
+    // 反证：把必填改成带默认值不该让任何现存请求失效
+    expect(TravelRequestUISchema.safeParse(base()).success).toBe(true);
+  });
+
+  it('显式传空的 included_items 仍被拒', () => {
+    /*
+     * `.default()` 只在键**缺省**时生效，显式 `[]` 会照常走 `.min(1)`。
+     * 这正是想要的语义：可以不传，但传了就不能是「预算不含任何开支」——
+     * 后者让 min/max 失去意义，而它不是一个用户会有意表达的诉求。
+     */
+    const input = minimal();
+    input['budget'] = { ...(input['budget'] as object), included_items: [] };
+    expect(TravelRequestUISchema.safeParse(input).success).toBe(false);
+  });
+});

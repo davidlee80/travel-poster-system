@@ -8,8 +8,9 @@ import {
   LocaleSchema,
   PaceLevelSchema,
   TemplateIdSchema,
+  type BudgetIncludedItem,
 } from './enums.js';
-import { TravelConditionSchema } from './conditions.js';
+import { CONDITION_CODE_COUNT, TravelConditionSchema } from './conditions.js';
 import { DateStringSchema, NonEmptyStringSchema, TimeStringSchema } from './primitives.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
@@ -42,10 +43,15 @@ export const PlaceRefSchema = z.object({
 export type PlaceRef = z.infer<typeof PlaceRefSchema>;
 
 export const TripDestinationSchema = z.object({
-  mode: DestinationModeSchema,
+  /**
+   * P8：可缺省。V1 只有 `FIXED` 一个合法值，因此默认即正确 ——
+   * 让每个前端模板都显式传一个常量，只是把样板搬到客户端。
+   */
+  mode: DestinationModeSchema.default('FIXED'),
   text: NonEmptyStringSchema.max(200),
   place_id: NonEmptyStringSchema.max(100).optional(),
-  allow_multiple_destinations: z.boolean(),
+  /** P8：可缺省，默认 false。N-10 仍拒绝 `true`（V1 不支持多目的地） */
+  allow_multiple_destinations: z.boolean().default(false),
 });
 
 export const TripDatesSchema = z.object({
@@ -55,8 +61,11 @@ export const TripDatesSchema = z.object({
    * V1 只支持 0（N-09）。这里**不写 `z.literal(0)`** —— 那会让非 0 值
    * 返回 `REQ_SCHEMA_INVALID` 而不是 `REQ_DATE_FLEXIBILITY_UNSUPPORTED`，
    * 后者才能告诉用户「弹性日期暂不支持」。
+   *
+   * P8：可缺省，默认 0。默认值与 N-09 唯一接受的值一致，因此漏传等于合法；
+   * 而显式传非 0 仍然走 N-09 的精确错误码。
    */
-  flexibility_days: z.number().int().min(0),
+  flexibility_days: z.number().int().min(0).default(0),
 });
 
 export const TravelerChildSchema = z.object({
@@ -70,17 +79,58 @@ export const TravelerSeniorSchema = z.object({
 
 export const TravelersSchema = z.object({
   adults: z.number().int().min(0).max(20),
-  children: z.array(TravelerChildSchema).max(10),
-  seniors: z.array(TravelerSeniorSchema).max(10),
+  /** P8：可缺省，默认空数组 —— 「没带小孩」是绝大多数请求的情形 */
+  children: z.array(TravelerChildSchema).max(10).default([]),
+  seniors: z.array(TravelerSeniorSchema).max(10).default([]),
 });
 
+/**
+ * 预算默认覆盖的开支项（P8）。
+ *
+ * 不含 `INTERCITY_TRANSPORT`：往返大交通常常已经自行订好（原型的「已有订单」
+ * 就有这一项），把它算进默认集会让同一个 min/max 显得更紧，从而无谓地收窄行程。
+ *
+ * ## 这个字段今天是惰性数据
+ *
+ * 已核实：`normalize.ts` 只把它透传进 `NormalizedBudget`，Prompt 没有渲染它，
+ * 也没有任何 V-xx / N-xx 规则读它。也就是说模型目前并不知道预算覆盖了哪些开支，
+ * 而 min/max 的含义恰恰取决于此。这是 P8 之前就存在的缺口，不在本轮范围 ——
+ * 记在这里是为了让下一个动预算的人知道它还没接上。
+ */
+export const DEFAULT_BUDGET_ITEMS: readonly BudgetIncludedItem[] = [
+  'ACCOMMODATION',
+  'MEALS',
+  'LOCAL_TRANSPORT',
+  'TICKETS',
+];
+
 export const RequestBudgetSchema = z.object({
-  currency: CurrencySchema,
+  /** P8：可缺省。V1 只有 CNY */
+  currency: CurrencySchema.default('CNY'),
+  /**
+   * **不可缺省。** 它决定 min/max 是「人均每天」还是「全程总额」——
+   * 猜错让预算偏差约（人数 × 天数）≈ 20 倍，且 N-12 的 50 元/人/天 下限
+   * 也是按它折算的。这是 P8 里唯一一个「机器填充但仍必填」的字段。
+   */
   basis: BudgetBasisSchema,
   // 不在 schema 里比较 min/max，也不要求 > 0 —— 那是 N-04
   min: z.number().min(0),
   max: z.number().min(0),
-  included_items: z.array(BudgetIncludedItemSchema).min(1),
+  /**
+   * P8：可缺省，默认 `DEFAULT_BUDGET_ITEMS`。
+   *
+   * `.min(1)` 保留：`.default()` 只在键缺省时生效，因此「不传」合法而
+   * 「显式传 `[]`」仍被拒 —— 后者让 min/max 失去意义，不是用户会有意
+   * 表达的诉求。
+   *
+   * 默认值写成**函数**而不是直接给常量：Zod 4 的 `.default()` 短路返回，
+   * 不复制也不解析，因此给常量会让每次解析拿到**同一个数组引用** ——
+   * 任何下游的就地修改都会污染 `DEFAULT_BUDGET_ITEMS` 本身。
+   */
+  included_items: z
+    .array(BudgetIncludedItemSchema)
+    .min(1)
+    .default(() => [...DEFAULT_BUDGET_ITEMS]),
 });
 
 /**
@@ -101,12 +151,19 @@ export const CustomRequirementsSchema = z.object({
   /**
    * 5.1 的上限是 500 字，**超长截断并记入 assumptions**，不是拒绝。
    * 所以 schema 这里给一个宽松的硬上限防止滥用，真正的 500 字截断在标准化里做。
+   *
+   * P8：可缺省，默认空串 —— 「没有额外要求」是常态，而下游读的是
+   * `custom_text`（已截断的字符串），空串与不填是同一件事。
    */
-  raw_text: z.string().max(5_000),
+  raw_text: z.string().max(5_000).default(''),
 });
 
+/**
+ * 输出偏好。P8 起四个字段全部可缺省 —— 它们都是前端代码里的常量而不是
+ * 用户填的表单项，让每个模板显式传一遍只是搬运样板。
+ */
 export const OutputPreferencesSchema = z.object({
-  language: LocaleSchema,
+  language: LocaleSchema.default('zh-CN'),
   /**
    * 模板 ID 用枚举而不是自由字符串：N-11 要求「在已注册模板列表中」，
    * 而这个列表就是编译期已知的 TEMPLATE_ID_VALUES。
@@ -114,16 +171,40 @@ export const OutputPreferencesSchema = z.object({
    * 因为模板 ID 不是用户填的表单项，而是前端代码里的常量，
    * 出错属于客户端 bug 而不是用户输入错误。
    */
-  template_id: TemplateIdSchema,
-  generate_png: z.boolean(),
-  generate_pdf: z.boolean(),
+  template_id: TemplateIdSchema.default('travel_infographic_v1'),
+  /*
+   * 两个都默认 true：13.5 的导出是用户点了才发起的独立请求，这两个开关只是
+   * 声明「这份计划打算导出成什么」。默认 false 会让一个最小请求生成出的计划
+   * 无法导出，而那不是「少填了一个可选项」应有的后果。
+   */
+  generate_png: z.boolean().default(true),
+  generate_pdf: z.boolean().default(true),
 });
 
+/**
+ * 前端请求模型。
+ *
+ * ## 必填集只有 11 个字段（P8）
+ *
+ * `schema_version`、`client_request_id`、`timezone`、`trip.origin.text`、
+ * `trip.destination.text`、`trip.dates.start_date`、`trip.dates.end_date`、
+ * `travelers.adults`、`budget.basis`、`budget.min`、`budget.max`。
+ *
+ * 其余全部由 schema 填默认值 —— 前端呈现层可以整体替换，而替换者只需凑出
+ * 这 11 项。逐字段的判定过程与理由见 `docs/前端字段清单.md`。
+ *
+ * 四个「机器填充却仍必填」的字段各有具体理由（版本判别、幂等键、时区影响
+ * N-01 判断「今天」、basis 决定 min/max 的量级），同一份文档里逐条列了。
+ *
+ * 这次放宽**向后兼容**：照旧发全量字段的客户端一行不改，因此
+ * `travel_request_ui_v1` 不升版本号。
+ */
 export const TravelRequestUISchema = z.object({
   schema_version: z.literal(SCHEMA_VERSIONS.travelRequestUi),
   client_request_id: NonEmptyStringSchema.max(100),
-  locale: LocaleSchema,
-  /** IANA 时区名。N-01 用它判断「今天」，因此不能缺省 */
+  /** P8：可缺省。V1 只有 zh-CN */
+  locale: LocaleSchema.default('zh-CN'),
+  /** IANA 时区名。N-01 用它判断「今天」，因此**不能**缺省 */
   timezone: NonEmptyStringSchema.max(64),
 
   trip: z.object({
@@ -134,12 +215,50 @@ export const TravelRequestUISchema = z.object({
 
   travelers: TravelersSchema,
   budget: RequestBudgetSchema,
-  pace: RequestPaceSchema,
-  conditions: z.array(TravelConditionSchema).max(24),
-  custom_requirements: CustomRequirementsSchema,
-  output_preferences: OutputPreferencesSchema,
+  /**
+   * P8：可缺省。内部字段本来就全可选，标准化阶段按 level 补默认值。
+   *
+   * ## 对象级默认值一律用 `.prefault()` 而不是 `.default()`
+   *
+   * Zod 4 的 `.default()` **短路**：输入为 undefined 时直接返回默认值，
+   * 不再走内部 schema 的解析。因此 `OutputPreferencesSchema.default({})`
+   * 会产出 `{}` —— 而 `z.infer` 声称那里有四个必填字段。也就是说
+   * `.default()` 在对象上能造出**不满足自身推断类型**的值，而 TypeScript
+   * 完全看不见。
+   *
+   * `.prefault()` 会把默认值送进内部 schema 解析，内层的 `.default()`
+   * 因此正常生效。标量与数组的默认值本身已是完整合法值，用 `.default()` 即可。
+   */
+  pace: RequestPaceSchema.prefault({}),
+  /*
+   * 上限取字典大小而不是字面量：两者本来就该相等（一个 code 勾一次），
+   * 写死数字会在下一次扩字典时静默变成「最多只能勾前 N 个」，
+   * 而超出的表现是 REQ_SCHEMA_INVALID —— 定位不到任何表单项。
+   *
+   * 这里**不**去重：重复 code 的处理属于 N-08 的职责，它能给出带 field
+   * 的精确错误，而 schema 层只能给 REQ_SCHEMA_INVALID。
+   */
+  conditions: z.array(TravelConditionSchema).max(CONDITION_CODE_COUNT).default([]),
+  custom_requirements: CustomRequirementsSchema.prefault({}),
+  output_preferences: OutputPreferencesSchema.prefault({}),
 });
+
+/**
+ * **消费**用的类型：默认值已填好，全部字段都在。
+ *
+ * 下游（`normalize.ts` 等）用它 —— 例如 `ui.travelers.children.length`
+ * 不需要处理 undefined。
+ */
 export type TravelRequestUI = z.infer<typeof TravelRequestUISchema>;
+
+/**
+ * **构造**用的类型：附加字段可缺省。
+ *
+ * 前端拼请求体用这个。与 `TravelRequestUI` 刻意分开：混用的表现是前端为了
+ * 满足类型而显式传一堆默认值，于是「附加」在客户端侧又变回了必填 ——
+ * 那正是 P8 要消除的样板。
+ */
+export type TravelRequestUIInput = z.input<typeof TravelRequestUISchema>;
 
 // ── 3.1.1：NormalizedTravelRequest ──────────────────────────
 

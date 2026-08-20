@@ -5,7 +5,7 @@ import {
   type BudgetBasis,
   type ConditionCode,
   type PaceLevel,
-  type TravelRequestUI,
+  type TravelRequestUIInput,
 } from '@tps/schemas';
 
 /**
@@ -81,30 +81,34 @@ export interface BuildRequestOptions {
   readonly timezone: string;
 }
 
+/**
+ * 表单状态 → 请求体。
+ *
+ * ## 只发用户真正填过的字段
+ *
+ * 返回类型是 `TravelRequestUIInput`（= `z.input`）而不是 `TravelRequestUI`
+ * （= `z.infer`）：P8 之后契约的必填集只有 11 个字段，其余由 schema 填默认值。
+ *
+ * 因此这里**刻意不再**发 `locale`、`currency`、`included_items`、
+ * `output_preferences`、`mode`、`allow_multiple_destinations`、
+ * `flexibility_days` —— 它们的值与 schema 的默认值逐字相同，由前端再写一遍
+ * 只会让两处漂移，而漂移的方向通常是「前端比 schema 旧」。
+ *
+ * 判定哪个字段属于哪一类见 `docs/前端字段清单.md`。
+ */
 export function buildTravelRequest(
   state: TravelRequestFormState,
   options: BuildRequestOptions,
-): TravelRequestUI {
+): TravelRequestUIInput {
   return {
     schema_version: SCHEMA_VERSIONS.travelRequestUi,
     client_request_id: options.clientRequestId,
-    locale: 'zh-CN',
     timezone: options.timezone,
 
     trip: {
       origin: { text: state.origin.trim() },
-      destination: {
-        mode: 'FIXED',
-        text: state.destination.trim(),
-        // V1 不支持多目的地（N-10），因此这里是常量而不是表单项
-        allow_multiple_destinations: false,
-      },
-      dates: {
-        start_date: state.startDate,
-        end_date: state.endDate,
-        // V1 不支持弹性日期（N-09）
-        flexibility_days: 0,
-      },
+      destination: { text: state.destination.trim() },
+      dates: { start_date: state.startDate, end_date: state.endDate },
     },
 
     travelers: {
@@ -118,12 +122,14 @@ export function buildTravelRequest(
       seniors: Array.from({ length: state.seniorCount }, () => ({})),
     },
 
+    /*
+     * `basis` 必填而 `currency` 不必：前者决定 min/max 是「人均每天」还是
+     * 「全程总额」，猜错会让预算偏差约（人数 × 天数）；后者只有 CNY 一个值。
+     */
     budget: {
-      currency: 'CNY',
       basis: state.budgetBasis,
       min: state.budgetMin,
       max: state.budgetMax,
-      included_items: ['ACCOMMODATION', 'MEALS', 'LOCAL_TRANSPORT', 'TICKETS'],
     },
 
     pace: { level: state.paceLevel },
@@ -139,13 +145,6 @@ export function buildTravelRequest(
     })),
 
     custom_requirements: { raw_text: state.customText.trim() },
-
-    output_preferences: {
-      language: 'zh-CN',
-      template_id: 'travel_infographic_v1',
-      generate_png: true,
-      generate_pdf: true,
-    },
   };
 }
 
