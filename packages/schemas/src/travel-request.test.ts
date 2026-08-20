@@ -335,6 +335,50 @@ describe('P8：最小必填集（11 个字段）', () => {
     expect(TravelRequestUISchema.safeParse(base()).success).toBe(true);
   });
 
+  it('三个新增的附加字段可缺省，缺省时不出现在解析结果里', () => {
+    /*
+     * `existing_bookings` 有默认值（空数组 = 尚无预订），另两个是纯 optional：
+     * 「没选档位」与「档位是经济」不是一回事，给 `tier` 一个默认值会让前者
+     * 变得无法表达，而模型会据此调整选点取向。
+     */
+    const parsed = TravelRequestUISchema.parse(minimal());
+    expect(parsed.trip.existing_bookings).toEqual([]);
+    expect(parsed.budget.tier).toBeUndefined();
+    expect(parsed.pace.intensity).toBeUndefined();
+  });
+
+  it('三个新增字段的取值被正确接受', () => {
+    const input = minimal();
+    input['trip'] = { ...(input['trip'] as object), existing_bookings: ['LODGING', 'TICKETS'] };
+    input['budget'] = { ...(input['budget'] as object), tier: 'QUALITY' };
+    input['pace'] = { intensity: 4 };
+
+    const parsed = TravelRequestUISchema.parse(input);
+    expect(parsed.trip.existing_bookings).toEqual(['LODGING', 'TICKETS']);
+    expect(parsed.budget.tier).toBe('QUALITY');
+    expect(parsed.pace.intensity).toBe(4);
+  });
+
+  it.each([
+    ['existing_bookings 含未知取值', 'trip', { existing_bookings: ['FLIGHT'] }],
+    ['tier 不在枚举内', 'budget', { tier: 'BACKPACKER' }],
+  ])('%s 被拒绝', (_name, key, patch) => {
+    const input = minimal();
+    input[key] = { ...(input[key] as object), ...patch };
+    expect(TravelRequestUISchema.safeParse(input).success).toBe(false);
+  });
+
+  it.each([0, 6, 2.5])('intensity=%s 越界或非整数被拒绝', (intensity) => {
+    /*
+     * 1～5 对应原型滑块的五档。越界值不能静默截断：`intensity` 与 `level`
+     * 并存且以数值为准（5.1），一个被截断的 6 会让「特种兵」变成别的东西
+     * 而用户看不到任何提示。
+     */
+    const input = minimal();
+    input['pace'] = { intensity };
+    expect(TravelRequestUISchema.safeParse(input).success).toBe(false);
+  });
+
   it('显式传空的 included_items 仍被拒', () => {
     /*
      * `.default()` 只在键**缺省**时生效，显式 `[]` 会照常走 `.min(1)`。

@@ -3,8 +3,10 @@ import { z } from 'zod';
 import {
   BudgetBasisSchema,
   BudgetIncludedItemSchema,
+  BudgetTierSchema,
   CurrencySchema,
   DestinationModeSchema,
+  ExistingBookingSchema,
   LocaleSchema,
   PaceLevelSchema,
   TemplateIdSchema,
@@ -117,6 +119,12 @@ export const RequestBudgetSchema = z.object({
   min: z.number().min(0),
   max: z.number().min(0),
   /**
+   * P8：预算档位。**纯 optional 而不是带默认值** ——
+   * 「没选档位」与「档位是经济」不是一回事，给它默认值会让前者无法表达，
+   * 而模型会据此调整选点取向。
+   */
+  tier: BudgetTierSchema.optional(),
+  /**
    * P8：可缺省，默认 `DEFAULT_BUDGET_ITEMS`。
    *
    * `.min(1)` 保留：`.default()` 只在键缺省时生效，因此「不传」合法而
@@ -141,6 +149,17 @@ export const RequestBudgetSchema = z.object({
  */
 export const RequestPaceSchema = z.object({
   level: PaceLevelSchema.optional(),
+  /**
+   * P8：原型滑块的五档强度（1 躺平 … 5 特种兵）。
+   *
+   * 与 `level` 并存而不是取代它：`level` 只有三档，5→3 会把「躺平」与
+   * 「慢游」压成同一个 `RELAXED`。5.1 已经规定「数值字段与 level 冲突时
+   * 以数值为准」，因此这一项与其余四个数值字段同构。
+   *
+   * 越界值**不截断**：一个被悄悄改成 5 的 6 会让用户拿到与他所选不同的
+   * 节奏，而界面上看不出任何异常。
+   */
+  intensity: z.number().int().min(1).max(5).optional(),
   attractions_per_day_min: z.number().int().min(0).optional(),
   attractions_per_day_max: z.number().int().min(0).optional(),
   walking_limit_km: z.number().min(0).optional(),
@@ -211,6 +230,13 @@ export const TravelRequestUISchema = z.object({
     origin: PlaceRefSchema,
     destination: TripDestinationSchema,
     dates: TripDatesSchema,
+    /**
+     * P8：已经自行订好的部分。空数组 = 尚无预订。
+     *
+     * 默认值写成函数，理由同 `included_items`：Zod 4 的 `.default()` 短路
+     * 返回同一个引用。
+     */
+    existing_bookings: z.array(ExistingBookingSchema).default(() => []),
   }),
 
   travelers: TravelersSchema,

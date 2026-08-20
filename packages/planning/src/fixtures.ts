@@ -45,6 +45,12 @@ export function makeRequestFixture(overrides: RequestFixtureOverrides = {}): Tra
         allow_multiple_destinations: false,
       },
       dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 0 },
+      /*
+       * P8：夹具是**解析后**的形态（`TravelRequestUI` = `z.infer`），
+       * 因此带默认值的字段在这里是必填的 —— 漏写是编译错误。
+       * 空数组 = 尚无预订，与基准夹具「什么都没订」的设定一致。
+       */
+      existing_bookings: [],
       ...overrides.trip,
     },
 

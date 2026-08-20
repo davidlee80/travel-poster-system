@@ -96,6 +96,37 @@ export const BUDGET_INCLUDED_ITEM_VALUES = [
 export const BudgetIncludedItemSchema = z.enum(BUDGET_INCLUDED_ITEM_VALUES);
 export type BudgetIncludedItem = (typeof BUDGET_INCLUDED_ITEM_VALUES)[number];
 
+/**
+ * 已经自行订好的部分（P8，原型第 1 步的「已有订单」）。
+ *
+ * ## 为什么是数组而不是带 NONE 成员的枚举
+ *
+ * 空数组就是「尚无预订」。加一个 `NONE` 成员会造出 `['NONE','LODGING']`
+ * 这种自相矛盾却结构合法的值，而那需要再写一条校验去拦。
+ *
+ * ## 为什么要采集它
+ *
+ * 它改变行程结构而不只是文案：已订酒店意味着住宿位置固定、每日路线要围绕
+ * 它排；已订往返交通意味着首末日的时间窗被钉住。丢掉这一项等于让模型在
+ * 错误前提下规划，而产出的计划看起来完全正常。
+ */
+export const EXISTING_BOOKING_VALUES = ['INTERCITY_TRANSPORT', 'LODGING', 'TICKETS'] as const;
+export const ExistingBookingSchema = z.enum(EXISTING_BOOKING_VALUES);
+export type ExistingBooking = (typeof EXISTING_BOOKING_VALUES)[number];
+
+/**
+ * 预算档位（P8，原型第 3 步的五张卡片）。
+ *
+ * 数值已经进了 `budget.min`/`max`，档位名仍然要传：同一个预算区间下
+ * 「经济穷游」与「品质度假」的选点取向不同（前者优先免费/低价景点，
+ * 后者优先体验质量）。只发两个数字会把这层意图丢掉。
+ *
+ * `CUSTOM` 表示用户拖了滑块 —— 此时 min/max 才是唯一权威，档位名不含信息。
+ */
+export const BUDGET_TIER_VALUES = ['ECONOMY', 'STANDARD', 'QUALITY', 'LUXURY', 'CUSTOM'] as const;
+export const BudgetTierSchema = z.enum(BUDGET_TIER_VALUES);
+export type BudgetTier = (typeof BUDGET_TIER_VALUES)[number];
+
 export const PACE_LEVEL_VALUES = ['RELAXED', 'BALANCED', 'PACKED'] as const;
 export const PaceLevelSchema = z.enum(PACE_LEVEL_VALUES);
 export type PaceLevel = (typeof PACE_LEVEL_VALUES)[number];
