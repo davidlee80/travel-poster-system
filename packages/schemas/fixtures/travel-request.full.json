@@ -1,0 +1,64 @@
+{
+  "schema_version": "travel_request_ui_v1",
+  "client_request_id": "fixture-full-1",
+  "locale": "zh-CN",
+  "timezone": "Asia/Shanghai",
+
+  "trip": {
+    "origin": { "text": "上海", "place_id": "cn-shanghai" },
+    "destination": {
+      "mode": "FIXED",
+      "text": "杭州",
+      "place_id": "cn-hangzhou",
+      "allow_multiple_destinations": false
+    },
+    "dates": { "start_date": "2026-10-01", "end_date": "2026-10-05", "flexibility_days": 0 },
+    "existing_bookings": ["LODGING"]
+  },
+
+  "travelers": {
+    "adults": 2,
+    "children": [{ "age": 6 }],
+    "seniors": [{}]
+  },
+
+  "budget": {
+    "currency": "CNY",
+    "basis": "PER_PERSON_PER_DAY",
+    "tier": "QUALITY",
+    "min": 800,
+    "max": 1500,
+    "included_items": ["ACCOMMODATION", "MEALS", "LOCAL_TRANSPORT", "TICKETS", "SHOPPING"]
+  },
+
+  "pace": {
+    "level": "BALANCED",
+    "intensity": 3,
+    "attractions_per_day_min": 2,
+    "attractions_per_day_max": 3,
+    "walking_limit_km": 3,
+    "earliest_departure_time": "09:00"
+  },
+
+  "conditions": [
+    { "code": "interest.history_culture", "mode": "SHOULD", "value": true },
+    { "code": "interest.city_walk", "mode": "SHOULD", "value": true },
+    { "code": "budget.lodging_quality", "mode": "SHOULD", "value": true },
+    { "code": "accommodation.elevator", "mode": "MUST", "value": true },
+    { "code": "accessibility.child_car_seat", "mode": "MUST", "value": true },
+    { "code": "diet.allergy_seafood", "mode": "MUST", "value": true },
+    { "code": "accommodation.shared_dorm", "mode": "MUST", "value": false },
+    { "code": "interest.nightlife", "mode": "MUST", "value": false }
+  ],
+
+  "custom_requirements": {
+    "raw_text": "老人走不了太多路，孩子对花生过敏；想看运河和博物馆。"
+  },
+
+  "output_preferences": {
+    "language": "zh-CN",
+    "template_id": "travel_infographic_v1",
+    "generate_png": true,
+    "generate_pdf": true
+  }
+}

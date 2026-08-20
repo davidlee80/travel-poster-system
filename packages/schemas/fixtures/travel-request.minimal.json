@@ -1,0 +1,12 @@
+{
+  "schema_version": "travel_request_ui_v1",
+  "client_request_id": "fixture-minimal-1",
+  "timezone": "Asia/Shanghai",
+  "trip": {
+    "origin": { "text": "上海" },
+    "destination": { "text": "杭州" },
+    "dates": { "start_date": "2026-10-01", "end_date": "2026-10-03" }
+  },
+  "travelers": { "adults": 2 },
+  "budget": { "basis": "PER_PERSON_PER_DAY", "min": 300, "max": 800 }
+}

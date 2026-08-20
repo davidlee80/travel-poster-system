@@ -354,7 +354,23 @@ export const GATES = [
     why: '含三类断言：删对象在删行之前的顺序、MERGED 行不进清理路径的回归断言、生命周期规则声明的文本层断言（本机没有 mc，与 P5 对 Helm 的处理同一形态）',
     needsDb: true,
   },
+  {
+    id: 39,
+    title: '条件字典扩到 46 码后，字典、分域表与中文文案三处一致',
+    ref: 'P8 / R-55，设计稿 5.1',
+    kind: 'command',
+    run: 'pnpm --filter @tps/schemas exec vitest run conditions && pnpm --filter @tps/presentation exec vitest run condition-labels',
+    why: '5.1 的失效方式是静默的：漏配一个 code 的文案会让表单出现没有文字的标签，把 code 归错域会让它不进 Prompt 的对应小节 —— 两者都不报错。文案表是 Record<ConditionCode,…>，因此漏配是编译错误；这条门禁守的是分域条目数与「正向命名」两条约定',
+  },
+  {
+    id: 40,
+    title: '契约夹具通过校验，且校验器自身有效',
+    ref: 'P8 / R-56',
+    kind: 'command',
+    run: 'pnpm test:contract',
+    why: '前端呈现层可整体替换，替换者靠 pnpm validate:request 自证请求合法。一个恒返回 0 的校验器会让所有模板都「通过」而失效完全静默，因此 --self-test 用三项反证（缺 basis、未知 code、v2 版本号）确认它真的会拒。两份夹具分别覆盖最小必填集与全量可选项',
+  },
 ];
 
-/** 24.1 的项数。写成常量供自检，防止无意增删 */
-export const GATE_COUNT = 38;
+/** 24.1 的项数。写成常量供自检，防止无意增删。P8 加 #39/#40 */
+export const GATE_COUNT = 40;
