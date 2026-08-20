@@ -11,9 +11,16 @@ import {
 } from './conditions.js';
 
 describe('条件字典（5.1）', () => {
-  it('冻结 24 项', () => {
-    // 5.1 明确「V1 冻结以下 24 项」。数量变化必须是显式动作，
-    // 因为新增 code 需要同时更新 LLM Prompt 模板
+  it('清单长度与冻结常量一致', () => {
+    /*
+     * 5.1 原为「V1 冻结 24 项」，P8 扩到 46（R-55）。数量变化必须是显式动作
+     * —— 改清单而忘了改常量（或反之）会让这条断言先红。
+     *
+     * 5.1 的冻结条款还要求「新增域必须同时更新 Prompt 模板」。P8 核实过
+     * 那一条对本仓库不适用：`describeConditions` 是对 code 的泛型遍历，
+     * 分域靠前缀而非写死的段落。见 conditions.ts 上 CONDITION_DOMAIN_VALUES
+     * 的注释。
+     */
     expect(CONDITION_CODE_VALUES).toHaveLength(CONDITION_CODE_COUNT);
   });
 
@@ -49,18 +56,25 @@ describe('条件字典（5.1）', () => {
     }
   });
 
-  it('5.1 表格的分域条目数逐行正确', () => {
+  it('分域条目数逐行正确（5.1 + P8 的 R-55）', () => {
+    /*
+     * 逐域断言而不只断言总数：把一个 code 从 interest 挪到 transport 时
+     * 总数不变，而 Prompt 的分域注入与素材检索的按域取偏好都会跟着变。
+     *
+     * 括号里是 P8 新增数（合计 +22，见 R-55）。
+     */
     expect(
       Object.fromEntries(
         CONDITION_DOMAIN_VALUES.map((d) => [d, CONDITION_CODES_BY_DOMAIN[d].length]),
       ),
     ).toEqual({
-      interest: 8,
-      transport: 4,
-      accommodation: 4,
-      accessibility: 3,
+      interest: 14, // 8 + 6
+      transport: 6, // 4 + 2
+      accommodation: 13, // 4 + 9
+      budget: 3, // P8 新增域
+      accessibility: 4, // 3 + 1
       diet: 4,
-      schedule: 1,
+      schedule: 2, // 1 + 1
     });
   });
 
@@ -105,5 +119,94 @@ describe('TravelConditionSchema', () => {
     expect(
       TravelConditionSchema.safeParse({ code: 'diet.halal', mode: 'MUST', value: 'yes' }).success,
     ).toBe(false);
+  });
+});
+
+// ── P8：条件字典扩容（R-55）─────────────────────────────────
+
+describe('P8：条件字典扩容（R-55）', () => {
+  it('冻结数量为 46', () => {
+    expect(CONDITION_CODE_VALUES).toHaveLength(CONDITION_CODE_COUNT);
+    expect(CONDITION_CODE_COUNT).toBe(46);
+  });
+
+  it('新增 budget 域，且七个域都非空', () => {
+    /*
+     * 空域会让 Prompt 的分域注入产出一个空段落 —— 模型看到一个只有标题
+     * 没有内容的小节，而那比不写这一段更容易被误解。
+     */
+    expect(CONDITION_DOMAIN_VALUES).toContain('budget');
+    for (const domain of CONDITION_DOMAIN_VALUES) {
+      expect(
+        CONDITION_CODES_BY_DOMAIN[domain].length,
+        `域 ${domain} 没有任何 code`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it('P8 新增的 code 采用正向命名，否定语义走 value:false', () => {
+    /*
+     * 反向命名的 code 与 `value: false` 组合会产生双重否定
+     * （「不要（不要多人间）」），而 5.1 的 value 是 boolean ——
+     * 读代码的人无法判断它是「要多人间」还是「不要不要多人间」。
+     *
+     * 白名单里的四个是 P8 之前就存在的。它们已写入历史 plan_json 的
+     * constraint_report.satisfied，改名会让存量计划的条件比对静默错位，
+     * 因此列入例外而不是修掉。
+     */
+    const LEGACY_NEGATIVE = [
+      'transport.avoid_transfer',
+      'accessibility.low_walking',
+      'schedule.no_late_night',
+      'diet.no_spicy',
+    ];
+    const negative = CONDITION_CODE_VALUES.filter(
+      (code) => /\.(no|not|avoid|without|low)_/.test(code) && !LEGACY_NEGATIVE.includes(code),
+    );
+    expect(negative, '新增 code 不应含否定前缀').toEqual([]);
+  });
+
+  it('原型的 22 个新标签全部有 code', () => {
+    const expected = [
+      'interest.city_walk',
+      'interest.cafe',
+      'interest.hot_spring',
+      'interest.theme_park',
+      'interest.zoo_aquarium',
+      'interest.light_hiking',
+      'transport.cycling',
+      'transport.rail',
+      'accommodation.hotel',
+      'accommodation.homestay',
+      'accommodation.apartment',
+      'accommodation.resort',
+      'accommodation.hostel',
+      'accommodation.breakfast',
+      'accommodation.kitchen',
+      'accommodation.shared_dorm',
+      'accommodation.single_base',
+      'budget.lodging_quality',
+      'budget.unique_experience',
+      'budget.transport_convenience',
+      'schedule.daily_rest',
+      'accessibility.child_car_seat',
+    ] as const;
+
+    expect(expected, '第二轮决策定的是 22 个新码').toHaveLength(22);
+    for (const code of expected) {
+      expect(isKnownConditionCode(code), `${code} 不在字典内`).toBe(true);
+    }
+    // 24 个既有 + 22 个新增
+    expect(CONDITION_CODE_COUNT).toBe(24 + expected.length);
+  });
+
+  it('刻意不建的两个 code 确实不在字典里', () => {
+    /*
+     * 「混合交通」表达「没有约束」，V-30 要求每条 MUST 都出现在 satisfied
+     * 里，而没有任何行程结构能「满足混合交通」。
+     * 「不要多人间」的否定语义走 accommodation.shared_dorm + value:false。
+     */
+    expect(isKnownConditionCode('transport.mixed')).toBe(false);
+    expect(isKnownConditionCode('accommodation.no_shared_dorm')).toBe(false);
   });
 });

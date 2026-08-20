@@ -20,11 +20,27 @@ import { ConditionModeSchema } from './enums.js';
  * 的后果是该域的条件被忽略，同样没有任何报错。
  */
 
-/** 6 个域。新增域必须同时更新 Prompt 模板（5.1 的冻结条款） */
+/**
+ * 7 个域。新增域必须同时更新 Prompt 模板（5.1 的冻结条款）。
+ *
+ * ## P8 新增 `budget`，且**确实不需要**改 Prompt（R-55）
+ *
+ * 冻结条款那句话针对的是「Prompt 里按域写死了段落」的实现。而
+ * `packages/llm/src/prompt.ts` 的 `describeConditions` 是对 code 列表的
+ * 泛型遍历，分域靠 code 前缀而不是硬编码的小节 —— 已逐行核对。
+ *
+ * 这一段写在这里而不只写在修订记录里：下一个加域的人会先看这个数组，
+ * 而「条款说要改 Prompt，但代码里找不到要改的地方」会让他以为自己漏了什么。
+ */
 export const CONDITION_DOMAIN_VALUES = [
   'interest',
   'transport',
   'accommodation',
+  /**
+   * P8：愿意把钱花在哪。与 `interest`（想玩什么）正交 ——
+   * 同一个用户可以对美食毫无兴趣，却要求住宿品质。
+   */
+  'budget',
   'accessibility',
   'diet',
   'schedule',
@@ -33,11 +49,24 @@ export const ConditionDomainSchema = z.enum(CONDITION_DOMAIN_VALUES);
 export type ConditionDomain = (typeof CONDITION_DOMAIN_VALUES)[number];
 
 /**
- * 5.1 冻结的 24 项。这是**唯一**的手写清单。
+ * 冻结的条件清单。这是**唯一**的手写清单。
+ *
+ * 5.1 原为 24 项；P8 扩到 46 项（R-55），让原型界面上的每一个标签都有结构化
+ * 落点 —— 落进 `conditions` 的诉求受 V-30 硬约束校验保护，而落进自由文本的
+ * 不受。判定过程见 `docs/前端字段清单.md`。
  *
  * 必须是 `as const` 字面量元组而不是从分域表 `flat()` 派生：
  * `Object.values(...).flat()` 的类型是 `string[]`，`ConditionCode` 会退化成
  * `string`，白名单在编译期就失去了全部意义 —— 而这正是本文件要防的事。
+ *
+ * ## 两条命名约定
+ *
+ * 1. **正向命名**：否定语义走 `value: false`，不进 code 名。
+ *    「不要多人间」= `accommodation.shared_dorm` + `value: false`；
+ *    建一个 `no_shared_dorm` 会让「不要它」变成读不懂的双重否定。
+ *    四个反向命名的历史例外见 conditions.test.ts 的白名单。
+ * 2. **既有 code 一律不改名不删除**：它们已写入 `plan_json` 与
+ *    `constraint_report.satisfied`，改名会让存量计划的条件比对静默错位。
  */
 export const CONDITION_CODE_VALUES = [
   // interest
@@ -49,20 +78,55 @@ export const CONDITION_CODE_VALUES = [
   'interest.nightlife',
   'interest.photography',
   'interest.family_kids',
+  // interest（P8 新增）
+  'interest.city_walk',
+  'interest.cafe',
+  'interest.hot_spring',
+  'interest.theme_park',
+  'interest.zoo_aquarium',
+  'interest.light_hiking',
   // transport
   'transport.public_transit',
   'transport.self_drive',
   'transport.walking_first',
   'transport.avoid_transfer',
+  // transport（P8 新增）
+  'transport.cycling',
+  'transport.rail',
   // accommodation
   'accommodation.elevator',
   'accommodation.near_transit',
   'accommodation.private_bath',
   'accommodation.family_room',
+  /*
+   * accommodation（P8 新增）：住宿类型 5 项 + 设施 3 项 + 稳定性 1 项。
+   *
+   * 类型与设施同域：用户在原型里是分两组勾的，但对生成来说都是「住哪」的
+   * 约束，分成两个域会让 Prompt 多一个只有五项的小节而没有额外信息。
+   */
+  'accommodation.hotel',
+  'accommodation.homestay',
+  'accommodation.apartment',
+  'accommodation.resort',
+  'accommodation.hostel',
+  'accommodation.breakfast',
+  'accommodation.kitchen',
+  'accommodation.shared_dorm',
+  'accommodation.single_base',
+  // budget（P8 新增域）
+  'budget.lodging_quality',
+  'budget.unique_experience',
+  'budget.transport_convenience',
   // accessibility
   'accessibility.wheelchair',
   'accessibility.stroller',
   'accessibility.low_walking',
+  /*
+   * accessibility（P8 新增）。落在这个域而不是新建一个「儿童设施」域：
+   * 它与轮椅、推车同类 —— 都是「需要某项设备才能出行」，
+   * 且同域意味着它自动继承 MUST_BY_DEFAULT（安全座椅不是偏好）。
+   */
+  'accessibility.child_car_seat',
   // diet
   'diet.vegetarian',
   'diet.halal',
@@ -70,10 +134,18 @@ export const CONDITION_CODE_VALUES = [
   'diet.allergy_seafood',
   // schedule
   'schedule.no_late_night',
+  // schedule（P8 新增）
+  'schedule.daily_rest',
 ] as const;
 
-/** 5.1 冻结的条目数。写成常量供测试断言，防止无意增删 */
-export const CONDITION_CODE_COUNT = 24;
+/**
+ * 冻结的条目数。写成常量供测试断言，防止无意增删。
+ *
+ * 它同时是 `TravelRequestUISchema.conditions` 的数组上限 —— 两者本来就该
+ * 相等（一个 code 勾一次），分开写死会让下一次扩字典静默变成
+ * 「最多只能勾前 N 个」。
+ */
+export const CONDITION_CODE_COUNT = 46;
 
 export const ConditionCodeSchema = z.enum(CONDITION_CODE_VALUES);
 export type ConditionCode = (typeof CONDITION_CODE_VALUES)[number];

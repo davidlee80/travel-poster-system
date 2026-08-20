@@ -92,6 +92,18 @@ export const BUDGET_INCLUDED_ITEM_VALUES = [
   'LOCAL_TRANSPORT',
   'TICKETS',
   'INTERCITY_TRANSPORT',
+  /*
+   * P8 新增。原型的预算包含项有六个勾选框，购物是唯一没有对应值的一个。
+   *
+   * 加它是安全的：仓库里没有任何 `Record<BudgetIncludedItem, …>`，也没有对
+   * 该枚举的穷举 switch —— `included_items` 一路透传到 normalize 与
+   * `NormalizedBudget`，因此不存在「漏配一个分支」的落点（已逐处核对）。
+   * 这一句写在这里是为了让下一个加值的人知道该去确认什么。
+   *
+   * 注意它与 `interest.shopping` 是两件事：这里是「预算含不含购物开支」，
+   * 那里是「想不想逛」。同时勾选是合理输入。
+   */
+  'SHOPPING',
 ] as const;
 export const BudgetIncludedItemSchema = z.enum(BUDGET_INCLUDED_ITEM_VALUES);
 export type BudgetIncludedItem = (typeof BUDGET_INCLUDED_ITEM_VALUES)[number];

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { BUDGET_INCLUDED_ITEM_VALUES } from './enums.js';
 import { TravelRequestUISchema } from './travel-request.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
@@ -388,5 +389,35 @@ describe('P8：最小必填集（11 个字段）', () => {
     const input = minimal();
     input['budget'] = { ...(input['budget'] as object), included_items: [] };
     expect(TravelRequestUISchema.safeParse(input).success).toBe(false);
+  });
+});
+
+describe('P8：预算包含项覆盖原型的六个勾选框', () => {
+  it('六个值齐备，顺序稳定', () => {
+    expect(BUDGET_INCLUDED_ITEM_VALUES).toEqual([
+      'ACCOMMODATION',
+      'MEALS',
+      'LOCAL_TRANSPORT',
+      'TICKETS',
+      'INTERCITY_TRANSPORT',
+      'SHOPPING',
+    ]);
+  });
+
+  it('SHOPPING 可作为包含项提交', () => {
+    const input = minimal();
+    input['budget'] = { ...(input['budget'] as object), included_items: ['MEALS', 'SHOPPING'] };
+    const parsed = TravelRequestUISchema.parse(input);
+    expect(parsed.budget.included_items).toEqual(['MEALS', 'SHOPPING']);
+  });
+
+  it('默认集不含 SHOPPING 与 INTERCITY_TRANSPORT', () => {
+    /*
+     * 购物是可选消费，往返大交通常常已自行订好（原型的「已有订单」就有这一项）。
+     * 把它们算进默认集会让同一个 min/max 显得更紧，从而无谓地收窄行程。
+     */
+    const items = TravelRequestUISchema.parse(minimal()).budget.included_items;
+    expect(items).not.toContain('SHOPPING');
+    expect(items).not.toContain('INTERCITY_TRANSPORT');
   });
 });
