@@ -1,0 +1,219 @@
+# 五个应用服务的单机内测编排（Ubuntu 云主机）
+#
+# 这个文件是 `infrastructure/docker-compose.yml` 的**叠加层**，不是独立栈。
+# 必须两个 -f 一起给，顺序不能换：
+#
+#   docker compose -f infrastructure/docker-compose.yml -f deploy/mvp-apps.yml up -d
+#
+# ## 为什么是叠加而不是自成一份
+#
+# 基础设施那份已经定了三件不能抄错的事：pgvector 镜像（官方 postgres 装不上
+# vector 扩展，迁移 0001 会失败）、C.UTF-8 初始化参数、以及 minio-init 导入
+# 15.4 的生命周期规则。复制一份意味着它们将来会各改一次。
+#
+# 叠加的另一个作用是**同一个 compose 项目**（项目名 travel-poster-system 由
+# 第一个文件的 `name` 决定），因此应用容器能用 `postgres` / `redis` / `minio`
+# 这三个服务名直连，不需要额外建网络。
+#
+# ## 路径的坑
+#
+# compose 把文件里的相对路径按**项目目录**解析，而项目目录默认是第一个 -f
+# 文件所在的目录 —— 也就是 `infrastructure/`，不是仓库根。因此下面的
+# `context: ..` 和 `env_file: ../.env.deploy` 里那个 `..` 指的是仓库根。
+# 看起来多一级，改成 `.` 反而会失败。
+#
+# ## 端口只绑 127.0.0.1
+#
+# 应用端口一律不发布到公网，外部流量只经 Nginx 进来（见 docs/云服务器部署说明.md）。
+# 注意基础设施那份文件把 5432/6379/9000/9001 发布在 0.0.0.0 上，而 ufw
+# **拦不住 docker 发布的端口**（docker 直接插 iptables 的 DOCKER 链，绕过 ufw
+# 的 filter 规则）—— 必须靠云厂商安全组只放 22/80/443。
+
+services:
+  api:
+    image: tps/api:local
+    build:
+      context: ..
+      dockerfile: deploy/images/node-service.Dockerfile
+      args:
+        APP: api
+        PROBE_PORT: '3001'
+    container_name: tps-api
+    restart: unless-stopped
+    env_file:
+      - ../.env.deploy
+    environment:
+      PORT: '3001'
+    ports:
+      - '127.0.0.1:3001:3001'
+    # 22.3.3：必须大于应用侧的停机预算（SHUTDOWN_TIMEOUT_MS=25000）
+    stop_grace_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # 镜像里没有 curl（slim 只装了 tzdata/tini/ca-certificates），用 node 自带的 http
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3001/readyz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  web:
+    image: tps/web:local
+    build:
+      context: ..
+      dockerfile: deploy/images/web.Dockerfile
+    container_name: tps-web
+    restart: unless-stopped
+    env_file:
+      - ../.env.deploy
+    environment:
+      PORT: '3000'
+      # 服务端到服务端（web → api），与浏览器用的地址是两条不同的路径：
+      # 浏览器那条走 NEXT_PUBLIC_API_BASE，而它在镜像里已固化为空串
+      # （构建期内联），即同源相对路径 —— 正是反代方案需要的，别再传运行时变量去改它
+      INTERNAL_API_BASE: http://api:3001
+    ports:
+      - '127.0.0.1:3000:3000'
+    stop_grace_period: 45s
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  generation-worker:
+    image: tps/generation-worker:local
+    build:
+      context: ..
+      dockerfile: deploy/images/node-service.Dockerfile
+      args:
+        APP: generation-worker
+        PROBE_PORT: '3011'
+    container_name: tps-generation-worker
+    restart: unless-stopped
+    env_file:
+      - ../.env.deploy
+    environment:
+      # 上传走容器网络，不绕一圈公网 Nginx。素材的对外 URL 取自
+      # S3_PUBLIC_BASE_URL（写进 view_model 并永久保存），与这里无关
+      S3_ENDPOINT: http://minio:9000
+    ports:
+      - '127.0.0.1:3011:3011'
+    stop_grace_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3011/readyz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  render-worker:
+    image: tps/render-worker:local
+    build:
+      context: ..
+      dockerfile: deploy/images/render-worker.Dockerfile
+    container_name: tps-render-worker
+    restart: unless-stopped
+    env_file:
+      - ../.env.deploy
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      # 渲染路由在 web 上，不在 api 上（17.1）。方向与 INTERNAL_API_BASE 相反
+      RENDER_BASE_URL: http://web:3000
+    # 22.3.2 / L-07：/dev/shm 默认 64MB，Chromium 会崩，且崩出来的错误
+    # （"Target closed"）与内存不足的表现一样，两者都会让人先去查错的地方
+    shm_size: 1gb
+    ports:
+      - '127.0.0.1:3012:3012'
+    stop_grace_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      web:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3012/readyz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  retention-worker:
+    image: tps/retention-worker:local
+    build:
+      context: ..
+      dockerfile: deploy/images/node-service.Dockerfile
+      args:
+        APP: retention-worker
+        PROBE_PORT: '3013'
+    container_name: tps-retention-worker
+    # **不要加副本**。清理任务在进程内按固定间隔跑，多副本会让同一批到期用户
+    # 被并发清理（见 apps/retention-worker/src/main.ts 的注释）
+    restart: unless-stopped
+    env_file:
+      - ../.env.deploy
+    environment:
+      S3_ENDPOINT: http://minio:9000
+    ports:
+      - '127.0.0.1:3013:3013'
+    stop_grace_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3013/readyz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
