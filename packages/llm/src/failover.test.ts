@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { raceFirstSuccess, type Attempt } from './failover.js';
+import { ImageUnavailableError, type ImageRequest, type ImageResult } from './image.js';
+
+import { raceFirstSuccess, wrapImageFailover, type Attempt } from './failover.js';
 
 /**
  * 候选模型故障转移的调度器（多模型 failover 计划的任务 1）。
@@ -221,5 +223,129 @@ describe('raceFirstSuccess', () => {
     slowButFine.resolve('二号的产物');
     const result = await raceFirstSuccess(attempts, { perAttemptMs: 50, totalBudgetMs: 1000 });
     expect(result).toMatchObject({ kind: 'success', winner: '二号的产物', position: 1 });
+  });
+});
+
+describe('FailoverImageClient', () => {
+  const request = {
+    prompt: '杭州西湖',
+    negativePrompt: 'no text',
+    width: 1600,
+    height: 600,
+    seed: 42,
+    timeoutMs: 40_000,
+  };
+
+  function stubImage(model: string, behaviour: (signal?: AbortSignal) => Promise<ImageResult>) {
+    return { model, generate: (req: ImageRequest) => behaviour(req.signal) };
+  }
+
+  function imageResult(model: string): ImageResult {
+    return {
+      bytes: new Uint8Array([1]),
+      model,
+      modelVersion: model,
+      seed: 42,
+      costUnits: 1,
+    };
+  }
+
+  it('单候选时不包装，直接返回底层客户端', () => {
+    const only = stubImage('solo', () => Promise.resolve(imageResult('solo')));
+    const client = wrapImageFailover([only], { perAttemptMs: 100, totalBudgetMs: 200 });
+
+    // 图像标准用户档就是单候选，默认路径必须零开销
+    expect(client).toBe(only);
+  });
+
+  it('候选 1 超时后用候选 2，回传的 model 是候选 2 的名字', async () => {
+    const client = wrapImageFailover(
+      [
+        stubImage('慢模型', () => new Promise<ImageResult>(() => undefined)),
+        stubImage('快模型', () => Promise.resolve(imageResult('快模型'))),
+      ],
+      { perAttemptMs: 30, totalBudgetMs: 500 },
+    );
+
+    const result = await client.generate(request);
+    /*
+     * model 必须是真正产出这张图的那个 —— 二十章要求 generation_metadata
+     * 如实记录模型。回传主候选的名字会让「哪个模型画的」这个问题永久答错。
+     */
+    expect(result.model).toBe('快模型');
+  });
+
+  it('costUnits 记实际发出的请求数，不是 1', async () => {
+    /*
+     * 本轮决策 4：日预算按实际发出的请求数计。超时的那个候选供应商很可能
+     * 已经生成完并计了费，只记 1 会让 600 的熔断阈值失去意义。
+     */
+    const client = wrapImageFailover(
+      [
+        stubImage('慢模型', () => new Promise<ImageResult>(() => undefined)),
+        stubImage('快模型', () => Promise.resolve(imageResult('快模型'))),
+      ],
+      { perAttemptMs: 30, totalBudgetMs: 500 },
+    );
+
+    const result = await client.generate(request);
+    expect(result.costUnits).toBe(2);
+  });
+
+  it('全部候选失败时抛 ImageUnavailableError', async () => {
+    const client = wrapImageFailover(
+      [
+        stubImage('一号', () => Promise.reject(new Error('挂了'))),
+        stubImage('二号', () => Promise.reject(new Error('也挂了'))),
+      ],
+      { perAttemptMs: 100, totalBudgetMs: 500 },
+    );
+
+    await expect(client.generate(request)).rejects.toThrow(ImageUnavailableError);
+  });
+
+  it('把外部 signal 透传给候选，胜出后其余被 abort', async () => {
+    const seen: (AbortSignal | undefined)[] = [];
+    const client = wrapImageFailover(
+      [
+        stubImage('慢模型', (signal) => {
+          seen.push(signal);
+          return new Promise<ImageResult>(() => undefined);
+        }),
+        stubImage('快模型', (signal) => {
+          seen.push(signal);
+          return Promise.resolve(imageResult('快模型'));
+        }),
+      ],
+      { perAttemptMs: 30, totalBudgetMs: 500 },
+    );
+
+    await client.generate(request);
+
+    expect(seen).toHaveLength(2);
+    // 没有 signal 的话，被放弃的请求会继续占着上游算力
+    expect(seen.every((signal) => signal?.aborted === true)).toBe(true);
+  });
+
+  it('onOutcome 回报胜出位次与发出数，供调用方记指标', async () => {
+    /*
+     * packages/llm 不依赖 @tps/observability（分层），因此指标由调用方上报。
+     * position > 0 是「主模型没顶住」的唯一信号。
+     */
+    const outcomes: { position: number; attemptsStarted: number; ok: boolean }[] = [];
+    const client = wrapImageFailover(
+      [
+        stubImage('慢模型', () => new Promise<ImageResult>(() => undefined)),
+        stubImage('快模型', () => Promise.resolve(imageResult('快模型'))),
+      ],
+      {
+        perAttemptMs: 30,
+        totalBudgetMs: 500,
+        onOutcome: (outcome) => outcomes.push(outcome),
+      },
+    );
+
+    await client.generate(request);
+    expect(outcomes).toEqual([{ position: 1, attemptsStarted: 2, ok: true }]);
   });
 });

@@ -27,7 +27,44 @@ import { LlmConfigError } from './config.js';
  * 而降级路径（占位图）是即时的、成本为零的、用户仍能拿到页面的。
  */
 
-export const AI_IMAGE_TIMEOUT_MS = 20_000;
+/**
+ * 主路径的默认单候选超时。
+ *
+ * 曾是**硬上限**（21.2 措施二把 V1.0 的 40 秒压到 20 秒）。多模型故障转移
+ * 引入后它只是默认值：上限改由 `loadImageConfig` 按「与任务级 AI 预算的关系」
+ * 校验，而 T2 目标本身成了可以有意调整的量。40 秒是本轮定的折中值。
+ */
+export const AI_IMAGE_TIMEOUT_MS = 40_000;
+
+/**
+ * 预热路径的默认超时。
+ *
+ * `assets:preheat` 不在 T2 的 SLA 窗口内 —— 预热过的目的地本来就不需要主路径
+ * 再生图，所以那里可以慢慢生。分成两个变量而不是共用一个，是因为共用会强迫
+ * 两条路径里较严的那条决定另一条：要么主路径慢到违约 T2，
+ * 要么预热被压到跟主路径一样紧而白白降低成图率。
+ */
+export const AI_IMAGE_PREHEAT_TIMEOUT_MS = 60_000;
+
+/**
+ * 任务级 AI 累计耗时预算的默认值。
+ *
+ * 21.4 的「单任务 3 张」与 21.2 的「Hero 最多 2 次」都是**用次数近似时延**，
+ * 而那个近似的前提是「一次生成最多 20 秒」这个常量。超时可配之后，同样的
+ * 「2 次」可以是 80 秒也可以是 240 秒，次数就不再约束时延。
+ *
+ * 因此时延要有自己的预算：次数管成本、耗时管时延，两者先到先停。
+ */
+export const DEFAULT_IMAGE_JOB_AI_BUDGET_MS = 80_000;
+
+/**
+ * 21.2 的素材解析窗口 = T2(155 秒) − T1(75 秒)。
+ *
+ * 这两个里程碑此前只存在于设计文档与告警规则里，没有代码常量 ——
+ * 于是「AI 预算是否越界」这件事没有任何一处能判定。放在这里是因为它唯一的
+ * 用途就是校验 `IMAGE_JOB_AI_BUDGET_MS`；真要用到别处再往上提。
+ */
+export const ASSET_RESOLUTION_WINDOW_MS = 80_000;
 
 export interface ImageRequest {
   readonly prompt: string;
@@ -46,6 +83,16 @@ export interface ImageRequest {
    */
   readonly seed: number;
   readonly timeoutMs: number;
+  /**
+   * 外部取消信号（候选模型故障转移用）。
+   *
+   * 与 `timeoutMs` 是两件事：后者是「这次调用最多等多久」，前者是
+   * 「别等了，已经有别的候选成功了」。两者取并集 —— 任一触发即中止。
+   *
+   * 没有它的话 `raceFirstSuccess` 的 abort 是空操作：被放弃的请求会继续
+   * 占着连接与上游算力直到自己超时，而此刻已经没人在等它的结果。
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface ImageResult {
@@ -201,7 +248,15 @@ export class HttpImageClient implements ImageClient {
           ...(this.gateway ? { 'x-tps-service': 'travel-poster-system' } : {}),
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(request.timeoutMs),
+        /*
+         * 两个信号取并集：自身超时，或外部说「别等了」（已有候选成功）。
+         * 外部 abort 抛的是 AbortError 而不是 TimeoutError，因此下面会归到
+         * `ImageUnavailableError` —— 那是对的，它不是超时而是被放弃。
+         */
+        signal: AbortSignal.any([
+          AbortSignal.timeout(request.timeoutMs),
+          ...(request.signal === undefined ? [] : [request.signal]),
+        ]),
       });
     } catch (error) {
       if (error instanceof Error && error.name === 'TimeoutError') {
@@ -265,11 +320,23 @@ export const IMAGE_MODES: readonly ImageMode[] = ['fake', 'direct', 'gateway'];
 
 export interface ImageConfig {
   readonly mode: ImageMode;
+  /** 主模型。候选池未配置时它就是唯一候选（回落路径） */
   readonly model: string;
   readonly baseUrl: string;
   readonly apiKey: string;
-  /** 21.2 措施二：20 秒 */
+  /** 主路径的单候选超时 */
   readonly timeoutMs: number;
+  /** 预热路径的单候选超时。不受 SLA 窗口约束 */
+  readonly preheatTimeoutMs: number;
+  /** 任务级 AI 累计耗时预算。次数管成本，这一项管时延 */
+  readonly jobAiBudgetMs: number;
+  /**
+   * 配置越界的说明，非空时调用方**必须**打进启动日志。
+   *
+   * 存在的理由见 `loadImageConfig` 里那段注释：这条约束从硬拒改成了 warn，
+   * 而「允许」的前提是「不静默」。没人显示它的话这个改动就退化成了单纯放宽。
+   */
+  readonly slaWarning?: string;
 }
 
 function readEnv(env: Record<string, string | undefined>, key: string): string {
@@ -292,21 +359,52 @@ export function loadImageConfig(
   }
   const mode = raw as ImageMode;
 
-  const timeoutRaw = readEnv(env, 'IMAGE_TIMEOUT_MS');
-  const timeoutMs = timeoutRaw === '' ? AI_IMAGE_TIMEOUT_MS : Number(timeoutRaw);
-  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
-    throw new LlmConfigError(`IMAGE_TIMEOUT_MS 取值非法：${timeoutRaw}`);
-  }
-  if (timeoutMs > AI_IMAGE_TIMEOUT_MS) {
-    /*
-     * 上限而不是建议值：21.2 的 T2 目标（P95 < 110 秒）是在「AI 生成 ≤ 20 秒」
-     * 的前提下算出来的。允许配到 40 秒等于允许一个配置项静默推翻 SLA，
-     * 而违约会以「偶发 T2 超时」的形式出现，无从关联到这一行配置。
-     */
+  const readMs = (key: string, fallback: number): number => {
+    const raw = readEnv(env, key);
+    const value = raw === '' ? fallback : Number(raw);
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new LlmConfigError(`${key} 取值非法：${raw}`);
+    }
+    return value;
+  };
+
+  const timeoutMs = readMs('IMAGE_TIMEOUT_MS', AI_IMAGE_TIMEOUT_MS);
+  const preheatTimeoutMs = readMs('IMAGE_PREHEAT_TIMEOUT_MS', AI_IMAGE_PREHEAT_TIMEOUT_MS);
+  const jobAiBudgetMs = readMs('IMAGE_JOB_AI_BUDGET_MS', DEFAULT_IMAGE_JOB_AI_BUDGET_MS);
+
+  /*
+   * ## 为什么这一条仍然硬拒
+   *
+   * 单个候选就能吃掉整个任务的 AI 预算时，候选链**根本轮不到第二个** ——
+   * 也就是配了故障转移却不会生效。这不是「更慢」而是「功能静默失效」，
+   * 与下面那条（只是更慢）性质不同。
+   */
+  if (timeoutMs > jobAiBudgetMs) {
     throw new LlmConfigError(
-      `IMAGE_TIMEOUT_MS 不得超过 ${AI_IMAGE_TIMEOUT_MS}（21.2 措施二：超时压到 20 秒）`,
+      `IMAGE_TIMEOUT_MS(${timeoutMs}) 不得超过 IMAGE_JOB_AI_BUDGET_MS(${jobAiBudgetMs})：` +
+        '单候选就能耗尽任务预算时，候选链轮不到第二个，故障转移不会生效',
     );
   }
+
+  /*
+   * ## 为什么这一条从硬拒改成了 warn
+   *
+   * 原先 `IMAGE_TIMEOUT_MS > 20000` 是硬拒，理由写在 21.2：T2 目标是在
+   * 「AI 生成 ≤ 20 秒」的前提下算出来的，允许配大等于让一个配置项静默
+   * 推翻 SLA。
+   *
+   * 而现在 SLA 本身成了可以被有意调整的量（T2 110 → 155 秒），硬拒会挡住
+   * **合法**的调整。所以保留的是「不静默」，放开的是「不允许」——
+   * 越界时照配置执行，但把后果明确写出来，由调用方在启动日志里显示。
+   *
+   * 静默才是那条硬拒真正反对的东西。
+   */
+  const slaWarning =
+    jobAiBudgetMs > ASSET_RESOLUTION_WINDOW_MS
+      ? `IMAGE_JOB_AI_BUDGET_MS(${jobAiBudgetMs}) 超过 21.2 的素材窗口` +
+        `(${ASSET_RESOLUTION_WINDOW_MS} = T2 155s − T1 75s)：T2 会随之延后，` +
+        '要么同步调高 T2 目标与告警阈值，要么把 AI 生成移出主路径（assets:preheat）'
+      : undefined;
 
   const config: ImageConfig = {
     mode,
@@ -314,6 +412,10 @@ export function loadImageConfig(
     baseUrl: readEnv(env, mode === 'gateway' ? 'IMAGE_GATEWAY_URL' : 'IMAGE_BASE_URL'),
     apiKey: readEnv(env, 'IMAGE_API_KEY'),
     timeoutMs,
+    preheatTimeoutMs,
+    jobAiBudgetMs,
+    // exactOptionalPropertyTypes：不能把 undefined 显式赋给可选属性
+    ...(slaWarning === undefined ? {} : { slaWarning }),
   };
 
   if (mode !== 'fake') {

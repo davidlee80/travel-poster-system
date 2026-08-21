@@ -42,6 +42,13 @@ export interface LlmRequest {
   readonly maxTokens: number;
   readonly purpose: LlmPurpose;
   readonly timeoutMs: number;
+  /**
+   * 外部取消信号（候选模型故障转移用）。
+   *
+   * 与 `timeoutMs` 取并集：后者是「这次最多等多久」，前者是「别等了，
+   * 已经有别的候选成功了」。没有它 `raceFirstSuccess` 的 abort 就是空操作。
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface LlmUsage {
@@ -213,7 +220,11 @@ abstract class HttpLlmClient implements LlmClient {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...this.headers() },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(request.timeoutMs),
+        // 自身超时与外部放弃取并集，任一触发即中止
+        signal: AbortSignal.any([
+          AbortSignal.timeout(request.timeoutMs),
+          ...(request.signal === undefined ? [] : [request.signal]),
+        ]),
       });
     } catch (error) {
       // AbortSignal.timeout 触发时抛 TimeoutError（DOMException）

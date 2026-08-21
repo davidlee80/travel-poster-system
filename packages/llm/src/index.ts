@@ -39,7 +39,10 @@ export {
 } from './client.js';
 
 export {
+  AI_IMAGE_PREHEAT_TIMEOUT_MS,
   AI_IMAGE_TIMEOUT_MS,
+  ASSET_RESOLUTION_WINDOW_MS,
+  DEFAULT_IMAGE_JOB_AI_BUDGET_MS,
   FakeImageClient,
   HttpImageClient,
   IMAGE_MODES,
@@ -103,3 +106,14 @@ export {
   type PromptMessages,
   type RepairPromptInput,
 } from './prompt.js';
+
+export {
+  raceFirstSuccess,
+  wrapImageFailover,
+  wrapLlmFailover,
+  type Attempt,
+  type FailoverClientOptions,
+  type FailoverOutcome,
+  type RaceOptions,
+  type RaceResult,
+} from './failover.js';

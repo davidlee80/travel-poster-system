@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { LlmConfigError } from './config.js';
 import {
+  AI_IMAGE_PREHEAT_TIMEOUT_MS,
   AI_IMAGE_TIMEOUT_MS,
+  DEFAULT_IMAGE_JOB_AI_BUDGET_MS,
   FakeImageClient,
   HttpImageClient,
   ImageTimeoutError,
@@ -141,13 +143,15 @@ describe('HttpImageClient', () => {
 });
 
 describe('配置', () => {
-  it('缺省为 fake 模式，超时取 20 秒', () => {
+  it('缺省为 fake 模式，三个时间参数各有默认值', () => {
     expect(loadImageConfig({})).toEqual({
       mode: 'fake',
       model: '',
       baseUrl: '',
       apiKey: '',
       timeoutMs: AI_IMAGE_TIMEOUT_MS,
+      preheatTimeoutMs: AI_IMAGE_PREHEAT_TIMEOUT_MS,
+      jobAiBudgetMs: DEFAULT_IMAGE_JOB_AI_BUDGET_MS,
     });
   });
 
@@ -169,13 +173,81 @@ describe('配置', () => {
     expect(config.baseUrl).toBe('https://gw.example.com');
   });
 
-  it('超时不得超过 20 秒（21.2 措施二不可被配置推翻）', () => {
-    expect(() => loadImageConfig({ IMAGE_TIMEOUT_MS: '40000' })).toThrow(/20000/);
+  it('超时上限的判据改成了「与任务预算的关系」，不再是固定的 20 秒', () => {
+    /*
+     * ## 这条断言原本冻结的是另一个行为
+     *
+     * 原文是「超时不得超过 20 秒（21.2 措施二不可被配置推翻）」，硬拒任何
+     * 大于 20000 的取值。多模型故障转移引入后那个判据不再成立：T2 目标本身
+     * 成了可以有意调整的量（110 → 155 秒），继续硬拒会挡住合法调整。
+     *
+     * 但原断言想守的东西**没有变**：一个配置项不该静默推翻 SLA。守法从
+     * 「不许配大」换成了两条：
+     *   - 越过任务预算 → 仍然硬拒（那会让故障转移静默失效，见下）
+     *   - 只是越过素材窗口 → 允许，但必须留下 slaWarning
+     *
+     * 改判据而不是删测试：删掉的话，下一次有人把 timeoutMs 配成 600 秒时
+     * 没有任何东西会拦他。
+     */
     expect(loadImageConfig({ IMAGE_TIMEOUT_MS: '8000' }).timeoutMs).toBe(8_000);
+    // 40 秒现在是默认值，不再触发任何拒绝
+    expect(loadImageConfig({ IMAGE_TIMEOUT_MS: '40000' }).timeoutMs).toBe(40_000);
+    // 但超过任务级 AI 预算仍然启动即失败
+    expect(() => loadImageConfig({ IMAGE_TIMEOUT_MS: '90000' })).toThrow(LlmConfigError);
   });
 
   it('fake 模式未提供渲染函数时生成必然失败（降级链因此可测）', async () => {
     const client = createImageClient(loadImageConfig({}));
     await expect(client.generate(request)).rejects.toThrow(ImageUnavailableError);
+  });
+});
+
+describe('超时分层与任务级 AI 预算', () => {
+  const base = { IMAGE_MODE: 'fake' } as Record<string, string | undefined>;
+
+  it('IMAGE_TIMEOUT_MS 默认 40 秒，且 60 秒现在合法', () => {
+    /*
+     * 原来这里硬拒 > 20000，理由是「不允许一个配置项静默推翻 SLA」。
+     * 现在 SLA 本身成了可被有意调整的量（T2 110 → 155 秒），硬拒会挡住
+     * 合法调整。保留的是「不静默」，放开的是「不允许」。
+     */
+    expect(loadImageConfig(base).timeoutMs).toBe(40_000);
+    expect(loadImageConfig({ ...base, IMAGE_TIMEOUT_MS: '60000' }).timeoutMs).toBe(60_000);
+  });
+
+  it('预热路径有自己的超时，默认 60 秒且不受素材窗口约束', () => {
+    /*
+     * assets:preheat 不在 T2 的 SLA 窗口内，可以慢慢生 ——
+     * 预热过的目的地本来就不需要主路径再生图。
+     */
+    expect(loadImageConfig(base).preheatTimeoutMs).toBe(60_000);
+    expect(loadImageConfig({ ...base, IMAGE_PREHEAT_TIMEOUT_MS: '120000' }).preheatTimeoutMs).toBe(
+      120_000,
+    );
+  });
+
+  it('单候选超时超过任务级 AI 预算时启动即失败', () => {
+    /*
+     * 这条约束仍然硬拒：单个候选就能吃掉整个任务的 AI 预算，说明两个数字
+     * 之间的关系配错了 —— 而它不是「更慢」而是「候选链根本轮不到第二个」。
+     */
+    expect(() =>
+      loadImageConfig({ ...base, IMAGE_TIMEOUT_MS: '90000', IMAGE_JOB_AI_BUDGET_MS: '80000' }),
+    ).toThrow(LlmConfigError);
+  });
+
+  it('任务级 AI 预算超过素材窗口时只 warn，不拒绝启动', () => {
+    /*
+     * 「允许但显式告知」：调高 T2 是合法运营决策，但必须留下痕迹。
+     * 静默才是原来那条硬拒真正反对的东西。
+     */
+    const config = loadImageConfig({ ...base, IMAGE_JOB_AI_BUDGET_MS: '200000' });
+
+    expect(config.jobAiBudgetMs).toBe(200_000);
+    expect(config.slaWarning).toContain('素材窗口');
+  });
+
+  it('预算未越界时没有 slaWarning', () => {
+    expect(loadImageConfig(base).slaWarning).toBeUndefined();
   });
 });

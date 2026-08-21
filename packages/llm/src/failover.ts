@@ -33,6 +33,9 @@
  * 留这个参数是因为切换它不需要改本模块的任何逻辑。
  */
 
+import { ImageUnavailableError, type ImageClient, type ImageResult } from './image.js';
+import { LlmUnavailableError, type LlmClient, type LlmResult } from './client.js';
+
 /** 一次尝试。收到的 signal 在放弃该候选时被 abort */
 export type Attempt<T> = (signal: AbortSignal) => Promise<T>;
 
@@ -171,4 +174,135 @@ export async function raceFirstSuccess<T>(
 
   abortAll();
   return { kind: 'failed', errors, attemptsStarted };
+}
+
+// ── 装饰器 ──────────────────────────────────────────────────
+
+/**
+ * 一条候选链的结局，回报给调用方。
+ *
+ * `packages/llm` 不依赖 `@tps/observability`（分层：模型访问层不该知道
+ * 指标体系长什么样），因此指标与日志由调用方按这个回调上报。
+ */
+export interface FailoverOutcome {
+  /** 胜出候选的位次。> 0 说明主模型没顶住，是「主模型有问题」的唯一信号 */
+  readonly position: number;
+  /** 实际发出的请求数。日预算按它计，不按成功次数（本轮决策 4） */
+  readonly attemptsStarted: number;
+  readonly ok: boolean;
+}
+
+export interface FailoverClientOptions {
+  readonly perAttemptMs: number;
+  readonly totalBudgetMs: number;
+  readonly onOutcome?: (outcome: FailoverOutcome) => void;
+}
+
+/**
+ * 给图像客户端套上故障转移。
+ *
+ * **单候选时原样返回底层客户端**，不做任何包装 —— 图像的标准用户档就是
+ * 单候选（本轮决策 5），那条路径必须零开销。包一层空壳会让默认路径
+ * 多两次 Promise 调度，虽然可忽略，但更重要的是让调用栈变浑。
+ */
+export function wrapImageFailover(
+  candidates: readonly ImageClient[],
+  options: FailoverClientOptions,
+): ImageClient {
+  const first = candidates[0];
+  if (first === undefined) {
+    throw new ImageUnavailableError('候选模型列表为空');
+  }
+  if (candidates.length === 1) return first;
+
+  return {
+    // 接口要求有个 model；用主候选的名字，实际产出者见 ImageResult.model
+    model: first.model,
+
+    async generate(request) {
+      const result = await raceFirstSuccess<ImageResult>(
+        candidates.map((candidate) => (signal) => candidate.generate({ ...request, signal })),
+        options,
+      );
+
+      options.onOutcome?.({
+        position: result.kind === 'success' ? result.position : -1,
+        attemptsStarted: result.attemptsStarted,
+        ok: result.kind === 'success',
+      });
+
+      if (result.kind === 'failed') {
+        throw new ImageUnavailableError(
+          `全部 ${result.attemptsStarted} 个候选模型均失败：${describeErrors(result.errors)}`,
+        );
+      }
+
+      /*
+       * `costUnits` 记实际发出的请求数而不是 1。
+       *
+       * 超时的那些候选，供应商很可能已经生成完并计了费 —— 我们只是没等到。
+       * 记 1 会让 21.4 的日预算熔断（600）比真实成本低估若干倍，
+       * 而那个阈值存在的意义就是反映成本。
+       */
+      return { ...result.winner, costUnits: result.attemptsStarted };
+    },
+  };
+}
+
+/**
+ * 给文本客户端套上故障转移。
+ *
+ * 与图像侧对称，两处差异：
+ *   - 没有 `costUnits` 概念，token 用量取胜出候选的（其余候选的 token
+ *     没有产出，计进去会让「每份计划的 token 成本」失真）
+ *   - 全部失败时抛 `LlmUnavailableError`，映射到 13.7 的可重试码
+ */
+export function wrapLlmFailover(
+  candidates: readonly LlmClient[],
+  options: FailoverClientOptions,
+): LlmClient {
+  const first = candidates[0];
+  if (first === undefined) {
+    throw new LlmUnavailableError('候选模型列表为空');
+  }
+  if (candidates.length === 1) return first;
+
+  return {
+    model: first.model,
+
+    async complete(request) {
+      const result = await raceFirstSuccess<LlmResult>(
+        candidates.map((candidate) => (signal) => candidate.complete({ ...request, signal })),
+        options,
+      );
+
+      options.onOutcome?.({
+        position: result.kind === 'success' ? result.position : -1,
+        attemptsStarted: result.attemptsStarted,
+        ok: result.kind === 'success',
+      });
+
+      if (result.kind === 'failed') {
+        throw new LlmUnavailableError(
+          `全部 ${result.attemptsStarted} 个候选模型均失败：${describeErrors(result.errors)}`,
+        );
+      }
+
+      return result.winner;
+    },
+  };
+}
+
+/**
+ * 把多个候选的失败原因拼成一句。
+ *
+ * 保留全部而不只是最后一个：排查时要看的恰恰是「是不是每个都因为同一个理由
+ * 失败」—— 那说明问题在我们这边（请求体、凭据），而各自不同的失败更像是
+ * 上游各自的问题。截断到 200 字符避免把上游的长错误体灌进日志。
+ */
+function describeErrors(errors: readonly unknown[]): string {
+  return errors
+    .map((error) => (error instanceof Error ? error.message : String(error)))
+    .join(' | ')
+    .slice(0, 200);
 }
