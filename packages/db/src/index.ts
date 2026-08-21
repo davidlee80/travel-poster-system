@@ -100,3 +100,13 @@ export {
   type ModelPoolsRepository,
   type ModelPoolsRepositoryOptions,
 } from './model-pools.js';
+
+export {
+  createTierAdminRepository,
+  type ModelPoolRow,
+  type TierAdminRepository,
+  type TierMappingRow,
+  type UpsertMappingInput,
+  type UpsertPoolInput,
+  type UserTierRow,
+} from './tier-admin.js';
