@@ -86,12 +86,32 @@ services:
     # （见 deploy/storage/README.md：只有 users/ 前缀挂规则，anon/ 不挂）
     volumes:
       - ../deploy/storage:/config:ro
+    # ## 两个桶的匿名读策略是相反的，且都必须显式声明
+    #
+    # 素材桶 `download`（允许匿名读）：素材 URL 由 S3_PUBLIC_BASE_URL 直接拼出
+    # 写进 ViewModel（19.3），是渲染页与浏览器里的普通 <img src>，没有签名。
+    # 键形如 `assets/{role}/{ab}/{id}.webp` —— 15.4 明确它**全局共享、与用户
+    # 空间无关**，因此公开读不泄露任何用户私有内容。
+    #
+    # 导出桶 `none`（拒绝匿名读）：那里才是用户私有产物
+    # （`users/{user_id}/...` 与 `anon/...`），访问一律走 13.6 的 SigV4 预签名。
+    #
+    # 这两行此前**不存在**，而部署文档的 Nginx 段注释写着「素材公开读」——
+    # 也就是说那个前提整个仓库里没有任何一处建立。缺失的表现极其隐蔽：
+    # 素材图片一律 403，而 RenderReadyProbe 刻意让坏图不阻塞就绪
+    # （十八章降级链），于是导出照样 COMPLETED、健康检查全绿、
+    # 用户拿到的长图里每个图片位置都是空白。
+    #
+    # 显式写 `none` 而不是依赖默认值：默认值是 MinIO 的实现细节，
+    # 而「导出桶不可匿名读」是安全约束，不该靠默认值成立。
     entrypoint: >
       /bin/sh -c "
       mc alias set local http://minio:9000 tps tps_local_dev_only &&
       mc mb --ignore-existing local/tps-assets &&
       mc mb --ignore-existing local/tps-exports &&
       mc ilm import local/tps-exports < /config/exports-lifecycle.json &&
+      mc anonymous set download local/tps-assets &&
+      mc anonymous set none local/tps-exports &&
       echo 'buckets ready'
       "
     restart: 'no'

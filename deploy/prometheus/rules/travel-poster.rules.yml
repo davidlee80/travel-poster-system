@@ -91,6 +91,39 @@ groups:
           description: '验收标准 5 要求恒为 0。多半是新增了图标键但漏配 @tps/icon-library 的映射。'
           runbook: 'docs/运维手册.md#图标加载失败'
 
+      # 3b. 素材图片加载失败（按比例判定）
+      #
+      # 与上一条互补：那条查契约漂移（清单外的图标键），这条查**网络层失败**
+      # —— ViewModel 里的素材 URL 取不到。
+      #
+      # ## 为什么必须有这条告警
+      #
+      # RenderReadyProbe 刻意让坏图不阻塞就绪（十八章降级链：一张坏图不该让
+      # 整份导出作废）。那个决定是对的，但副作用是素材全军覆没时：页面照样
+      # ready、travel_render_degraded_total 不动、导出照样 COMPLETED ——
+      # 用户拿到图片位置全是空白的长图，而在这条告警之前**没有任何信号**。
+      #
+      # ## 为什么用比例而不是计数
+      #
+      # 「21 张里坏 1 张」是降级链在正常工作（景点图缺失不阻断流程），
+      # 「21 张全坏」是配置错误（S3_PUBLIC_BASE_URL 在渲染容器内解析不到、
+      # 或素材桶不允许匿名读）。计数分不出这两者，比例可以。
+      #
+      # 阈值 50%：正常降级极少同时命中一半以上槽位，而配置错误必然是 100%。
+      # `for: 15m` 是为了滤掉素材刚入库那一小段的缓存穿透。
+      - alert: TravelAssetImageLoadFailureRatioHigh
+        expr: |
+          sum(rate(travel_render_asset_image_failure_total[30m]))
+            /
+          sum(rate(travel_render_asset_image_seen_total[30m])) > 0.5
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: '渲染时超过一半素材图片加载失败'
+          description: '导出仍会显示 COMPLETED，但产物里图片位置是空白的。先查 S3_PUBLIC_BASE_URL 在 render-worker 容器内能否解析，再查素材桶是否允许匿名读。render-worker 日志里有「素材图片全部加载失败」那一行。'
+          runbook: 'docs/运维手册.md#素材图片加载失败'
+
       # 4. 修复异常（规则集可能过严）
       #
       # P95 贴到 3 轮意味着规则集把大量正常输出判成了违规 ——

@@ -68,6 +68,43 @@ export const iconLoadFailureTotal = createCounter({
 });
 
 /**
+ * 素材图片加载失败计数。
+ *
+ * ## 为什么 iconLoadFailureTotal 不够
+ *
+ * 上一项的注释写着「这个指标度量的不是网络失败，而是**契约漂移**」——
+ * 这一项就是它明确排除掉的另一半：ViewModel 里的素材 URL 取不到。
+ * 成因有三类，都是配置或运维问题而非代码缺陷：
+ * `S3_PUBLIC_BASE_URL` 填了渲染容器解析不到的地址、素材桶不允许匿名读、
+ * 对象已被清理而 ViewModel 永久保存（19.3）。
+ *
+ * ## 为什么必须有这一项
+ *
+ * `RenderReadyProbe` 刻意让坏图不阻塞就绪（十八章降级链），于是图片全部
+ * 加载失败时：页面 ready、`degraded=false`、`missingIcons=0`、导出 COMPLETED。
+ * 用户拿到一张图片位置全空白的长图，而**所有健康信号都是绿的**。
+ *
+ * 分子分母都记（`total` 走下面那个 gauge 式的 `_seen_total`）是因为
+ * 「21 张里坏 1 张」与「21 张全坏」在处置上完全不同：前者是降级链正常工作，
+ * 后者是配置错误。只记失败数无法区分，而告警需要的是比例。
+ *
+ * 不进 `travel_render_degraded_total`：那一项是 21.3 算「降级产物占比」的
+ * 分子，专指 17.3 的溢出未解决。混进图片失败会让那个比率失去原本含义。
+ */
+export const assetImageFailureTotal = createCounter({
+  name: 'travel_render_asset_image_failure_total',
+  help: '渲染页面中加载失败的素材图片数（S3_PUBLIC_BASE_URL 不可达 / 桶权限 / 对象缺失）',
+  labelNames: ['page_type'],
+});
+
+/** 分母：见过的 `<img>` 总数。告警要的是失败**比例**，只有分子判不出严重性 */
+export const assetImageSeenTotal = createCounter({
+  name: 'travel_render_asset_image_seen_total',
+  help: '渲染页面中的素材图片总数（travel_render_asset_image_failure_total 的分母）',
+  labelNames: ['page_type'],
+});
+
+/**
  * 渲染失败计数（TP-5-04，R-42）。
  *
  * ## 为什么要这一项
@@ -112,6 +149,7 @@ export function recordRenderQuality(input: {
   readonly round: number;
   readonly degraded: boolean;
   readonly missingIcons: number;
+  readonly images: { readonly total: number; readonly broken: number };
 }): void {
   const labels = {
     template_id: TEMPLATE_BY_PAGE_TYPE[input.pageType],
@@ -124,5 +162,14 @@ export function recordRenderQuality(input: {
   }
   if (input.missingIcons > 0) {
     iconLoadFailureTotal.inc({}, input.missingIcons);
+  }
+
+  /*
+   * 分母无条件记，包括 total 为 0 的页面 —— 否则「这一页本来就没有图」与
+   * 「这一页的图全没加载」在指标上无法区分，而两者一个正常一个是故障。
+   */
+  assetImageSeenTotal.inc({ page_type: input.pageType }, input.images.total);
+  if (input.images.broken > 0) {
+    assetImageFailureTotal.inc({ page_type: input.pageType }, input.images.broken);
   }
 }

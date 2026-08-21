@@ -268,12 +268,47 @@ async function capture(
    * 放在抓取**之前**：即使 PNG/PDF 生成失败，这一页的渲染质量数据仍然有效
    * —— 而那种情况下它恰恰更有用（排查「为什么这一页导不出来」）。
    */
+  const pageType = target.dayNumber === null ? 'full' : 'day';
   recordRenderQuality({
-    pageType: target.dayNumber === null ? 'full' : 'day',
+    pageType,
     round: rendered.round,
     degraded: rendered.degraded,
     missingIcons: rendered.missingIcons,
+    images: rendered.images,
   });
+
+  /*
+   * 素材图片加载失败要留下痕迹。
+   *
+   * 这一段是纯日志，不改变结局 —— 十八章的降级链要求坏图不阻断导出，
+   * 那个决定保持不变。补日志的理由是它此前**完全不可见**：图片全部取不到时
+   * 页面仍然 ready、degraded 仍是 false、导出仍然 COMPLETED，
+   * 用户拿到一张图片位置全空白的长图，而日志里一个字都没有。
+   *
+   * 全坏与部分坏用不同级别：全坏几乎一定是配置问题
+   * （S3_PUBLIC_BASE_URL 在渲染容器里解析不到、素材桶不允许匿名读），
+   * 而少数坏图是降级链在正常工作。
+   */
+  if (rendered.images.broken > 0) {
+    const allBroken = rendered.images.broken === rendered.images.total;
+    const detail = {
+      page_type: pageType,
+      broken: rendered.images.broken,
+      total: rendered.images.total,
+    };
+    if (allBroken) {
+      deps.logger.error(
+        detail,
+        `第 ${target.dayNumber ?? 0} 页的 ${rendered.images.total} 张素材图片全部加载失败 —— ` +
+          '检查 S3_PUBLIC_BASE_URL 在渲染容器内是否可解析、素材桶是否允许匿名读',
+      );
+    } else {
+      deps.logger.warn(
+        detail,
+        `第 ${target.dayNumber ?? 0} 页有 ${rendered.images.broken}/${rendered.images.total} 张素材图片加载失败`,
+      );
+    }
+  }
 
   try {
     const bytes =

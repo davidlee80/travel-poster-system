@@ -141,6 +141,38 @@ await runWorker({
           }
 
           /*
+           * 每次导出的结局都要落一行日志。
+           *
+           * 在此之前这里只记指标，于是 `docker logs` 里除了两行启动信息什么
+           * 都没有 —— 一次导出失败在日志中的痕迹为**零**，排查只能去翻
+           * `exports` 表的 `error_detail`，而那需要先知道 export_id。
+           * 指标能告诉你「失败率上升了」，日志才能告诉你「哪一次、为什么」。
+           *
+           * 失败用 error 级：16.3 说导出失败对用户非阻断（可退回网页版），
+           * 但对运维不是 —— 它意味着渲染链路有问题。
+           */
+          const summary = {
+            export_id: payload.exportId,
+            outcome: outcome.kind,
+            duration_ms: Date.now() - startedAt,
+            ...(outcome.kind === 'skipped'
+              ? { reason: outcome.reason }
+              : { format: outcome.format, scope: outcome.scope }),
+            ...(outcome.kind === 'completed' || outcome.kind === 'partial'
+              ? { files: outcome.files }
+              : {}),
+            ...(outcome.kind === 'partial' ? { failed_days: outcome.failed } : {}),
+            ...(outcome.kind === 'failed' ? { error_code: outcome.errorCode } : {}),
+          };
+          if (outcome.kind === 'failed') {
+            handle.logger.error(summary, '导出失败');
+          } else if (outcome.kind === 'partial') {
+            handle.logger.warn(summary, '导出部分成功');
+          } else {
+            handle.logger.info(summary, '导出完成');
+          }
+
+          /*
            * 16.3：导出失败**非阻断**（重试 1 次后跳过，记 warnings）。
            * 但队列层仍要知道这次失败了 —— 否则第一次失败就被当成成功，
            * 那次重试机会白白浪费。`exports` 行此刻已经是 FAILED 且带错误码，

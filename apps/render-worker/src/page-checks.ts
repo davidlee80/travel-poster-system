@@ -32,6 +32,51 @@ export async function countMissingIcons(page: Page): Promise<number> {
   return page.evaluate(() => document.querySelectorAll('[data-icon-missing]').length);
 }
 
+export interface BrokenImageReport {
+  /** 页面上 `<img>` 的总数 */
+  readonly total: number;
+  /** 其中加载已结束但没有位图的数量 */
+  readonly broken: number;
+}
+
+/**
+ * 数出未能加载的素材图片。
+ *
+ * ## 与 countMissingIcons 的分工
+ *
+ * 那一项数的是**契约漂移**（ViewModel 引用了清单外的图标键，9.1 把图标内联
+ * 进构建产物，运行期没有网络请求可失败）。这一项数的是**网络层失败**：
+ * ViewModel 里的素材 URL 取不到 —— `S3_PUBLIC_BASE_URL` 配错、素材桶不允许
+ * 匿名读、或对象已被清理而 ViewModel 永久保存（19.3）。
+ *
+ * ## 为什么必须单独数
+ *
+ * `RenderReadyProbe` 刻意让失败的图片**不阻塞就绪**（十八章降级链：一张坏图
+ * 不该让整个导出作废）。那个决定是对的，但它的副作用是：图片全军覆没时
+ * 页面照样 ready、`degraded` 照样 false、导出照样 COMPLETED —— 用户拿到一张
+ * 图片位置全是空白的长图，而监控一片绿色。
+ *
+ * 「一张坏图降级」与「21 张全坏」在系统里本该是两件事，而在此之前
+ * 它们的可观测表现完全一致。这个计数就是用来把两者分开的。
+ *
+ * ## 判据为什么带 complete
+ *
+ * `naturalWidth === 0` 单独用会误报懒加载尚未开始的图片 —— 那种图也没有位图，
+ * 但它不是故障。`complete` 为 true 表示加载已经结束（无论成功或失败），
+ * 两者合起来才等价于「尝试过且失败了」。
+ *
+ * 不抛错：与 countMissingIcons 一致，可见性由指标与日志承担。
+ */
+export async function countBrokenImages(page: Page): Promise<BrokenImageReport> {
+  return page.evaluate(() => {
+    const images = [...document.querySelectorAll('img')];
+    return {
+      total: images.length,
+      broken: images.filter((img) => img.complete && img.naturalWidth === 0).length,
+    };
+  });
+}
+
 // ── TP-1-11：中文字形断言 ──────────────────────────────────────────
 
 export interface LoadedFace {

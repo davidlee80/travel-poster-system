@@ -3,10 +3,12 @@ import type { BrowserContext, Page } from 'playwright-core';
 
 import { CJK_FONT_UNAVAILABLE, RENDER_ERROR_CODES, RenderError } from './errors.js';
 import {
+  countBrokenImages,
   countMissingIcons,
   detectOverflow,
   probeCjkGlyphs,
   waitForReady,
+  type BrokenImageReport,
   type OverflowReport,
 } from './page-checks.js';
 
@@ -65,6 +67,14 @@ export interface RenderPageResult {
    * 那种情况下页面根本没渲染出来。
    */
   readonly missingIcons: number;
+  /**
+   * 素材图片加载情况。
+   *
+   * 同样只在第 1 轮测量：素材 URL 能否取到与降级版式无关。
+   * `broken > 0` 不影响 `degraded` —— 后者专指 17.3 的溢出未解决，
+   * 混进图片失败会让「降级产物占比」这个指标失去原本的含义。
+   */
+  readonly images: BrokenImageReport;
 }
 
 /**
@@ -88,6 +98,7 @@ export async function renderPage(request: RenderPageRequest): Promise<RenderPage
   try {
     let last: { readonly variant: RenderVariant; readonly overflow: OverflowReport } | null = null;
     let missingIcons = 0;
+    let images: BrokenImageReport = { total: 0, broken: 0 };
 
     for (const [index, variant] of RENDER_ROUNDS.entries()) {
       const remaining = TOTAL_RENDER_BUDGET_MS - (now() - startedAt);
@@ -112,6 +123,7 @@ export async function renderPage(request: RenderPageRequest): Promise<RenderPage
       if (index === 0) {
         await assertCjkGlyphs(page);
         missingIcons = await countMissingIcons(page);
+        images = await countBrokenImages(page);
       }
 
       const overflow = await detectOverflow(page);
@@ -138,6 +150,7 @@ export async function renderPage(request: RenderPageRequest): Promise<RenderPage
           degraded: false,
           elapsedMs: now() - startedAt,
           missingIcons,
+          images,
         };
       }
     }
@@ -159,6 +172,7 @@ export async function renderPage(request: RenderPageRequest): Promise<RenderPage
       degraded: true,
       elapsedMs: now() - startedAt,
       missingIcons,
+      images,
     };
   } catch (error) {
     // 失败路径必须关 page，否则 browser 会攒着永不释放的渲染进程

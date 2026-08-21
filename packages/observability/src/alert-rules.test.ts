@@ -86,19 +86,46 @@ describe('Prometheus 规则文件', () => {
     }
   });
 
-  it('21.3 的六条告警一条不少', () => {
+  /** 21.3 表格明确要求的六条 */
+  const DESIGN_ALERTS = [
+    'TravelCjkFontUnavailable',
+    'TravelHeroCacheHitRatioLow',
+    'TravelIconLoadFailure',
+    'TravelJobT1SlaBreach',
+    'TravelPlanRepairIterationsHigh',
+    'TravelRenderDegradedRatioHigh',
+  ] as const;
+
+  /**
+   * 实现补充的告警，与 METRICS_CATALOG 里 `source: 'supplementary'` 同一性质。
+   *
+   * 每加一条都要在这里写明理由 —— 告警的边际成本是「值班的人被叫起来」，
+   * 而没有理由的告警最终会被静音，连带着把有理由的那些一起淹掉。
+   */
+  const SUPPLEMENTARY_ALERTS: Readonly<Record<string, string>> = {
+    TravelAssetImageLoadFailureRatioHigh:
+      'RenderReadyProbe 刻意让坏图不阻塞就绪（十八章降级链），因此素材 URL 全部取不到时页面仍 ready、degraded 仍为 false、导出仍 COMPLETED —— 用户拿到图片位置全空白的长图而所有信号都是绿的。21.3 的六条里没有一条能覆盖这个失效',
+  };
+
+  it('21.3 的六条告警一条不少，补充的告警都有理由', () => {
     /*
      * 逐个列出而不是只断言数量：少一条时报错信息要能说出少了哪一条。
      * 数量断言在「删了一条、加了一条」时完全沉默。
      */
-    expect(alerts.map((rule) => rule.alert).sort()).toEqual([
-      'TravelCjkFontUnavailable',
-      'TravelHeroCacheHitRatioLow',
-      'TravelIconLoadFailure',
-      'TravelJobT1SlaBreach',
-      'TravelPlanRepairIterationsHigh',
-      'TravelRenderDegradedRatioHigh',
-    ]);
+    const present = alerts.map((rule) => rule.alert);
+    for (const name of DESIGN_ALERTS) {
+      expect(present, `21.3 要求的 ${name} 不在规则文件里`).toContain(name);
+    }
+
+    // 反向：规则文件里的每一条要么是 21.3 要求的，要么在补充清单里有理由
+    for (const name of present) {
+      const known =
+        DESIGN_ALERTS.includes(name as (typeof DESIGN_ALERTS)[number]) ||
+        SUPPLEMENTARY_ALERTS[name!] !== undefined;
+      expect(known, `${name} 既不在 21.3 的六条里，也没在 SUPPLEMENTARY_ALERTS 写明理由`).toBe(
+        true,
+      );
+    }
   });
 
   it('每条告警都有 severity、说明与 runbook 链接', () => {
@@ -127,14 +154,28 @@ describe('Prometheus 规则文件', () => {
     expect(withoutFor.sort()).toEqual(['TravelCjkFontUnavailable', 'TravelIconLoadFailure']);
   });
 
-  it('两条 critical 告警对应验收标准里「恒为 0」的两项', () => {
+  it('critical 只给「产物对用户无价值」的那几条', () => {
     const critical = alerts
       .filter((rule) => rule.labels?.['severity'] === 'critical')
       .map((rule) => rule.alert)
       .sort();
 
-    // 验收标准 5（图标 100% 加载）与 17.5（字形缺失不允许降级输出）
-    expect(critical).toEqual(['TravelCjkFontUnavailable', 'TravelIconLoadFailure']);
+    /*
+     * 判据不是「严重」而是**产物是否还有价值**：
+     *   字形缺失   → 豆腐块页面（17.5 明确不允许降级输出）
+     *   图标缺失   → 契约漂移，验收标准 5 要求恒为 0
+     *   素材图全坏 → 图片位置全空白的长图，而系统报告 COMPLETED
+     * 三者的共同点是「交付了，但交付的东西没用」，而这恰恰是监控最容易漏掉的
+     * 一类故障 —— 它不表现为失败率上升。
+     *
+     * 降级产物占比、缓存命中率、SLA 违约都是 warning：那些情况下用户拿到的
+     * 东西仍然可用，只是变差了。
+     */
+    expect(critical).toEqual([
+      'TravelAssetImageLoadFailureRatioHigh',
+      'TravelCjkFontUnavailable',
+      'TravelIconLoadFailure',
+    ]);
   });
 
   it('SLA 告警只看 ≤7 天那一档', () => {

@@ -197,6 +197,22 @@ export const METRICS_CATALOG: readonly CatalogEntry[] = [
     note: '采集点是渲染页面里的 [data-icon-missing]：那是「图标加载失败」唯一可观测的形态（验收标准 5）',
   },
   {
+    name: 'travel_render_asset_image_failure_total',
+    kind: 'counter',
+    labels: ['page_type'],
+    owner: 'render-worker',
+    source: 'supplementary',
+    note: '设计稿没有这一项。补它的理由：RenderReadyProbe 刻意让坏图不阻塞就绪（十八章降级链），因此素材 URL 全部取不到时页面仍 ready、degraded 仍为 false、导出仍 COMPLETED —— 用户拿到图片位置全空白的长图而所有健康信号都是绿的。travel_icon_load_failure_total 明确只度量契约漂移，不覆盖网络失败',
+  },
+  {
+    name: 'travel_render_asset_image_seen_total',
+    kind: 'counter',
+    labels: ['page_type'],
+    owner: 'render-worker',
+    source: 'supplementary',
+    note: '上一项的分母。「21 张坏 1 张」是降级链正常工作，「21 张全坏」是配置错误，只记失败数分不出这两者，而告警要的是比例',
+  },
+  {
     name: 'travel_render_failure_total',
     kind: 'counter',
     labels: ['reason_code'],
