@@ -91,7 +91,21 @@ export const PLAN_PROMPT_VERSION = 'plan_v1';
  * 天数、目的地、硬约束对得上，否则默认配置下的 Worker 处理不了任何请求
  * （见 fixture-plan.ts）。真实客户端与请求无关，直接传实例即可。
  */
-export type LlmClientFactory = (normalized: NormalizedTravelRequest) => LlmClient;
+export type LlmClientFactory = (
+  normalized: NormalizedTravelRequest,
+  context: JobModelContext,
+) => LlmClient | Promise<LlmClient>;
+
+/**
+ * 装配模型客户端时需要知道的任务身份。
+ *
+ * `tierLevel` 决定候选模型池（迁移 0009）。做成一个对象而不是两个位置参数：
+ * 下一次要加维度（地域、A/B 分组）时不必再改一遍所有工厂的签名。
+ */
+export interface JobModelContext {
+  readonly userType: UserType;
+  readonly tierLevel: number;
+}
 
 export interface GeneratePlanDeps {
   readonly plans: TravelPlansRepository;
@@ -123,8 +137,12 @@ export interface GeneratePlanDeps {
    * 计数从来没被重置过。
    *
    * 缺省时降级链没有第 1 级（等价于 21.4 的全局熔断已打开）。
+   *
+   * **可以是异步的**：候选模型池要查库（按 `tierLevel` 选池，迁移 0009）。
+   * 同步签名的代价是把那次查询搬到进程启动时，而那样一来运营改配置就要
+   * 重启 Worker 才生效 —— 池存在数据库里的意义正是不必重启。
    */
-  readonly aiAssets?: (userType: UserType) => AiLayerDeps;
+  readonly aiAssets?: (context: JobModelContext) => AiLayerDeps | Promise<AiLayerDeps>;
 
   /**
    * 授权图源搜索层的**工厂**（TP-6-03/06）。
@@ -477,8 +495,13 @@ export async function generatePlan(
     return failJob('PLAN_SCHEMA_INVALID');
   }
   const normalized = normalizedParsed.data;
-  // fake 模式需要按请求构造录制输出；真实客户端与请求无关
-  const llm: LlmClient = typeof deps.llm === 'function' ? deps.llm(normalized) : deps.llm;
+  // fake 模式需要按请求构造录制输出；真实客户端还要按 tier 选候选池
+  const modelContext: JobModelContext = {
+    userType: context.userType,
+    tierLevel: context.tierLevel,
+  };
+  const llm: LlmClient =
+    typeof deps.llm === 'function' ? await deps.llm(normalized, modelContext) : deps.llm;
 
   /*
    * VALIDATING_REQUEST：3.1.2 的 N-01～N-12 已在 API 的同步路径执行过
@@ -736,7 +759,7 @@ export async function generatePlan(
     };
 
     await step('RESOLVING_ASSETS');
-    const ai = deps.aiAssets?.(context.userType);
+    const ai = deps.aiAssets === undefined ? undefined : await deps.aiAssets(modelContext);
     const licensedSource = deps.searchAssets?.();
     const result = await buildAndSavePresentations(
       {

@@ -962,4 +962,29 @@ describeIntegration('计划仓储（集成，需 PostgreSQL）', () => {
       expect(page.items).toHaveLength(1);
     });
   });
+
+  describe('findJobContext 的 tier_level（迁移 0009）', () => {
+    it('缺省为 0 —— 未分层的用户走默认候选池', async () => {
+      const userId = await anonymousUser();
+      const handles = await repository.createGeneration(generationInput(userId, key('tier0')));
+
+      const context = await repository.findJobContext(handles.jobId);
+      expect(context?.tierLevel).toBe(0);
+    });
+
+    it('读的是库里的当前值，不是入队时的快照', async () => {
+      /*
+       * 用户在任务排队期间升级订阅（排队本身可能持续几分钟）时，应当按
+       * **新**等级选模型池。把 tier_level 放进队列载荷就做不到这一点 ——
+       * 而那种过期只会表现为「付费用户偶尔没用上付费模型」，查不出原因。
+       */
+      const userId = await registeredUser('tier-upgrade@example.com');
+      const handles = await repository.createGeneration(generationInput(userId, key('tierUp')));
+
+      await pool.query('UPDATE users SET tier_level = 10 WHERE id = $1', [userId]);
+
+      const context = await repository.findJobContext(handles.jobId);
+      expect(context?.tierLevel).toBe(10);
+    });
+  });
 });

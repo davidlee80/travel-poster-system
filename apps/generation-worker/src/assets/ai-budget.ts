@@ -4,21 +4,33 @@ import type { AssetRole } from '@tps/schemas';
 /**
  * AI 图片生成的预算与熔断（TP-4-03/15/17，设计稿 21.2 措施二、21.4）。
  *
- * 三层限制，从窄到宽：
+ * 四层限制，从窄到宽：
  *
  * ```text
  * 1. 单任务实时 Hero 次数   21.2 措施二「最多 2 次」∩ 21.4 的 QUOTA_*_AI_HERO
  *                           匿名为 0 → 匿名任务不产生任何 AI Hero（TP-4-17）
  * 2. 单任务 AI 图总张数     21.4「3 张」，超出后续槽位直接走占位图
- * 3. 全局日调用量熔断       21.4「达到预算阈值时全局切到素材库 + 占位图」
+ * 3. 单任务 AI 累计耗时     IMAGE_JOB_AI_BUDGET_MS，时延闸（见下）
+ * 4. 全局日调用量熔断       21.4「达到预算阈值时全局切到素材库 + 占位图」
  * ```
  *
  * ## 为什么 Hero 次数与总张数是两个计数而不是一个
  *
- * 它们防的是两件不同的事。总张数（3）是**成本**上限；Hero 次数（2）是
- * **时延**上限 —— 21.2 的 T2 目标（P95 < 110 秒）扣掉 T1 的 75 秒只剩
- * 35 秒，而一次 Hero 生成最多 20 秒。合成一个数的话，一个 14 天的任务
- * 可能把 3 张额度全花在 Hero 上（3 × 20 = 60 秒），T2 必然违约。
+ * 它们防的是两件不同的事。总张数（3）是**成本**上限；Hero 次数（2）曾是
+ * **时延**上限 —— 21.2 的 T2 目标扣掉 T1 只剩一个固定窗口，而一次 Hero
+ * 生成最多 20 秒。合成一个数的话，一个 14 天的任务可能把 3 张额度全花在
+ * Hero 上（3 × 20 = 60 秒），T2 必然违约。
+ *
+ * ## 为什么次数不再够用：新增累计耗时闸
+ *
+ * 上面那句「一次最多 20 秒」是**硬编码常量**时才成立的推论。多模型故障转移
+ * 把单候选超时改成了可配（默认 40 秒），并且一条候选链可以发出多个请求 ——
+ * 同样的「2 次 Hero」现在可以是 80 秒也可以是 400 秒。次数就此只剩成本含义。
+ *
+ * 因此时延要有自己的预算：**次数管成本、耗时管时延，两者先到先停**。
+ * 耗时由调用方在每次真实的模型调用后用 `recordElapsed` 回报 ——
+ * 放在这里而不是让每个上限各自估算，是因为「已经花了多少时间」这件事
+ * 只有实际发起调用的那一层知道。
  *
  * ## 21.4 的 `QUOTA_*_AI_HERO` 按「每任务」理解
  *
@@ -87,6 +99,7 @@ export type AiBudgetDecision =
 export type AiBudgetRejection =
   | 'HERO_QUOTA_EXHAUSTED'
   | 'JOB_IMAGE_LIMIT'
+  | 'JOB_AI_TIME_EXHAUSTED'
   | 'GLOBAL_CIRCUIT_OPEN'
   | 'PROVIDER_FAILING'
   | 'ROLE_NOT_ELIGIBLE';
@@ -96,6 +109,15 @@ export interface AiBudgetDeps {
   readonly userType: UserType;
   /** 21.4 的 `QUOTA_*_AI_HERO`。匿名为 0 */
   readonly heroQuota: number;
+  /**
+   * 任务级 AI 累计耗时上限（`IMAGE_JOB_AI_BUDGET_MS`）。
+   *
+   * **必填而不是带默认值**：这是时延的唯一防线，而「忘了接线」与
+   * 「有意不限」在带默认值的形态下长得一模一样。少传一个参数会让
+   * TypeScript 立刻报错，而一个静默生效的 `Infinity` 只会在 T2 违约时
+   * 才被发现 —— 那时排查方向会先落在模型供应商上。
+   */
+  readonly jobAiBudgetMs: number;
   readonly dailyBudget?: number;
   readonly now?: () => Date;
 }
@@ -111,16 +133,23 @@ export class AiImageBudget {
   private images = 0;
   private heroes = 0;
   private failures = 0;
+  private elapsedMs = 0;
 
   constructor(private readonly deps: AiBudgetDeps) {}
 
-  /** 已用张数与失败次数，供 `warnings` 与日志使用 */
+  /** 已用张数、失败次数与累计耗时，供 `warnings` 与日志使用 */
   get used(): {
     readonly images: number;
     readonly heroes: number;
     readonly failures: number;
+    readonly elapsedMs: number;
   } {
-    return { images: this.images, heroes: this.heroes, failures: this.failures };
+    return {
+      images: this.images,
+      heroes: this.heroes,
+      failures: this.failures,
+      elapsedMs: this.elapsedMs,
+    };
   }
 
   /**
@@ -148,6 +177,15 @@ export class AiImageBudget {
       return { allowed: false, reason: 'JOB_IMAGE_LIMIT' };
     }
 
+    if (this.elapsedMs >= this.deps.jobAiBudgetMs) {
+      /*
+       * 时延闸。与张数闸并列而不是二选一：一个 3 天的任务可能张数没用完
+       * 但一次候选链就把窗口花光，而一个 14 天的任务可能每次都很快、
+       * 张数先到。两个闸各自独立地对应一种真实情形。
+       */
+      return { allowed: false, reason: 'JOB_AI_TIME_EXHAUSTED' };
+    }
+
     if (this.failures >= MAX_AI_FAILURES_PER_JOB) {
       // 本任务内的供应商已连续失败：继续试只是在消耗用户的等待时间
       return { allowed: false, reason: 'PROVIDER_FAILING' };
@@ -163,6 +201,21 @@ export class AiImageBudget {
     this.images += 1;
     if (hero) this.heroes += 1;
     return { allowed: true };
+  }
+
+  /**
+   * 记一次真实模型调用的耗时（无论成败）。
+   *
+   * 由调用方在调用返回后回报，而不是让本类自己掐表：一次 `reserve` 到
+   * 实际发起调用之间还隔着并发锁与同键等待（最多 22 秒），把那段算进来
+   * 会让「AI 花了多久」变成「这个槽位等了多久」，两者的处置完全不同。
+   *
+   * 与额度相反，**耗时不可归还**（`refund` 不动它）：额度还了还能给别的
+   * 槽位用，而时间一旦流走，T2 的窗口就是真的少了那么多。
+   */
+  recordElapsed(ms: number): void {
+    // 负值只可能来自时钟回拨；忽略而不是让已花掉的时间被凭空还回来
+    this.elapsedMs += Math.max(0, ms);
   }
 
   /**
@@ -190,9 +243,22 @@ export class AiImageBudget {
     this.failures += 1;
   }
 
-  /** 生成成功后记入全局日计数（熔断的唯一数据来源） */
-  async commit(): Promise<void> {
+  /**
+   * 记入全局日计数（熔断的唯一数据来源）。
+   *
+   * ## 口径是「发出的请求数」而不是「成功的张数」
+   *
+   * `costUnits` 由客户端给出，候选链上等于**实际发出的请求数**。
+   * 超时的那些候选，供应商很可能已经生成完并计了费 —— 我们只是没等到。
+   * 记 1 会让 21.4 的 600 熔断比真实成本低估若干倍，而那个阈值存在的
+   * 意义就是反映成本。
+   *
+   * `costUnits` 为 0 时不写：`FakeImageClient` 报 0，而它不花钱 ——
+   * 让开发环境的调用混进成本核算会让熔断在本地毫无意义地打开。
+   */
+  async commit(costUnits = 1): Promise<void> {
+    if (costUnits <= 0) return;
     const now = (this.deps.now ?? (() => new Date()))();
-    await this.deps.counters.increment(aiImageDailyKey(now), DAILY_TTL_SECONDS);
+    await this.deps.counters.increment(aiImageDailyKey(now), DAILY_TTL_SECONDS, costUnits);
   }
 }

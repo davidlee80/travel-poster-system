@@ -1,6 +1,7 @@
 import {
   checkDatabase,
   createAssetsRepository,
+  createModelPoolsRepository,
   createPool,
   createPresentationsRepository,
   createRetrievalRepository,
@@ -41,6 +42,7 @@ import { loadQuotaConfig, optionalInt, quotaFor, requireString, runWorker } from
 import { UnrecoverableError, Worker } from 'bullmq';
 
 import { AiImageBudget, DEFAULT_AI_IMAGE_DAILY_BUDGET } from './assets/ai-budget.js';
+import { selectImageClient, selectLlmClient } from './assets/model-selection.js';
 import { ImageSearchBudget } from './assets/search-budget.js';
 import { isUnrecoverable } from './retry-policy.js';
 import { renderFakeGeneratedImage } from './assets/fake-image.js';
@@ -66,6 +68,7 @@ const redis = createRedis(redisUrl);
 const queueRedis = createQueueRedis(redisUrl);
 
 const plans = createTravelPlansRepository(dbPool);
+const modelPools = createModelPoolsRepository(dbPool);
 const retrievalRepository = createRetrievalRepository(dbPool);
 const assetsRepository = createAssetsRepository(dbPool);
 const presentationsRepository = createPresentationsRepository(dbPool);
@@ -81,10 +84,8 @@ const storage = new S3ObjectStorage(loadAssetsStorageConfig());
  * —— 也就是默认配置下的 Worker 处理不了任何请求（见 fixture-plan.ts）。
  */
 const llmConfig = loadLlmConfig();
-const llm: LlmClientFactory | ReturnType<typeof createLlmClient> =
-  llmConfig.mode === 'fake'
-    ? (normalized) => new FakeLlmClient([fixturePlanFor(normalized)])
-    : createLlmClient(llmConfig);
+/** `fake` 模式下没有真实客户端；工厂在 `start` 里按模式分流（见下） */
+const envLlm = llmConfig.mode === 'fake' ? null : createLlmClient(llmConfig);
 const embedding = new LocalHashingEmbeddingClient();
 
 /*
@@ -122,9 +123,42 @@ await runWorker({
         llm_model: llmConfig.model || '(fake)',
         image_mode: imageConfig.mode,
         image_model: imageConfig.model || '(fake)',
+        image_timeout_ms: imageConfig.timeoutMs,
+        image_job_ai_budget_ms: imageConfig.jobAiBudgetMs,
       },
       '生成 Worker 就绪，开始消费队列',
     );
+
+    /*
+     * 配置越过 21.2 的素材窗口时必须留下痕迹。`loadImageConfig` 有意从
+     * 「硬拒」改成了「允许 + 告知」（见 image.ts），而「允许」的前提是
+     * 「不静默」—— 没人显示这条的话那个改动就退化成了单纯放宽。
+     */
+    if (imageConfig.slaWarning !== undefined) {
+      handle.logger.warn({ reason_code: 'IMAGE_SLA_BUDGET_EXCEEDED' }, imageConfig.slaWarning);
+    }
+
+    /*
+     * 文本模型的每任务工厂。
+     *
+     * `fake` 模式与候选池互斥：录制输出必须与请求的天数、目的地、硬约束
+     * 对得上，而池里的模型名在 fake 模式下没有对应的客户端。
+     * 真实模式下按 `tier_level` 选池，无配置时回落到 `LLM_MODEL` 单模型 ——
+     * 也就是迁移后不配置任何池时行为与现在完全一致。
+     */
+    const llm: LlmClientFactory = async (normalized, context) => {
+      if (envLlm === null) return new FakeLlmClient([fixturePlanFor(normalized)]);
+
+      const selected = await selectLlmClient({
+        pools: modelPools,
+        tierLevel: context.tierLevel,
+        logger: handle.logger,
+        fallback: envLlm,
+        build: (model) => createLlmClient({ ...llmConfig, model }),
+        perAttemptMs: llmConfig.timeoutMs,
+      });
+      return selected.client;
+    };
 
     const worker = new Worker(
       PLAN_QUEUE_NAME,
@@ -183,18 +217,60 @@ await runWorker({
                     dailyBudget: imageSearchConfig.dailyBudget,
                   }),
                 }),
-                aiAssets: (userType) => ({
-                  image,
-                  assetLock,
-                  imageTimeoutMs: imageConfig.timeoutMs,
-                  userTypeLabel: userType,
-                  budget: new AiImageBudget({
-                    counters,
-                    userType,
-                    heroQuota: quotaFor(quotaConfig, userType).aiHero,
-                    dailyBudget: aiDailyBudget,
-                  }),
-                }),
+                aiAssets: async ({ userType, tierLevel }) => {
+                  /*
+                   * 候选模型按 `tier_level` 从池里取（迁移 0009）。
+                   * 无配置时 `selectImageClient` 回落到 `image`（env 单模型），
+                   * 装饰器也不会包装 —— 标准用户档的单候选路径零开销。
+                   */
+                  const selected = await selectImageClient({
+                    pools: modelPools,
+                    tierLevel,
+                    logger: handle.logger,
+                    fallback: image,
+                    build: (model) =>
+                      createImageClient(
+                        { ...imageConfig, model },
+                        { renderer: renderFakeGeneratedImage },
+                      ),
+                    perAttemptMs: imageConfig.timeoutMs,
+                    totalBudgetMs: imageConfig.jobAiBudgetMs,
+                    onOutcome: (outcome) => {
+                      /*
+                       * 只在真的动用了备选时才记一条：`position > 0` 是
+                       * 「主模型没顶住」的唯一信号，而故障转移会把它掩盖成
+                       * 「慢了一点」。指标在任务 6 补，这里先让它可见。
+                       */
+                      if (outcome.position !== 0) {
+                        handle.logger.warn(
+                          {
+                            reason_code: 'AI_IMAGE_FAILOVER',
+                            position: outcome.position,
+                            attempts: outcome.attemptsStarted,
+                            ok: outcome.ok,
+                          },
+                          outcome.ok
+                            ? `图像主模型未胜出，采用第 ${outcome.position + 1} 个候选`
+                            : `图像候选链全部失败（发出 ${outcome.attemptsStarted} 个请求）`,
+                        );
+                      }
+                    },
+                  });
+
+                  return {
+                    image: selected.client,
+                    assetLock,
+                    imageTimeoutMs: imageConfig.timeoutMs,
+                    userTypeLabel: userType,
+                    budget: new AiImageBudget({
+                      counters,
+                      userType,
+                      heroQuota: quotaFor(quotaConfig, userType).aiHero,
+                      dailyBudget: aiDailyBudget,
+                      jobAiBudgetMs: imageConfig.jobAiBudgetMs,
+                    }),
+                  };
+                },
               },
               payload,
             );

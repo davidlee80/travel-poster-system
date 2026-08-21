@@ -1,6 +1,13 @@
 import { heroCacheKey } from '@tps/assets';
 import type { AssetCandidateRow, AssetsRepository, InsertAssetInput } from '@tps/db';
-import { FakeImageClient, ImageTimeoutError, type EmbeddingClient } from '@tps/llm';
+import {
+  FakeImageClient,
+  ImageTimeoutError,
+  ImageUnavailableError,
+  wrapImageFailover,
+  type EmbeddingClient,
+  type ImageClient,
+} from '@tps/llm';
 import { InMemoryAssetLock, type AssetLock } from '@tps/queue';
 import {
   AssetRequirementItemSchema,
@@ -13,8 +20,8 @@ import { InMemoryCounterStore, createSilentLogger } from '@tps/shared';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 
-import { AiImageBudget } from '../ai-budget.js';
-import { AI_WAIT_TIMEOUT_MS, resolveByAi, seedForCacheKey } from './ai-generator.js';
+import { AiImageBudget, aiImageDailyKey } from '../ai-budget.js';
+import { aiWaitTimeoutMs, resolveByAi, seedForCacheKey } from './ai-generator.js';
 
 /**
  * ai-generator resolver（TP-4-02/03/06，设计稿 9.3～9.5、11.x、13.8）。
@@ -84,6 +91,10 @@ function harness(
     readonly lock?: AssetLock;
     readonly heroQuota?: number;
     readonly byCacheKey?: Record<string, AssetCandidateRow>;
+    readonly jobAiBudgetMs?: number;
+    readonly now?: () => number;
+    /** 替换整个图片客户端（用于验证故障转移链在客户端边界之内） */
+    readonly image?: ImageClient;
   } = {},
 ): Harness {
   const inserted: InsertAssetInput[] = [];
@@ -123,10 +134,12 @@ function harness(
     insertVariant: () => Promise.resolve(),
   };
 
-  const image = new FakeImageClient(async (request) => {
-    if (options.fail !== undefined) throw options.fail;
-    return (options.renderer ?? gradient)(request.width, request.height);
-  });
+  const image =
+    options.image ??
+    new FakeImageClient(async (request) => {
+      if (options.fail !== undefined) throw options.fail;
+      return (options.renderer ?? gradient)(request.width, request.height);
+    });
 
   return {
     inserted,
@@ -144,7 +157,9 @@ function harness(
         counters: new InMemoryCounterStore(),
         userType: 'REGISTERED',
         heroQuota: options.heroQuota ?? 2,
+        jobAiBudgetMs: options.jobAiBudgetMs ?? 80_000,
       }),
+      ...(options.now === undefined ? {} : { now: options.now }),
     },
   };
 }
@@ -328,13 +343,24 @@ describe('13.8 同键并发去重（TP-4-06）', () => {
     const h = harness({ lock });
     let clock = 0;
     const outcome = await resolveByAi(
-      { ...h.deps, assetLock: lock, now: () => (clock += AI_WAIT_TIMEOUT_MS) },
+      { ...h.deps, assetLock: lock, now: () => (clock += aiWaitTimeoutMs(h.deps.imageTimeoutMs)) },
       heroItem(),
       HERO_KEY,
     );
 
     expect(outcome.resolved).toBeNull();
     expect(outcome.warnings).toEqual(['ASSET_AI_GENERATION_TIMEOUT']);
+  });
+
+  it('等待上限严格大于持锁方的单候选超时（否则等待方总是先放弃）', () => {
+    /*
+     * 原来这是硬编码的 22 秒，推导自「AI 超时 20 秒」。超时改成可配之后，
+     * 40 秒的默认值会让 22 秒的等待方每次都先走占位图 —— 而它要的图
+     * 十几秒后就落库了。13.8 要求的恰恰是「其余等待结果」。
+     */
+    for (const timeoutMs of [8_000, 20_000, 40_000, 60_000]) {
+      expect(aiWaitTimeoutMs(timeoutMs)).toBeGreaterThan(timeoutMs);
+    }
   });
 
   it('10 个同键并发只有 1 次真的生成', async () => {
@@ -355,5 +381,110 @@ describe('13.8 同键并发去重（TP-4-06）', () => {
     for (const outcome of outcomes) {
       expect(outcome.resolved?.resolution.strategy ?? 'CACHE_HIT').not.toBe('LOCAL_LIBRARY_MATCH');
     }
+  });
+});
+
+describe('候选模型故障转移与预算的交界', () => {
+  it('整条候选链失败只记 1 次 failure，不是每个候选记 1 次', async () => {
+    /*
+     * ## 这条断言防的是「failover 跑不完一轮」
+     *
+     * `MAX_AI_FAILURES_PER_JOB = 2`：按候选记的话，一条 3 候选的链失败一次
+     * 就把任务内的失败额度用光了 —— 第二个槽位直接 `PROVIDER_FAILING`，
+     * 于是配了候选池却只有第一个槽位真的用上。
+     *
+     * 之所以现在天然成立，是因为故障转移在 **ImageClient 边界之内**：
+     * 对 resolver 而言一条链就是一次 `generate`。这条测试冻结那个边界 ——
+     * 哪天有人把重试搬到 resolver 里，它会立刻变红。
+     */
+    const failing = (name: string): ImageClient => ({
+      model: name,
+      generate: () => Promise.reject(new ImageUnavailableError(`${name} 挂了`)),
+    });
+    const chain = wrapImageFailover([failing('a'), failing('b'), failing('c')], {
+      perAttemptMs: 50,
+      totalBudgetMs: 500,
+    });
+
+    const h = harness({ image: chain });
+    const outcome = await resolveByAi(h.deps, heroItem(), HERO_KEY);
+
+    expect(outcome.resolved).toBeNull();
+    expect(outcome.warnings).toEqual(['ASSET_AI_GENERATION_FAILED']);
+    expect(h.deps.budget.used.failures).toBe(1);
+  });
+
+  it('日计数记链上实际发出的请求数（costUnits），不是 1', async () => {
+    /*
+     * 候选 1 快速失败、候选 2 成功 → 发出了 2 个请求。
+     * 装饰器把 `costUnits` 置成 2，预算层照它写日计数（本轮决策 4）。
+     */
+    const good = new FakeImageClient(
+      (request) => gradient(request.width, request.height),
+      'good-model',
+    );
+    const chain = wrapImageFailover(
+      [
+        {
+          model: 'bad-model',
+          generate: () => Promise.reject(new ImageUnavailableError('模型名不存在')),
+        },
+        // 真实客户端的 costUnits 是 1；包装后应变成 2（两次请求）
+        {
+          model: 'good-model',
+          generate: (request) => good.generate(request).then((r) => ({ ...r, costUnits: 1 })),
+        },
+      ],
+      { perAttemptMs: 50, totalBudgetMs: 500 },
+    );
+
+    const counters = new InMemoryCounterStore();
+    const h = harness({ image: chain });
+    const budget = new AiImageBudget({
+      counters,
+      userType: 'REGISTERED',
+      heroQuota: 2,
+      jobAiBudgetMs: 80_000,
+      now: () => new Date('2026-08-21T10:00:00Z'),
+    });
+
+    const outcome = await resolveByAi({ ...h.deps, budget }, heroItem(), HERO_KEY);
+
+    expect(outcome.resolved).not.toBeNull();
+    expect(await counters.peek(aiImageDailyKey(new Date('2026-08-21T10:00:00Z')))).toBe(2);
+  });
+
+  it('模型调用的耗时进任务级预算，耗尽后下一个槽位拿不到 AI', async () => {
+    let clock = 0;
+    const h = harness({
+      jobAiBudgetMs: 40_000,
+      now: () => clock,
+      // 每次生成消耗 40 秒墙钟
+      renderer: async (width, height) => {
+        clock += 40_000;
+        return gradient(width, height);
+      },
+    });
+
+    const first = await resolveByAi(h.deps, heroItem(), HERO_KEY);
+    expect(first.resolved).not.toBeNull();
+    expect(h.deps.budget.used.elapsedMs).toBe(40_000);
+
+    // 张数（3）与 Hero 次数（2）都还有余额，但时间没有了
+    const second = await resolveByAi(h.deps, heroItem(), `${HERO_KEY}:2`);
+    expect(second.resolved).toBeNull();
+    expect(second.warnings).toEqual(['ASSET_AI_GENERATION_FAILED']);
+  });
+
+  it('JOB_AI_TIME_EXHAUSTED 进 warnings 而不是抛错（13.7 素材类非阻断）', async () => {
+    let clock = 0;
+    const h = harness({ jobAiBudgetMs: 1, now: () => clock });
+    h.deps.budget.recordElapsed(1);
+    clock += 1;
+
+    // 不抛错，且不调用模型
+    const outcome = await resolveByAi(h.deps, heroItem(), HERO_KEY);
+    expect(outcome.warnings).toEqual(['ASSET_AI_GENERATION_FAILED']);
+    expect(h.inserted).toHaveLength(0);
   });
 });

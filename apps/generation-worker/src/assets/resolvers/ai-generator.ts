@@ -69,7 +69,12 @@ export interface AiGeneratorDeps extends IngestDeps {
   readonly image: ImageClient;
   readonly assetLock: AssetLock;
   readonly budget: AiImageBudget;
-  /** 21.2 措施二：20 秒。由配置传入，不在这里硬编码（可下调，不可上调） */
+  /**
+   * 单候选超时（`IMAGE_TIMEOUT_MS`，默认 40 秒）。由配置传入。
+   *
+   * 曾经的注释是「21.2 措施二：20 秒，可下调不可上调」。上限改由
+   * `loadImageConfig` 按「与任务级 AI 预算的关系」校验，这里只是照用。
+   */
   readonly imageTimeoutMs: number;
   /**
    * `travel_ai_image_total` 的 `user_type` 标签（21.3 的 R-13 通用维度）。
@@ -88,8 +93,24 @@ export interface AiGenerateOutcome {
   readonly warnings: readonly AssetWarningCode[];
 }
 
-/** 等待他人生成完成的上限。比 AI 超时（20 秒）多 2 秒，覆盖后处理与落库 */
-export const AI_WAIT_TIMEOUT_MS = 22_000;
+/** 在持锁方的单候选超时之外多给的余量，覆盖后处理、上传与落库 */
+export const AI_WAIT_MARGIN_MS = 2_000;
+
+/**
+ * 等待他人生成完成的上限。
+ *
+ * **必须由单候选超时推导，不能是独立常量。** 原来它是硬编码的 22 秒
+ * （= 20 秒超时 + 2 秒余量）；超时改成可配（默认 40 秒）之后，那个 22 秒
+ * 就比持锁方自己的超时还短 —— 等待方每次都先放弃走占位图，而它要的图
+ * 十几秒后就落库了。表现是「14 天里只有 1 天有 Hero」，而 13.8 要求的
+ * 恰恰是「其余等待结果」。
+ *
+ * 写成函数而不是让调用方自己加：这个不变式（等待 > 生成）一旦要靠人记住，
+ * 下一次改超时时就会再断一次。
+ */
+export function aiWaitTimeoutMs(imageTimeoutMs: number): number {
+  return imageTimeoutMs + AI_WAIT_MARGIN_MS;
+}
 
 /** 轮询间隔。250 毫秒是「不给数据库压力」与「不白等」之间的折中 */
 const AI_POLL_INTERVAL_MS = 250;
@@ -164,14 +185,33 @@ export async function resolveByAi(
     );
     const seed = seedForCacheKey(cacheKey);
 
-    const generated = await deps.image.generate({
-      prompt: renderPrompt(brief),
-      negativePrompt: renderNegativePrompt(brief),
-      width: size.width,
-      height: size.height,
-      seed,
-      timeoutMs: deps.imageTimeoutMs,
-    });
+    /*
+     * ## 掐表的范围只包住模型调用
+     *
+     * 任务级预算（`recordElapsed`）度量的是「AI 花掉了多少窗口」。上面的
+     * 并发锁与同键等待（最多 22 秒）不算 —— 那段时间没有调用任何模型，
+     * 而它已经有自己的上限（`aiWaitTimeoutMs`）。
+     *
+     * 用 `deps.now` 而不是墙钟，与 `callModel` 里的选择相反，理由也相反：
+     * 那里的读数进 `travel_llm_duration_seconds`，被假时钟污染是**静默**的；
+     * 这里的读数只决定「后面的槽位还能不能用 AI」，配错的后果是 warnings
+     * 里多一条 `JOB_AI_TIME_EXHAUSTED` —— 可见，且换来了可测。
+     */
+    const startedAt = (deps.now ?? Date.now)();
+    let generated;
+    try {
+      generated = await deps.image.generate({
+        prompt: renderPrompt(brief),
+        negativePrompt: renderNegativePrompt(brief),
+        width: size.width,
+        height: size.height,
+        seed,
+        timeoutMs: deps.imageTimeoutMs,
+      });
+    } finally {
+      // 失败的调用同样花了时间：超时的那 40 秒是实打实从 T2 窗口里走掉的
+      deps.budget.recordElapsed((deps.now ?? Date.now)() - startedAt);
+    }
 
     /*
      * 二十章的九个字段在这里一次写齐，并过一遍 schema。
@@ -219,7 +259,7 @@ export async function resolveByAi(
        * 但**要记全局日计数** —— 供应商已经计费了，钱花掉了。
        */
       deps.budget.recordFailure(item.role);
-      await deps.budget.commit();
+      await deps.budget.commit(generated.costUnits);
       deps.logger.warn(
         { role: item.role, reason_code: ingested.rejection.reason },
         'AI 生成物未通过 11.2 后处理校验',
@@ -228,7 +268,7 @@ export async function resolveByAi(
       return { resolved: null, warnings: ['ASSET_POSTPROCESS_FAILED'] };
     }
 
-    await deps.budget.commit();
+    await deps.budget.commit(generated.costUnits);
 
     const row = await deps.assets.findByCacheKey(cacheKey);
     if (row === null) {
@@ -276,7 +316,7 @@ async function waitForCacheKey(
   cacheKey: string,
 ): Promise<AssetCandidateRow | null> {
   const now = deps.now ?? Date.now;
-  const deadline = now() + AI_WAIT_TIMEOUT_MS;
+  const deadline = now() + aiWaitTimeoutMs(deps.imageTimeoutMs);
 
   for (;;) {
     const row = await deps.assets.findByCacheKey(cacheKey);

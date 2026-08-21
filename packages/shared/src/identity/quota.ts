@@ -145,8 +145,14 @@ export function quotaFor(config: QuotaConfig, userType: UserType): IdentityQuota
  * 不适合只靠连着 Redis 的端到端测试抽查。
  */
 export interface CounterStore {
-  /** 自增并返回自增后的值；键首次出现时设置 TTL */
-  increment(key: string, ttlSeconds: number): Promise<number>;
+  /**
+   * 自增并返回自增后的值；键首次出现时设置 TTL。
+   *
+   * `amount` 缺省为 1。一次加 N 而不是循环调用 N 次，是因为「一条候选链
+   * 发出了 N 个请求」是**一个**事件（AI 成本计数，21.4）—— 拆成 N 次
+   * 网络往返除了慢，还让「加到一半失败」变成可能的中间状态。
+   */
+  increment(key: string, ttlSeconds: number, amount?: number): Promise<number>;
   /** 只读当前值，不自增。用于「查询剩余额度」而不消耗额度。 */
   peek(key: string): Promise<number>;
 }
@@ -157,9 +163,9 @@ export class InMemoryCounterStore implements CounterStore {
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
-  async increment(key: string, ttlSeconds: number): Promise<number> {
+  async increment(key: string, ttlSeconds: number, amount = 1): Promise<number> {
     const current = this.read(key);
-    const next = current + 1;
+    const next = current + amount;
     this.counters.set(key, { value: next, expiresAt: this.now() + ttlSeconds * 1000 });
     return Promise.resolve(next);
   }

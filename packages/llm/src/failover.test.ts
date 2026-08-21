@@ -292,6 +292,24 @@ describe('FailoverImageClient', () => {
     expect(result.costUnits).toBe(2);
   });
 
+  it('胜出者报 0 时仍是 0 —— 假实现不该混进成本报表', async () => {
+    /*
+     * `FakeImageClient` 用 costUnits = 0 表示「这次调用不花钱」。改写成
+     * attemptsStarted 会让本地与 CI 的调用计入 21.4 的日预算，
+     * 于是 600 的熔断会在开发环境毫无意义地打开。
+     */
+    const free = (model: string) => ({ ...imageResult(model), costUnits: 0 });
+    const client = wrapImageFailover(
+      [
+        stubImage('慢模型', () => new Promise<ImageResult>(() => undefined)),
+        stubImage('假模型', () => Promise.resolve(free('假模型'))),
+      ],
+      { perAttemptMs: 30, totalBudgetMs: 500 },
+    );
+
+    expect((await client.generate(request)).costUnits).toBe(0);
+  });
+
   it('全部候选失败时抛 ImageUnavailableError', async () => {
     const client = wrapImageFailover(
       [

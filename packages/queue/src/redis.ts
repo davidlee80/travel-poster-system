@@ -81,15 +81,20 @@ export class RedisJobLock {
 /**
  * 21.4 的配额计数。
  *
- * `INCR` 返回自增后的值，天然原子；TTL 只在首次出现时设置
- * （`INCR` 返回 1 即首次），否则每次自增都续期会让日配额永不重置。
+ * `INCRBY` 返回自增后的值，天然原子；TTL 只在首次出现时设置
+ * （返回值等于本次增量即首次），否则每次自增都续期会让日配额永不重置。
  */
 export class RedisCounterStore implements CounterStore {
   constructor(private readonly redis: Redis) {}
 
-  async increment(key: string, ttlSeconds: number): Promise<number> {
-    const value = await this.redis.incr(key);
-    if (value === 1) await this.redis.expire(key, ttlSeconds);
+  async increment(key: string, ttlSeconds: number, amount = 1): Promise<number> {
+    const value = await this.redis.incrby(key, amount);
+    /*
+     * 判「首次」用 `value === amount` 而不是 `value === 1`：一次加 2 的
+     * 首次调用会得到 2，按旧判据就不会设 TTL —— 那个键从此永不过期，
+     * 于是日熔断在第一次多候选调用之后再也不会重置。
+     */
+    if (value === amount) await this.redis.expire(key, ttlSeconds);
     return value;
   }
 

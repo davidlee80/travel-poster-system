@@ -10,6 +10,9 @@ import {
   aiImageDailyKey,
 } from './ai-budget.js';
 
+/** 测试用的任务级 AI 耗时预算。取整便于算边界 */
+const JOB_AI_BUDGET_MS = 80_000;
+
 /**
  * AI 图片预算与熔断（TP-4-03/15/17，设计稿 21.2 措施二、21.4）。
  *
@@ -35,11 +38,13 @@ function makeDeps(overrides: {
   userType?: 'ANONYMOUS' | 'REGISTERED';
   heroQuota?: number;
   dailyBudget?: number;
+  jobAiBudgetMs?: number;
 }) {
   return {
     userType: overrides.userType ?? ('REGISTERED' as const),
     heroQuota: overrides.heroQuota ?? 2,
     dailyBudget: overrides.dailyBudget ?? DEFAULT_AI_IMAGE_DAILY_BUDGET,
+    jobAiBudgetMs: overrides.jobAiBudgetMs ?? JOB_AI_BUDGET_MS,
     now: () => NOW,
   };
 }
@@ -194,5 +199,99 @@ describe('连续失败上限（时延保护）', () => {
 
     expect(b.used.failures).toBe(0);
     expect((await b.reserve('FOOD_IMAGE')).allowed).toBe(true);
+  });
+});
+
+describe('任务级 AI 累计耗时预算', () => {
+  /*
+   * ## 为什么次数管不住时延了
+   *
+   * 21.4 的「3 张」与 21.2 的「Hero 2 次」都是**用次数近似时延**，而那个近似
+   * 的前提是「一次生成最多 20 秒」这个常量。超时改成可配 + 候选池之后，
+   * 同样的「2 次」可以是 80 秒也可以是 400 秒 —— 次数只剩成本含义。
+   *
+   * 因此时延要有自己的预算，与次数**先到先停**。
+   */
+
+  it('累计耗时达上限后拒绝，理由是 JOB_AI_TIME_EXHAUSTED', async () => {
+    const { budget: b } = budget({ jobAiBudgetMs: 80_000 });
+
+    expect((await b.reserve('FOOD_IMAGE')).allowed).toBe(true);
+    b.recordElapsed(80_000);
+
+    expect(await b.reserve('FOOD_IMAGE')).toEqual({
+      allowed: false,
+      reason: 'JOB_AI_TIME_EXHAUSTED',
+    });
+  });
+
+  it('恰好用满才拒，差 1 毫秒仍然放行（边界不多不少）', async () => {
+    const { budget: b } = budget({ jobAiBudgetMs: 80_000 });
+    b.recordElapsed(79_999);
+    expect((await b.reserve('FOOD_IMAGE')).allowed).toBe(true);
+  });
+
+  it('耗时与张数是两个独立的闸：张数没到 3 也能被耗时拦住', async () => {
+    const { budget: b } = budget({ jobAiBudgetMs: 40_000 });
+
+    await b.reserve('FOOD_IMAGE');
+    b.recordElapsed(40_000);
+
+    expect(b.used.images).toBe(1);
+    // 成本闸（3 张）还剩 2 张，时延闸已经关了
+    expect(await b.reserve('FOOD_IMAGE')).toEqual({
+      allowed: false,
+      reason: 'JOB_AI_TIME_EXHAUSTED',
+    });
+  });
+
+  it('耗时累加，且负值不会把已花掉的时间还回来', () => {
+    const { budget: b } = budget();
+    b.recordElapsed(1_000);
+    b.recordElapsed(2_000);
+    b.recordElapsed(-5_000);
+    expect(b.used.elapsedMs).toBe(3_000);
+  });
+
+  it('refund 不退还耗时 —— 时间花掉了就是花掉了', async () => {
+    /*
+     * 与额度相反：额度可以还（那一张没进库，后面的槽位该能再试），
+     * 但时间不能还。还了的话一次上游超时 + 归还就能让同一个任务无限重试，
+     * 而 T2 的窗口是真的在流走。
+     */
+    const { budget: b } = budget();
+    await b.reserve('FOOD_IMAGE');
+    b.recordElapsed(30_000);
+    b.refund('FOOD_IMAGE');
+
+    expect(b.used).toMatchObject({ images: 0, elapsedMs: 30_000 });
+  });
+});
+
+describe('日计数按发出的请求数计（本轮决策 4）', () => {
+  it('一条链发出 2 个候选 → 日计数 +2，不是 +1', async () => {
+    /*
+     * 超时的那个候选，供应商很可能已经生成完并计了费 —— 我们只是没等到。
+     * 记 1 会让 21.4 的 600 熔断比真实成本低估若干倍，而那个阈值存在的
+     * 意义就是反映成本。
+     */
+    const { budget: b, counters } = budget();
+
+    await b.reserve('FOOD_IMAGE');
+    await b.commit(2);
+
+    expect(await counters.peek(aiImageDailyKey(NOW))).toBe(2);
+  });
+
+  it('缺省仍是 +1（单候选路径没有行为变化）', async () => {
+    const { budget: b, counters } = budget();
+    await b.commit();
+    expect(await counters.peek(aiImageDailyKey(NOW))).toBe(1);
+  });
+
+  it('costUnits 为 0 时不写计数 —— fake 客户端不该混进成本报表', async () => {
+    const { budget: b, counters } = budget();
+    await b.commit(0);
+    expect(await counters.peek(aiImageDailyKey(NOW))).toBe(0);
   });
 });

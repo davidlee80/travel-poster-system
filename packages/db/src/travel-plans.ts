@@ -129,6 +129,14 @@ export interface JobContext {
    * 而身份类型会变（匿名升级为注册），载荷里那份会过期。
    */
   readonly userType: 'ANONYMOUS' | 'REGISTERED';
+  /**
+   * 用户分层等级（迁移 0009 的 `users.tier_level`，默认 0）。
+   *
+   * Worker 用它按 `tier_model_pools` 选候选模型池。与 `userType` 一起
+   * 从 `users` join 出来而不是塞进队列载荷：等级会变（用户升级订阅），
+   * 载荷里那份在任务排队期间就可能过期，而排队本身可能持续几分钟。
+   */
+  readonly tierLevel: number;
   readonly status: JobStatusValue;
   readonly progress: number;
   /** `travel_requests.normalized_request`，由调用方用 schema 解析 */
@@ -586,12 +594,13 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
         plan_id: string | null;
         user_id: string;
         user_type: string;
+        tier_level: number;
         status: string;
         progress: number;
         normalized_request: unknown;
       }>(
         `SELECT j.id, j.request_id, j.plan_id, j.user_id, j.status, j.progress,
-                u.user_type, r.normalized_request
+                u.user_type, u.tier_level, r.normalized_request
            FROM generation_jobs j
            JOIN travel_requests r ON r.id = j.request_id
            JOIN users u ON u.id = j.user_id
@@ -608,6 +617,8 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
         planId: row.plan_id,
         userId: row.user_id,
         userType: row.user_type === 'REGISTERED' ? 'REGISTERED' : 'ANONYMOUS',
+        // 列是 NOT NULL DEFAULT 0；兜底是为了迁移未跑完时不至于 NaN 传下去
+        tierLevel: Number(row.tier_level ?? 0),
         status: row.status,
         progress: row.progress,
         normalizedRequest: row.normalized_request,

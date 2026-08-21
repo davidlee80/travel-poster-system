@@ -243,8 +243,14 @@ export function wrapImageFailover(
        * 超时的那些候选，供应商很可能已经生成完并计了费 —— 我们只是没等到。
        * 记 1 会让 21.4 的日预算熔断（600）比真实成本低估若干倍，
        * 而那个阈值存在的意义就是反映成本。
+       *
+       * 胜出者本身报 0 时保持 0：`FakeImageClient` 用它表示「这次调用不花钱」，
+       * 而假实现的调用混进成本报表会让本地与 CI 的熔断毫无意义地打开。
        */
-      return { ...result.winner, costUnits: result.attemptsStarted };
+      return {
+        ...result.winner,
+        costUnits: result.winner.costUnits === 0 ? 0 : result.attemptsStarted,
+      };
     },
   };
 }

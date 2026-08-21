@@ -4,7 +4,13 @@ import {
   createRetrievalRepository,
   createTravelPlansRepository,
 } from '@tps/db';
-import { FakeImageClient, FakeLlmClient, LocalHashingEmbeddingClient } from '@tps/llm';
+import {
+  AI_IMAGE_TIMEOUT_MS,
+  DEFAULT_IMAGE_JOB_AI_BUDGET_MS,
+  FakeImageClient,
+  FakeLlmClient,
+  LocalHashingEmbeddingClient,
+} from '@tps/llm';
 import { InMemoryAssetLock } from '@tps/queue';
 import { InMemoryCounterStore, createSilentLogger, type UserType } from '@tps/shared';
 import { InMemoryObjectStorage } from '@tps/storage';
@@ -62,15 +68,16 @@ export function createE2eWorkerDeps(pool: Pool): E2eWorkerDeps {
      * 匿名 0 次、注册 2 次）—— 门禁 #19 与 21.4 的「匿名 AI Hero 为 0」
      * 都靠这个差异成立，测试里给同一个值会让那两条永远通过。
      */
-    aiAssets: (userType: UserType) => ({
+    aiAssets: ({ userType }: { readonly userType: UserType }) => ({
       image: new FakeImageClient(renderFakeGeneratedImage),
       assetLock: new InMemoryAssetLock(),
-      imageTimeoutMs: 20_000,
+      imageTimeoutMs: AI_IMAGE_TIMEOUT_MS,
       userTypeLabel: userType,
       budget: new AiImageBudget({
         counters: new InMemoryCounterStore(),
         userType,
         heroQuota: userType === 'ANONYMOUS' ? 0 : 2,
+        jobAiBudgetMs: DEFAULT_IMAGE_JOB_AI_BUDGET_MS,
       }),
     }),
     storage,
