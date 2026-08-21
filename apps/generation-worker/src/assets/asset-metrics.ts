@@ -98,6 +98,58 @@ export const aiImageTotal = createCounter({
   labelNames: ['outcome', 'role', 'user_type'],
 });
 
+/**
+ * 候选模型故障转移的结局（多模型 failover 计划的任务 6）。
+ *
+ * ## 为什么必须有它
+ *
+ * 故障转移的作用就是**把主模型的故障掩盖成「慢了一点」**。这正是它的价值，
+ * 也正是它的危险：主模型完全挂掉时，`travel_ai_image_total{outcome="generated"}`
+ * 一切正常、成功率一切正常，只有 P95 悄悄涨了一截 —— 而涨了多少会被
+ * 「本来就有波动」解释掉。`position > 0` 是唯一能把「主模型有问题」
+ * 从「今天有点慢」里分出来的信号。
+ *
+ * `position` 的取值是 `0` / `1` / `2` / `none`（全失败，没有胜出者）。
+ * 做成有界字符串而不是直接放位次数字：候选数由运营配置，无上界的话标签基数
+ * 也无上界（21.3 禁止无界标签）。超过 2 的位次归到 `2`，因为「第 3 个之后
+ * 才成功」与「第 3 个成功」需要的处置是同一个。
+ *
+ * `kind` 区分图像与文本：两者的候选数与超时完全不同（1～2 个 40 秒 vs
+ * 3 个 30 秒），混在一起的话任何按位次的分位数都没有意义。
+ *
+ * **每条链都记一次**，包括主模型直接胜出。少了那些样本，「备选被用上的
+ * 占比」就没有分母 —— 而告警要的正是那个比例。单候选路径不进这个计数器：
+ * 装饰器在只有一个候选时原样返回底层客户端，那条路径上不存在「故障转移」。
+ */
+export const aiFailoverTotal = createCounter({
+  name: 'travel_ai_failover_total',
+  help: '候选模型故障转移结局（按类别、胜出位次、结局）',
+  labelNames: ['kind', 'position', 'outcome'],
+});
+
+/**
+ * 候选数被时延预算截断的次数（多模型 failover 计划的任务 6）。
+ *
+ * 配置搬进数据库之后就没有「启动即校验」了：运营可以在系统运行时把
+ * `max_candidates` 改成 10，而 `10 × 40 秒` 会突破任务上限。读取处的处置是
+ * **截断而不是拒绝**（拒绝会让一次配置失误变成用户拿不到计划），
+ * 而截断必须可见 —— 静默截断会让运营以为配置生效了，然后花几天调查
+ * 「为什么候选数调上去成功率没变」。
+ *
+ * 这个计数器就是那件事的唯一信号。它有增长即「配置超出了时延预算」。
+ */
+export const aiPoolClampedTotal = createCounter({
+  name: 'travel_ai_pool_clamped_total',
+  help: '候选池的配置候选数被时延预算截断的次数',
+  labelNames: ['kind'],
+});
+
+/** 把任意位次映射到有界标签值。见 `aiFailoverTotal` 的注释 */
+export function failoverPositionLabel(position: number): string {
+  if (position < 0) return 'none';
+  return position >= 2 ? '2' : String(position);
+}
+
 /** 21.2：全部素材解析（14 天）P95 < 25 秒 */
 export const assetBatchDuration = createHistogram({
   name: 'travel_asset_batch_duration_seconds',

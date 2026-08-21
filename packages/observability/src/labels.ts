@@ -49,6 +49,16 @@ export const ALLOWED_LABELS = [
 
   // 身份事件（R-13）
   'event',
+
+  /*
+   * 模型候选池（迁移 0009）。两者的取值集合都由代码封闭，不由配置决定：
+   *   kind      'LLM' | 'IMAGE'
+   *   position  '0' | '1' | '2' | 'none' —— 位次由 failoverPositionLabel 归并到
+   *             这四个取值。直接放位次数字会让基数随运营配的候选数增长，
+   *             而「第 3 个之后才成功」与「第 3 个成功」的处置是同一个。
+   */
+  'kind',
+  'position',
 ] as const;
 
 export type AllowedLabel = (typeof ALLOWED_LABELS)[number];

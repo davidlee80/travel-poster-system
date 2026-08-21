@@ -124,6 +124,75 @@ groups:
           description: '导出仍会显示 COMPLETED，但产物里图片位置是空白的。先查 S3_PUBLIC_BASE_URL 在 render-worker 容器内能否解析，再查素材桶是否允许匿名读。render-worker 日志里有「素材图片全部加载失败」那一行。'
           runbook: 'docs/运维手册.md#素材图片加载失败'
 
+      # 3c. T2 违约（21.2 的 T2 P95 < 155 秒）
+      #
+      # ## 为什么现在才有这条，以及为什么阈值是 155 而不是 110
+      #
+      # T2 此前只有度量手段（`travel_job_milestone_seconds{milestone="t2"}`）
+      # 与门禁 #16 的人工判定，没有告警 —— 而多模型故障转移把素材窗口从
+      # 35 秒放宽到 80 秒（40 秒/候选 × 2），T2 目标随之从 110 调到 155。
+      # 一个刚被有意放宽的 SLA 如果没有告警，「放宽」与「失控」就没有区别。
+      #
+      # 155 = T1(75) + 素材窗口(80)。三个数字必须一起改，改一个的后果是
+      # 告警变噪音（阈值偏紧）或永不触发（偏松）。
+      #
+      # 与 T1 那条一样只看 ≤7 天档：8～14 天要分段调两次模型，目标不同。
+      - alert: TravelJobT2SlaBreach
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(travel_job_milestone_seconds_bucket{milestone="t2",total_days_bucket="1-7"}[15m])
+            )
+          ) > 155
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'T2（页面可看）P95 超过 155 秒'
+          description: '素材解析窗口被吃满。先看 travel_ai_failover_total 是否 position > 0 占比高（主模型在拖），再看 travel_asset_cache_hit_ratio 是否掉了（预热没覆盖热门目的地）。'
+          runbook: 'docs/运维手册.md#t2-sla-违约'
+
+      # 3d. 主模型胜出率下降（故障转移在掩盖故障）
+      #
+      # 故障转移的价值就是把主模型的故障变成「慢一点」，这也是它的危险：
+      # 主模型完全挂掉时成功率、`travel_ai_image_total`、任务状态全都正常。
+      # 唯一的信号是「备选被用上的占比」。
+      #
+      # 阈值 20%：偶发（供应商的某个节点抖动）本就会有个位数占比，
+      # 而系统性故障会迅速逼近 100%。`for: 15m` 滤掉单次波动。
+      #
+      # severity 是 warning 而不是 critical：用户此刻**拿得到产物**，
+      # 只是慢了一点、贵了一点。判据与 21.3 其余告警一致 ——
+      # 产物对用户是否还有价值。
+      - alert: TravelAiFailoverRatioHigh
+        expr: |
+          sum by (kind) (rate(travel_ai_failover_total{position!="0"}[30m]))
+            /
+          sum by (kind) (rate(travel_ai_failover_total[30m])) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: '超过 20% 的模型调用要靠备选候选才成功'
+          description: '主模型在超时或报错，而故障转移把它掩盖成「慢一点」。用 pnpm model:pool -- --list 确认当前候选顺序，再查主模型在中转站侧的状态。position="none" 的部分是整条链都失败。'
+          runbook: 'docs/运维手册.md#主模型胜出率下降'
+
+      # 3e. 候选数被截断（配置超出时延预算）
+      #
+      # 没有 `for`：这不是波动而是配置状态 —— 有增长就说明运营配的
+      # `max_candidates` 大于时延预算允许的值，而**运行时只会静默按截断后的
+      # 数量执行**。不告警的话，那位运营会以为配置生效了，然后花几天调查
+      # 「为什么候选数调上去成功率没变」。
+      - alert: TravelAiPoolClamped
+        expr: increase(travel_ai_pool_clamped_total[30m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: '候选池的配置候选数被时延预算截断'
+          description: '运行时只试了截断后的数量。pnpm model:pool -- --list 会显示每档实际生效的候选数；要么下调 max_candidates，要么调高 IMAGE_JOB_AI_BUDGET_MS（同时要调 T2 阈值）。'
+          runbook: 'docs/运维手册.md#候选池配置被截断'
+
       # 4. 修复异常（规则集可能过严）
       #
       # P95 贴到 3 轮意味着规则集把大量正常输出判成了违规 ——

@@ -1,5 +1,6 @@
 /**
- * 24.1 的 38 项验收门禁清单（TP-5-06；#35～#38 随 P6 的 TP-6-17 纳入）。
+ * 验收门禁清单（TP-5-06；#35～#38 随 P6 的 TP-6-17 纳入，
+ * #39/#40 随 P8，#41～#43 随多模型故障转移）。
  *
  * ## 为什么需要这份清单
  *
@@ -166,10 +167,10 @@ export const GATES = [
   // ── 新增门禁（V1.0 缺失）─────────────────────────────────
   {
     id: 16,
-    title: 'T1/T2 分段 SLA（≤7 天：T1 P95 < 75 秒、T2 P95 < 110 秒）',
+    title: 'T1/T2 分段 SLA（≤7 天：T1 P95 < 75 秒、T2 P95 < 155 秒）',
     ref: '24.1 #16、21.2',
     kind: 'manual',
-    why: '分位数需要真实模型与足够样本量。已交付的是**度量手段**：generation_jobs 的 t1_at/t2_at 两列、travel_job_milestone_seconds 直方图、以及 21.3 的 SLA 违约告警规则。用 fake 模型跑出的 P95 只反映本机 CPU',
+    why: '分位数需要真实模型与足够样本量。已交付的是**度量手段**：generation_jobs 的 t1_at/t2_at 两列、travel_job_milestone_seconds 直方图、以及 T1/T2 两条 SLA 违约告警。**T2 从 110 调到 155** 是多模型故障转移的显式决定：素材窗口从 35 秒放宽到 80 秒（40 秒/候选 × 2），155 = 75 + 80。用 fake 模型跑出的 P95 只反映本机 CPU',
   },
   {
     id: 17,
@@ -370,7 +371,39 @@ export const GATES = [
     run: 'pnpm test:contract',
     why: '前端呈现层可整体替换，替换者靠 pnpm validate:request 自证请求合法。一个恒返回 0 的校验器会让所有模板都「通过」而失效完全静默，因此 --self-test 用三项反证（缺 basis、未知 code、v2 版本号）确认它真的会拒。两份夹具分别覆盖最小必填集与全量可选项',
   },
+
+  // ── 多模型故障转移与超时分层（迁移 0009）──────────────────
+  {
+    id: 41,
+    title: '候选池未配置时行为与迁移前一致（两张表为空 → 回落 env 单模型）',
+    ref: '多模型 failover 计划第 3 节',
+    kind: 'command',
+    run: 'pnpm --filter @tps/generation-worker exec vitest run model-selection',
+    why: '这一项是整个特性能否渐进启用、回滚是否需要动代码的唯一保证。失效的表现是「迁移完还没配任何池，AI 素材就全没了」—— 而那时会被当成模型故障去查。**不需要数据库**：仓储用进程内假实现，包括「读库抛错也回落」那条',
+  },
+  {
+    id: 42,
+    title: '区间匹配与截断（tier 15 落到 10 那一档；max_candidates=10 被削到 2 且可见）',
+    ref: '多模型 failover 计划第 2、3 节',
+    kind: 'command',
+    run: 'pnpm --filter @tps/generation-worker exec vitest run model-selection model-pool-cli && pnpm --filter @tps/db exec vitest run model-pools.test',
+    why: '区间匹配是选整数等级而非枚举的全部收益：破了的话运营每加一档都得同时加映射，而漏加的表现是「那批用户静默回落到单模型」。截断这一半守的是可见性 —— 静默截断会让运营以为配置生效了，然后花几天调查「为什么候选数调上去成功率没变」。SQL 侧的区间匹配另由 pnpm test:integration 的 model-pools 覆盖',
+  },
+  {
+    id: 43,
+    title: '时延闸生效（累计耗时达上限 → JOB_AI_TIME_EXHAUSTED 进 warnings 而非错误）',
+    ref: '多模型 failover 计划第 0、1 节',
+    kind: 'command',
+    run: 'pnpm --filter @tps/generation-worker exec vitest run ai-budget ai-generator',
+    why: '21.4 的「3 张」与 21.2 的「Hero 2 次」都是用次数近似时延，而那个近似的前提是「一次生成最多 20 秒」这个硬编码常量。超时可配之后次数只剩成本含义 —— 没有这一项，T2 的窗口就没有任何东西在守。同批还含「整条候选链失败只记 1 次 failure」：按候选记的话 MAX_AI_FAILURES_PER_JOB=2 会让 failover 跑不完一轮',
+  },
 ];
 
-/** 24.1 的项数。写成常量供自检，防止无意增删。P8 加 #39/#40 */
-export const GATE_COUNT = 40;
+/**
+ * 24.1 的项数。写成常量供自检，防止无意增删。
+ *
+ * 24.1 原表是 38 项；P8 加 #39/#40，多模型故障转移加 #41～#43。
+ * 后五项不在设计稿里，理由逐条写在各自的 `why` ——
+ * 与 METRICS_CATALOG 的 `source: 'supplementary'` 同一处理。
+ */
+export const GATE_COUNT = 43;

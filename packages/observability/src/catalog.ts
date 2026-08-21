@@ -221,6 +221,22 @@ export const METRICS_CATALOG: readonly CatalogEntry[] = [
     note: 'R-42：21.3 的字体故障告警条件写的是「日志出现 CJK_FONT_UNAVAILABLE」，而 Prometheus 不看日志。把渲染失败原因计成指标，那条告警才有可判定的对象',
   },
   {
+    name: 'travel_ai_failover_total',
+    kind: 'counter',
+    labels: ['kind', 'position', 'outcome'],
+    owner: 'generation-worker',
+    source: 'supplementary',
+    note: '设计稿没有多模型故障转移。补它的理由：故障转移的作用就是把主模型的故障掩盖成「慢了一点」—— 主模型完全挂掉时成功率与 travel_ai_image_total 全都正常，只有 P95 悄悄涨一截，而那会被「本来就有波动」解释掉。position > 0 的占比是唯一能把「主模型有问题」从「今天有点慢」里分出来的信号',
+  },
+  {
+    name: 'travel_ai_pool_clamped_total',
+    kind: 'counter',
+    labels: ['kind'],
+    owner: 'generation-worker',
+    source: 'supplementary',
+    note: '候选池配置搬进数据库后就没有「启动即校验」了：运营可以在运行时把 max_candidates 改成 10，而 10 × 40 秒会突破任务上限。读取处的处置是截断而不是拒绝（拒绝会让一次配置失误变成用户拿不到计划），而静默截断会让运营以为配置生效了。这个计数器是那件事的唯一信号',
+  },
+  {
     name: 'travel_export_total',
     kind: 'counter',
     labels: ['format', 'scope', 'outcome', 'user_type'],

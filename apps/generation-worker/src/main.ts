@@ -235,26 +235,6 @@ await runWorker({
                       ),
                     perAttemptMs: imageConfig.timeoutMs,
                     totalBudgetMs: imageConfig.jobAiBudgetMs,
-                    onOutcome: (outcome) => {
-                      /*
-                       * 只在真的动用了备选时才记一条：`position > 0` 是
-                       * 「主模型没顶住」的唯一信号，而故障转移会把它掩盖成
-                       * 「慢了一点」。指标在任务 6 补，这里先让它可见。
-                       */
-                      if (outcome.position !== 0) {
-                        handle.logger.warn(
-                          {
-                            reason_code: 'AI_IMAGE_FAILOVER',
-                            position: outcome.position,
-                            attempts: outcome.attemptsStarted,
-                            ok: outcome.ok,
-                          },
-                          outcome.ok
-                            ? `图像主模型未胜出，采用第 ${outcome.position + 1} 个候选`
-                            : `图像候选链全部失败（发出 ${outcome.attemptsStarted} 个请求）`,
-                        );
-                      }
-                    },
                   });
 
                   return {

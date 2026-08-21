@@ -105,6 +105,12 @@ describe('Prometheus 规则文件', () => {
   const SUPPLEMENTARY_ALERTS: Readonly<Record<string, string>> = {
     TravelAssetImageLoadFailureRatioHigh:
       'RenderReadyProbe 刻意让坏图不阻塞就绪（十八章降级链），因此素材 URL 全部取不到时页面仍 ready、degraded 仍为 false、导出仍 COMPLETED —— 用户拿到图片位置全空白的长图而所有信号都是绿的。21.3 的六条里没有一条能覆盖这个失效',
+    TravelJobT2SlaBreach:
+      '21.3 只给了 T1 一条 SLA 告警，T2 此前只有度量手段与门禁 #16 的人工判定。多模型故障转移把素材窗口从 35 秒放宽到 80 秒、T2 目标从 110 调到 155 —— 一个刚被有意放宽的 SLA 如果没有告警，「放宽」与「失控」在图上就没有区别',
+    TravelAiFailoverRatioHigh:
+      '故障转移的作用就是把主模型的故障掩盖成「慢一点」：主模型完全挂掉时成功率、travel_ai_image_total、任务状态全都正常。备选被用上的占比是唯一能把「主模型有问题」从「今天有点慢」里分出来的信号',
+    TravelAiPoolClamped:
+      '候选池配置在数据库里，因此失去了「启动即校验」。读取处的处置是截断而不是拒绝（拒绝会让一次配置失误变成用户拿不到计划），而静默截断会让运营以为配置生效了，然后花几天调查「为什么候选数调上去成功率没变」',
   };
 
   it('21.3 的六条告警一条不少，补充的告警都有理由', () => {
@@ -144,14 +150,23 @@ describe('Prometheus 规则文件', () => {
     }
   });
 
-  it('只有「任意一次即告警」的两条没有 for', () => {
+  it('「任意一次即告警」的那几条没有 for，其余都有', () => {
     /*
      * 21.3 给每条告警都定了持续时间，除了图标回归与字体故障 ——
      * 那两条是「任意一次即告警」。没有 `for` 的告警会因为一次抓取抖动
      * 就响，因此这个例外必须是显式的、被钉住的，而不是某次编辑时漏写。
+     *
+     * `TravelAiPoolClamped` 是后来加进这个例外的第三条，性质与前两条一致但
+     * 理由不同：前两条是「一次就是缺陷」，这一条是「它度量的不是波动而是
+     * **配置状态**」—— 截断发生过就说明配置超出了时延预算，而运行时会静默
+     * 按截断后的数量执行。加 `for` 只会推迟运营发现自己的配置没生效。
      */
     const withoutFor = alerts.filter((rule) => rule.for === undefined).map((rule) => rule.alert);
-    expect(withoutFor.sort()).toEqual(['TravelCjkFontUnavailable', 'TravelIconLoadFailure']);
+    expect(withoutFor.sort()).toEqual([
+      'TravelAiPoolClamped',
+      'TravelCjkFontUnavailable',
+      'TravelIconLoadFailure',
+    ]);
   });
 
   it('critical 只给「产物对用户无价值」的那几条', () => {

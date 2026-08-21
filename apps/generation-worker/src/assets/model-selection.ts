@@ -1,4 +1,4 @@
-import { resolveCandidates, type ModelPoolsRepository } from '@tps/db';
+import { resolveCandidates, type ModelPoolKind, type ModelPoolsRepository } from '@tps/db';
 import {
   wrapImageFailover,
   wrapLlmFailover,
@@ -7,6 +7,8 @@ import {
   type LlmClient,
 } from '@tps/llm';
 import type { Logger } from '@tps/shared';
+
+import { aiFailoverTotal, aiPoolClampedTotal, failoverPositionLabel } from './asset-metrics.js';
 
 /**
  * 按用户等级挑选候选模型并装配故障转移客户端（多模型 failover 计划的任务 4）。
@@ -84,6 +86,38 @@ async function readPool(
   }
 }
 
+/**
+ * 一条候选链落定后的指标与日志。
+ *
+ * 放在这一层而不是让调用方各自实现：`kind` 与位次的有界化只有这里知道，
+ * 而两个调用点（图像的每任务工厂、文本的每任务工厂）需要的处置完全相同。
+ * 交给调用方的结果会是「图像侧记了指标、文本侧只记了日志」这种不对称。
+ */
+function outcomeReporter(kind: ModelPoolKind, logger: Logger): (outcome: FailoverOutcome) => void {
+  return (outcome) => {
+    aiFailoverTotal.inc({
+      kind,
+      position: failoverPositionLabel(outcome.position),
+      outcome: outcome.ok ? 'success' : 'failed',
+    });
+
+    // 主模型直接胜出是常态，不记日志（否则每次生成都留一行噪音）
+    if (outcome.position === 0) return;
+
+    logger.warn(
+      {
+        kind,
+        reason_code: 'AI_MODEL_FAILOVER',
+        position: outcome.position,
+        attempts: outcome.attemptsStarted,
+      },
+      outcome.ok
+        ? `${kind} 主模型未胜出，采用第 ${outcome.position + 1} 个候选`
+        : `${kind} 候选链全部失败（发出 ${outcome.attemptsStarted} 个请求）`,
+    );
+  };
+}
+
 export interface ImageSelectionInput extends PoolSelectionBase {
   /** 无池配置时使用的客户端（由 `IMAGE_MODEL` 构造） */
   readonly fallback: ImageClient;
@@ -92,7 +126,6 @@ export interface ImageSelectionInput extends PoolSelectionBase {
   readonly perAttemptMs: number;
   /** `IMAGE_JOB_AI_BUDGET_MS` */
   readonly totalBudgetMs: number;
-  readonly onOutcome?: (outcome: FailoverOutcome) => void;
 }
 
 export async function selectImageClient(
@@ -113,6 +146,7 @@ export async function selectImageClient(
      * 必须可见：静默截断会让运营以为把候选数调到 10 生效了，
      * 而实际只试 2 个 —— 于是「为什么成功率没上去」查不出原因。
      */
+    aiPoolClampedTotal.inc({ kind: 'IMAGE' });
     input.logger.warn(
       {
         kind: 'IMAGE',
@@ -131,7 +165,7 @@ export async function selectImageClient(
     client: wrapImageFailover(candidates.map(input.build), {
       perAttemptMs: input.perAttemptMs,
       totalBudgetMs: input.totalBudgetMs,
-      ...(input.onOutcome === undefined ? {} : { onOutcome: input.onOutcome }),
+      onOutcome: outcomeReporter('IMAGE', input.logger),
     }),
     candidates,
     poolName: pool.poolName,
@@ -144,7 +178,6 @@ export interface LlmSelectionInput extends PoolSelectionBase {
   readonly build: (model: string) => LlmClient;
   /** `LLM_TIMEOUT_MS`。链总预算取它 × 候选数 —— 文本没有独立的硬窗口 */
   readonly perAttemptMs: number;
-  readonly onOutcome?: (outcome: FailoverOutcome) => void;
 }
 
 export async function selectLlmClient(
@@ -172,7 +205,7 @@ export async function selectLlmClient(
        * 两层都压的话超时会被削两次，表现是「明明配了 30 秒却 10 秒就超时」。
        */
       totalBudgetMs: input.perAttemptMs * Math.max(1, candidates.length),
-      ...(input.onOutcome === undefined ? {} : { onOutcome: input.onOutcome }),
+      onOutcome: outcomeReporter('LLM', input.logger),
     }),
     candidates,
     poolName: pool.poolName,

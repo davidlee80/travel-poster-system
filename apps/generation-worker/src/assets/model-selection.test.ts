@@ -1,8 +1,10 @@
 import type { ModelPoolKind, ModelPoolSelection, ModelPoolsRepository } from '@tps/db';
-import { FakeImageClient, type ImageClient, type LlmClient } from '@tps/llm';
+import { ImageUnavailableError, FakeImageClient, type ImageClient, type LlmClient } from '@tps/llm';
+import { metricsText } from '@tps/observability';
 import { createSilentLogger } from '@tps/shared';
 import { describe, expect, it } from 'vitest';
 
+import { failoverPositionLabel } from './asset-metrics.js';
 import { selectImageClient, selectLlmClient } from './model-selection.js';
 
 /**
@@ -215,6 +217,89 @@ describe('图像候选数受时延预算约束', () => {
 
     expect(selected.candidates).toHaveLength(2);
     expect(selected.clamped).toBe(false);
+  });
+});
+
+describe('指标（任务 6）', () => {
+  it('位次标签的取值集合有界（21.3 禁止无界标签）', () => {
+    /*
+     * 候选数由运营配置，直接把位次数字当标签会让基数随配置增长。
+     * 归并到 2 是因为「第 3 个之后才成功」与「第 3 个成功」的处置是同一个。
+     */
+    expect([0, 1, 2, 3, 9, -1].map(failoverPositionLabel)).toEqual([
+      '0',
+      '1',
+      '2',
+      '2',
+      '2',
+      'none',
+    ]);
+  });
+
+  it('故障转移真的落进 travel_ai_failover_total（一个从不自增的计数器等于没有）', async () => {
+    const { repository } = pools([
+      {
+        kind: 'IMAGE',
+        poolName: 'paid',
+        models: ['坏模型', '好模型'],
+        maxCandidates: 2,
+        minTierLevel: 0,
+      },
+    ]);
+
+    const selected = await selectImageClient({
+      pools: repository,
+      tierLevel: 0,
+      logger,
+      fallback: fallbackImage,
+      build: (model) =>
+        model === '坏模型'
+          ? { model, generate: () => Promise.reject(new ImageUnavailableError('模型名不存在')) }
+          : buildImage(model),
+      // 快速失败不等满超时，因此这里的数值只影响链预算
+      perAttemptMs: 50,
+      totalBudgetMs: 100,
+    });
+
+    await selected.client.generate({
+      prompt: 'p',
+      negativePrompt: 'n',
+      width: 16,
+      height: 6,
+      seed: 1,
+      timeoutMs: 50,
+    });
+
+    /*
+     * 断言样本存在而不是断言具体数值：计数器是进程级的，写死数值会让这条
+     * 测试依赖同一文件里其他用例的执行顺序。
+     */
+    const text = await metricsText();
+    expect(text).toContain('travel_ai_failover_total{kind="IMAGE",position="1",outcome="success"}');
+  });
+
+  it('截断落进 travel_ai_pool_clamped_total', async () => {
+    const { repository } = pools([
+      {
+        kind: 'IMAGE',
+        poolName: 'wide',
+        models: ['a', 'b', 'c'],
+        maxCandidates: 3,
+        minTierLevel: 0,
+      },
+    ]);
+
+    await selectImageClient({
+      pools: repository,
+      tierLevel: 0,
+      logger,
+      fallback: fallbackImage,
+      build: buildImage,
+      perAttemptMs: 40_000,
+      totalBudgetMs: 80_000,
+    });
+
+    expect(await metricsText()).toContain('travel_ai_pool_clamped_total{kind="IMAGE"}');
   });
 });
 
