@@ -90,3 +90,13 @@ export {
   type TravelPlansRepository,
   type UpdateJobStateInput,
 } from './travel-plans.js';
+
+export {
+  createModelPoolsRepository,
+  resolveCandidates,
+  DEFAULT_POOL_CACHE_TTL_MS,
+  type ModelPoolKind,
+  type ModelPoolSelection,
+  type ModelPoolsRepository,
+  type ModelPoolsRepositoryOptions,
+} from './model-pools.js';
