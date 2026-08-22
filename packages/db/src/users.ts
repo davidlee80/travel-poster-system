@@ -82,6 +82,15 @@ export interface UsersRepository {
    */
   upgradeAnonymous(input: UpgradeAnonymousInput): Promise<UserRow | null>;
 
+  /**
+   * 改口令（13.9.2 的账号级操作）。
+   *
+   * 只更新哈希，**不动配额、不动 `upgraded_at`**。返回 false 表示没有匹配的
+   * 行（账号已注销，或调用方拿着一个匿名 id 进来）—— 调用方必须据此返回
+   * 失败而不是当成成功：静默成功的表现是用户以为改掉了，旧口令却依然有效。
+   */
+  updatePasswordHash(userId: string, passwordHash: string): Promise<boolean>;
+
   /** 匿名活跃续期（避免正在使用中的数据被保留期清理） */
   touchAnonymous(id: string, newExpiresAt: Date): Promise<void>;
 
@@ -214,6 +223,21 @@ export function createUsersRepository(pool: Pool): UsersRepository {
         }
         throw err;
       }
+    },
+
+    async updatePasswordHash(userId, passwordHash) {
+      /*
+       * `user_type = 'REGISTERED' AND status = 'ACTIVE'` 不是冗余的：
+       * 匿名行的 shape 约束禁止 password_hash 非空（迁移 0001），所以给一个
+       * 匿名 id 会撞约束报错而不是改错行；但 SUSPENDED / DELETED 的行没有
+       * 这层保护，少了这个条件就会给一个已注销的账号成功改掉口令。
+       */
+      const result = await pool.query(
+        `UPDATE users SET password_hash = $2
+         WHERE id = $1 AND user_type = 'REGISTERED' AND status = 'ACTIVE'`,
+        [userId, passwordHash],
+      );
+      return (result.rowCount ?? 0) > 0;
     },
 
     async touchAnonymous(id, newExpiresAt) {

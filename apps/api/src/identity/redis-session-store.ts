@@ -25,9 +25,25 @@ export class RedisSessionStore implements SessionStore {
     return `session:${hash}`;
   }
 
+  /**
+   * 反向索引：user_id → 该用户的会话哈希集合。
+   *
+   * 会话本身是 `hash → user_id` 的单向映射，没有它就无法实现
+   * `revokeAllForUser`（Redis 里没有「按值查键」）。
+   *
+   * **集合里可能有已经自然过期的成员** —— 会话键到期时 Redis 不会通知集合。
+   * 这是无害的：吊销时对不存在的键 `DEL` 是空操作。反过来（成员漏了）才有害，
+   * 因此 `create` 与 `touch` 都要维护它的 TTL。
+   */
+  private userKey(userId: string): string {
+    return `user-sessions:${userId}`;
+  }
+
   async create(userId: string): Promise<CreatedSession> {
     const token = issueOpaqueToken();
     await this.redis.set(this.key(token.hash), userId, 'EX', this.ttlSeconds);
+    await this.redis.sadd(this.userKey(userId), token.hash);
+    await this.redis.expire(this.userKey(userId), this.ttlSeconds);
     return { token: token.value, ttlSeconds: this.ttlSeconds };
   }
 
@@ -42,11 +58,32 @@ export class RedisSessionStore implements SessionStore {
    * 若会话被吊销（另一个标签页登出），`SET` 会把它**复活**。
    * `EXPIRE` 对不存在的键无操作，天然安全。
    */
-  async touch(token: string): Promise<void> {
+  async touch(token: string, userId: string): Promise<void> {
     await this.redis.expire(this.key(hashToken(token)), this.ttlSeconds);
+    /*
+     * 索引跟着一起续期。少了这一行，长期活跃的会话会在第 30 天之后
+     * **失去索引**（会话被 EXPIRE 续期、索引没有），此后
+     * `revokeAllForUser` 找不到它 —— 改口令时它会活下来。
+     * 那是一个只在账号用满 30 天之后才出现的安全漏洞，不可能靠手工测试发现。
+     */
+    await this.redis.expire(this.userKey(userId), this.ttlSeconds);
   }
 
+  /**
+   * 单个会话吊销（登出）。
+   *
+   * **不从索引里 SREM** —— 那需要先 `GET` 出 user_id，多一次往返，
+   * 而残留成员是无害的（见 `userKey` 的说明）。
+   */
   async revoke(token: string): Promise<void> {
     await this.redis.del(this.key(hashToken(token)));
+  }
+
+  async revokeAllForUser(userId: string): Promise<void> {
+    const hashes = await this.redis.smembers(this.userKey(userId));
+    if (hashes.length > 0) {
+      await this.redis.del(...hashes.map((hash) => this.key(hash)));
+    }
+    await this.redis.del(this.userKey(userId));
   }
 }

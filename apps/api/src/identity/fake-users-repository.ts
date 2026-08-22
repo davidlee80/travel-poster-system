@@ -151,6 +151,16 @@ export class FakeUsersRepository implements UsersRepository {
     });
   }
 
+  async updatePasswordHash(userId: string, passwordHash: string): Promise<boolean> {
+    const row = this.rows.get(userId);
+    // 复现 SQL 的 `user_type = 'REGISTERED' AND status = 'ACTIVE'` 过滤
+    if (!row || row.user_type !== 'REGISTERED' || row.status !== 'ACTIVE') {
+      return Promise.resolve(false);
+    }
+    this.put({ ...row, password_hash: passwordHash });
+    return Promise.resolve(true);
+  }
+
   async touchAnonymous(id: string, newExpiresAt: Date): Promise<void> {
     const row = this.rows.get(id);
     if (row && row.user_type === 'ANONYMOUS') {

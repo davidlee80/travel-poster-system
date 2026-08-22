@@ -90,6 +90,18 @@ export type RegisterResult =
   | { readonly outcome: 'password_too_weak'; readonly reason: string }
   | { readonly outcome: 'anonymous_already_upgraded' };
 
+export type ChangePasswordResult =
+  | {
+      readonly outcome: 'changed';
+      /** 新会话的 Cookie —— 旧的全部被吊销了，包括当前这一个 */
+      readonly cookies: readonly CookieMutation[];
+    }
+  | { readonly outcome: 'current_password_invalid' }
+  | { readonly outcome: 'rate_limited'; readonly retryAfterSeconds: number }
+  | { readonly outcome: 'password_too_weak'; readonly reason: string }
+  /** 会话指向的账号已不可用（并发注销）。客户端应清 Cookie 重新登录 */
+  | { readonly outcome: 'account_unavailable' };
+
 export type LoginResult =
   | {
       readonly outcome: 'logged_in';
@@ -166,7 +178,7 @@ export class IdentityService {
         const row = await users.findById(userId);
         if (row !== null && row.status === 'ACTIVE' && row.user_type === 'REGISTERED') {
           // 滑动过期：每次使用都续期（13.0）
-          await sessions.touch(input.sessionCookie);
+          await sessions.touch(input.sessionCookie, userId);
 
           /*
            * 分支 4：同时持有有效匿名令牌 → 待归并。
@@ -438,6 +450,81 @@ export class IdentityService {
       { name: COOKIE_NAMES.session, value: null, maxAgeSeconds: 0 },
       { name: COOKIE_NAMES.anonymous, value: null, maxAgeSeconds: 0 },
     ];
+  }
+
+  /**
+   * 改口令（13.9.2 的账号级操作，13.0 要求匿名身份不可访问）。
+   *
+   * ## 会吊销该用户的全部会话，然后为当前设备重新签发一个
+   *
+   * 用户改口令通常正是因为怀疑口令外泄。只改哈希不动会话的话，对方手上那个
+   * 会话完全不受影响 —— 30 天滑动过期意味着只要他还在用就永不过期，
+   * 而用户以为自己已经把人挡在门外了。
+   *
+   * 顺序是**先吊销、后签发**：反过来的话新会话也会被自己那次吊销带走，
+   * 用户改完口令立刻被登出。
+   *
+   * ## 口令错误复用登录失败计数器
+   *
+   * 这个端点同样是「拿口令去试」的入口，不设限流等于给暴力破解开一个
+   * 不被计数的旁路。与登录共用同一个 IP + 邮箱计数器是有意的：
+   * 攻击者在两个端点之间来回切换不应该让额度翻倍。
+   */
+  async changePassword(input: {
+    readonly userId: string;
+    readonly currentPassword: string;
+    readonly newPassword: string;
+    readonly ip: string | null;
+  }): Promise<ChangePasswordResult> {
+    const { users, sessions, quota } = this.deps;
+
+    const row = await users.findById(input.userId);
+    if (row === null || row.status !== 'ACTIVE' || row.user_type !== 'REGISTERED') {
+      return { outcome: 'account_unavailable' };
+    }
+
+    const currentOk =
+      row.password_hash !== null &&
+      (await verifyPassword(row.password_hash, input.currentPassword));
+
+    if (!currentOk) {
+      const failure = await quota.recordLoginFailure({
+        ip: input.ip,
+        // email 一定非空：REGISTERED 的 shape 约束保证了它（迁移 0001）
+        email: row.email ?? input.userId,
+      });
+      if (failure.locked) {
+        return { outcome: 'rate_limited', retryAfterSeconds: failure.retryAfterSeconds };
+      }
+      return { outcome: 'current_password_invalid' };
+    }
+
+    /*
+     * 强度校验放在**验证旧口令之后**。
+     *
+     * 反过来的话，一个不知道旧口令的人能用「新口令强度不足」与「旧口令不对」
+     * 两种不同的响应来确认某个口令是否正确 —— 校验顺序本身泄漏了信息。
+     */
+    const strength = checkPasswordStrength(input.newPassword);
+    if (!strength.ok) {
+      return { outcome: 'password_too_weak', reason: strength.reason };
+    }
+
+    const updated = await users.updatePasswordHash(row.id, await hashPassword(input.newPassword));
+    if (!updated) {
+      // 并发注销：口令没改成，绝不能回 changed（用户会以为旧口令已失效）
+      return { outcome: 'account_unavailable' };
+    }
+
+    await sessions.revokeAllForUser(row.id);
+    const session = await sessions.create(row.id);
+
+    return {
+      outcome: 'changed',
+      cookies: [
+        { name: COOKIE_NAMES.session, value: session.token, maxAgeSeconds: session.ttlSeconds },
+      ],
+    };
   }
 
   /** 执行待归并（由 resolve 的分支 4 标记） */

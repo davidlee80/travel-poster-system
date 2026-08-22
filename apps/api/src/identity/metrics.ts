@@ -30,7 +30,15 @@ export const identityByType = createCounter({
  * 因此两者的比值也能在灰度回切时看出开关是否真的生效了。
  */
 export type IdentityEvent =
-  'anon_created' | 'anonymous_rejected' | 'register' | 'upgrade' | 'login' | 'logout' | 'merge';
+  | 'anon_created'
+  | 'anonymous_rejected'
+  | 'register'
+  | 'upgrade'
+  | 'login'
+  | 'logout'
+  | 'merge'
+  /** 改口令。`rejected` 含旧口令错与新口令太弱两种 —— 区分它们要靠日志 */
+  | 'password_change';
 
 export type IdentityOutcome = 'succeeded' | 'rejected' | 'rate_limited' | 'failed';
 

@@ -140,6 +140,29 @@ export function logout(): Promise<ApiResult<void>> {
   return request<void>('/api/v1/auth/logout', { method: 'POST' });
 }
 
+/**
+ * 13.9.2 改口令。
+ *
+ * 成功时服务端**吊销该账号的全部会话**并在响应头里下发一个新的 —— 因此
+ * 当前这台设备仍然登录着，其他设备全部退出。界面必须把这件事说出来：
+ * 它是用户改口令时想要的效果，但不说的话是个意外。
+ *
+ * 返回 204 无响应体。拿到 400 `AUTH_CURRENT_PASSWORD_INVALID` 时
+ * `field` 是 `current_password`，`AUTH_PASSWORD_TOO_WEAK` 时是 `new_password`。
+ */
+export function changePassword(input: {
+  readonly currentPassword: string;
+  readonly newPassword: string;
+}): Promise<ApiResult<void>> {
+  return request<void>('/api/v1/auth/password', {
+    method: 'POST',
+    body: JSON.stringify({
+      current_password: input.currentPassword,
+      new_password: input.newPassword,
+    }),
+  });
+}
+
 // ── 计划相关（13.1～13.3、13.9.5）─────────────────────────────
 
 export interface GenerateResponse {

@@ -209,6 +209,47 @@ body {
   color: #5b5b5b;
 }
 
+/* 一行里并排的次要动作（修改密码 / 退出登录，或提交 / 取消） */
+.auth-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* 改密码表单：面板内的次级表单，用上边框与身份信息隔开 */
+.auth-panel__subform {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #e4e0d8;
+}
+
+.auth-panel__done {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #e4e0d8;
+}
+
+.auth-panel__done p {
+  margin: 0 0 8px;
+  color: #2f6b4f;
+  line-height: 1.6;
+}
+
+/* 政策链接：注册表单底部那句「注册即表示…」 */
+.auth-panel__legal {
+  margin: 0;
+  color: #5b5b5b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.auth-panel__legal a {
+  color: #2f6b4f;
+}
+
 /* ── 首页布局 ─────────────────────────────────────────────── */
 
 .home {
@@ -518,4 +559,90 @@ body {
     width: auto;
     margin: 12px 12px 0;
   }
+}
+
+/* ── 用户协议与隐私政策页（/legal）──────────────────────── */
+
+/*
+ * 正文由 markdown 渲染，因此这里必须用元素选择器 —— 但**全部收在
+ * `.legal__body` 之下**。裸的 `h2 { }` 会漏到 `/render/**` 的信息图模板上，
+ * 而那会让导出的 PNG 悄悄变样（视觉基线是这条约束的守卫）。
+ */
+.legal {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+  line-height: 1.75;
+}
+
+.legal__back {
+  margin: 0 0 20px;
+  font-size: 14px;
+}
+
+.legal__back a,
+.legal__body a {
+  color: #2f6b4f;
+}
+
+.legal h1 {
+  margin: 0 0 24px;
+  font-size: 26px;
+}
+
+.legal__body h2 {
+  margin: 36px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1.5px solid #e4e0d8;
+  font-size: 20px;
+}
+
+.legal__body h3 {
+  margin: 24px 0 10px;
+  font-size: 16px;
+}
+
+.legal__body p,
+.legal__body li {
+  color: #33322e;
+}
+
+.legal__body blockquote {
+  margin: 20px 0;
+  padding: 12px 16px;
+  border-left: 3px solid #cfc9bd;
+  background: #faf9f6;
+  color: #5b5b5b;
+}
+
+.legal__body table {
+  width: 100%;
+  margin: 16px 0;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.legal__body th,
+.legal__body td {
+  padding: 8px 10px;
+  border: 1px solid #e4e0d8;
+  text-align: left;
+  vertical-align: top;
+}
+
+.legal__body th {
+  background: #f4f2ec;
+}
+
+.legal__body hr {
+  margin: 32px 0;
+  border: 0;
+  border-top: 1px solid #e4e0d8;
+}
+
+.legal__body code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #f0eee8;
+  font-size: 13px;
 }

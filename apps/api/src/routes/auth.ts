@@ -25,6 +25,19 @@ const LoginBodySchema = z.object({
   password: z.string().min(1),
 });
 
+/**
+ * 改口令。
+ *
+ * 两个字段都只校验「非空」，**长度与强度交给 `checkPasswordStrength`** ——
+ * 在 schema 里再写一遍 `.min(10)` 会产生第二套强度规则，
+ * 而两套规则分叉时先撞上的是 schema 那套，返回的却是 `REQ_SCHEMA_INVALID`
+ * 而不是 `AUTH_PASSWORD_TOO_WEAK`，用户看不到「密码强度不足」的说明。
+ */
+const ChangePasswordBodySchema = z.object({
+  current_password: z.string().min(1),
+  new_password: z.string().min(1),
+});
+
 export interface AuthRoutesDeps {
   readonly identity: IdentityService;
   readonly quota: QuotaGuard;
@@ -233,11 +246,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
   });
 
   /**
-   * 13.0 账号级端点对匿名身份的拦截（TP-1-37）。
+   * 改口令（13.9.2），兼 13.0 账号级端点对匿名身份的拦截（TP-1-37）。
    *
-   * P1 只需证明拦截生效；改邮箱/改口令/删账号的实际逻辑在 P5（用户空间）。
-   * 现在就放这个端点是为了让「匿名不可访问账号级操作」这条契约有测试守护 ——
-   * 等到 P5 再加，中间任何一次改动都可能悄悄破坏它。
+   * 这个端点原先只做拦截、逻辑返回 501。补上实现是因为「忘了口令」在此之前
+   * **没有任何出路**：账号只有邮箱与口令两个凭据，而 V1 没有邮件发送能力，
+   * 所以自助找回做不了 —— 至少要让记得旧口令的用户能改掉它。
+   *
+   * 成功时会下发新的会话 Cookie：`changePassword` 吊销了该用户的全部会话
+   * （含当前这一个），当前设备靠这个新 Cookie 留在登录态。
    */
   app.post('/api/v1/auth/password', async (request, reply) => {
     const cookies = parseCookies(request.headers.cookie);
@@ -257,12 +273,53 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       return fail(request, reply, 'AUTH_ANONYMOUS_FORBIDDEN');
     }
 
-    // P5 实现改口令；此处返回 501 而不是假装成功
-    return reply.code(501).send(
-      buildErrorBody('SYS_INTERNAL_ERROR', {
-        requestId: request.id,
-        traceId: 'unavailable',
-      }),
-    );
+    /*
+     * 校验放在身份拦截**之后**。
+     *
+     * 反过来的话，匿名请求会先因为「body 格式不对」拿到 400 —— 而它真正的
+     * 问题是没有账号。TP-1-37 那条契约（匿名访问账号级端点得 403）也就
+     * 取决于请求体拼得对不对了。
+     */
+    const parsed = ChangePasswordBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return fail(request, reply, 'REQ_SCHEMA_INVALID', {
+        field: parsed.error.issues[0]?.path.join('.') ?? 'body',
+      });
+    }
+
+    const changed = await identity.changePassword({
+      userId: result.identity.userId,
+      currentPassword: parsed.data.current_password,
+      newPassword: parsed.data.new_password,
+      ip: clientIp(request),
+    });
+
+    switch (changed.outcome) {
+      case 'current_password_invalid':
+        recordIdentityEvent('password_change', 'rejected');
+        return fail(request, reply, 'AUTH_CURRENT_PASSWORD_INVALID', {
+          field: 'current_password',
+        });
+      case 'rate_limited':
+        recordIdentityEvent('password_change', 'rate_limited');
+        return fail(request, reply, 'AUTH_RATE_LIMITED', {
+          retryAfterSeconds: changed.retryAfterSeconds,
+        });
+      case 'password_too_weak':
+        recordIdentityEvent('password_change', 'rejected');
+        return fail(request, reply, 'AUTH_PASSWORD_TOO_WEAK', { field: 'new_password' });
+      case 'account_unavailable':
+        recordIdentityEvent('password_change', 'failed');
+        return fail(request, reply, 'AUTH_SESSION_INVALID');
+      case 'changed':
+        applyCookies(reply, changed.cookies, secureCookies);
+        recordIdentityEvent('password_change', 'succeeded');
+        /*
+         * 204 而不是 200 + 会话信息：改口令不改变身份或配额，回一份
+         * `SessionResponse` 会让前端以为需要拿它去覆盖本地状态。
+         * 新的会话 Cookie 在响应头里，浏览器自己会用。
+         */
+        return reply.code(204).send();
+    }
   });
 }

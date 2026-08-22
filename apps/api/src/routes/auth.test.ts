@@ -331,6 +331,182 @@ describe('POST /api/v1/auth/logout（13.9.3）', () => {
   });
 });
 
+describe('POST /api/v1/auth/password（13.9.2 改口令）', () => {
+  const OLD = 'correcthorsebattery';
+  const NEW = 'a-different-long-passphrase';
+
+  /** 注册一个用户并返回它的会话 Cookie */
+  async function registerUser(
+    instance: NonNullable<typeof app>,
+    email = 'user@example.com',
+  ): Promise<string> {
+    const reg = await instance.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email, password: OLD },
+    });
+    return setCookieValue(reg.headers, COOKIE_NAMES.session) as string;
+  }
+
+  function change(
+    instance: NonNullable<typeof app>,
+    session: string,
+    payload: Record<string, string>,
+  ) {
+    return instance.inject({
+      method: 'POST',
+      url: '/api/v1/auth/password',
+      headers: { cookie: `${COOKIE_NAMES.session}=${session}` },
+      payload,
+    });
+  }
+
+  it('改成功返回 204 并下发新会话 Cookie', async () => {
+    const harness = makeApp();
+    app = harness.app;
+    const session = await registerUser(app);
+
+    const res = await change(app, session, { current_password: OLD, new_password: NEW });
+
+    expect(res.statusCode).toBe(204);
+    const fresh = setCookieValue(res.headers, COOKIE_NAMES.session);
+    expect(fresh).toBeTruthy();
+    // 必须是**另一个**会话：全部旧会话（含当前这一个）都被吊销了
+    expect(fresh).not.toBe(session);
+  });
+
+  it('旧会话在改口令后立即失效，新会话可用', async () => {
+    /*
+     * 这是改口令唯一真正重要的断言。只改哈希不动会话的实现同样会返回 204，
+     * 而用户改口令通常正是因为怀疑口令外泄 —— 对方手上那个会话
+     * 30 天滑动过期，只要他还在用就永不过期。
+     */
+    const harness = makeApp();
+    app = harness.app;
+    const session = await registerUser(app);
+
+    const res = await change(app, session, { current_password: OLD, new_password: NEW });
+    const fresh = setCookieValue(res.headers, COOKIE_NAMES.session);
+
+    const withOld = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/password',
+      headers: { cookie: `${COOKIE_NAMES.session}=${session}` },
+      payload: { current_password: NEW, new_password: 'yet-another-long-passphrase' },
+    });
+    expect(withOld.statusCode).toBe(401);
+
+    const withNew = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/session',
+      headers: { cookie: `${COOKIE_NAMES.session}=${fresh as string}` },
+    });
+    expect(withNew.statusCode).toBe(200);
+    expect(withNew.json<{ user_type: string }>().user_type).toBe('REGISTERED');
+  });
+
+  it('改完之后新口令能登录、旧口令不能', async () => {
+    const harness = makeApp();
+    app = harness.app;
+    const session = await registerUser(app);
+    await change(app, session, { current_password: OLD, new_password: NEW });
+
+    const withNew = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'user@example.com', password: NEW },
+    });
+    expect(withNew.statusCode).toBe(200);
+
+    const withOld = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'user@example.com', password: OLD },
+    });
+    expect(withOld.statusCode).toBe(401);
+  });
+
+  it('旧口令错返回 400 AUTH_CURRENT_PASSWORD_INVALID，field 指向 current_password', async () => {
+    const harness = makeApp();
+    app = harness.app;
+    const session = await registerUser(app);
+
+    const res = await change(app, session, {
+      current_password: 'not-the-current-one',
+      new_password: NEW,
+    });
+
+    /*
+     * 400 而不是 401：401 在前端有全局含义（会话失效 → 重新解析身份），
+     * 用它表示「输错一个字」会把笔误当成掉线处理。
+     */
+    expect(res.statusCode).toBe(400);
+    const body = res.json<{ error: { code: string; field?: string } }>();
+    expect(body.error.code).toBe('AUTH_CURRENT_PASSWORD_INVALID');
+    expect(body.error.field).toBe('current_password');
+  });
+
+  it('新口令太弱返回 400 AUTH_PASSWORD_TOO_WEAK，field 指向 new_password', async () => {
+    const harness = makeApp();
+    app = harness.app;
+    const session = await registerUser(app);
+
+    const res = await change(app, session, { current_password: OLD, new_password: 'short' });
+
+    expect(res.statusCode).toBe(400);
+    const body = res.json<{ error: { code: string; field?: string } }>();
+    expect(body.error.code).toBe('AUTH_PASSWORD_TOO_WEAK');
+    expect(body.error.field).toBe('new_password');
+  });
+
+  it('旧口令错时不先报新口令太弱（校验顺序不泄漏旧口令是否正确）', async () => {
+    /*
+     * 若强度校验排在验证旧口令之前，不知道旧口令的人就能拿两种不同的响应
+     * 当作预言机：弱新口令 + 猜的旧口令回 PASSWORD_TOO_WEAK 说明旧口令
+     * 还没验到，回 CURRENT_PASSWORD_INVALID 说明……顺序本身泄漏了信息。
+     */
+    const harness = makeApp();
+    app = harness.app;
+    const session = await registerUser(app);
+
+    const res = await change(app, session, {
+      current_password: 'not-the-current-one',
+      new_password: 'short',
+    });
+
+    expect(res.json<{ error: { code: string } }>().error.code).toBe(
+      'AUTH_CURRENT_PASSWORD_INVALID',
+    );
+  });
+
+  it('口令连续错到上限返回 429（与登录共用计数器）', async () => {
+    const harness = makeApp(quotaConfig({ emailLoginFailuresPerHour: 2 }));
+    app = harness.app;
+    const session = await registerUser(app);
+
+    for (let i = 0; i < 2; i += 1) {
+      const res = await change(app, session, { current_password: `wrong-${i}`, new_password: NEW });
+      expect(res.statusCode).toBe(400);
+    }
+
+    const locked = await change(app, session, { current_password: 'wrong-x', new_password: NEW });
+    expect(locked.statusCode).toBe(429);
+    expect(locked.json<{ error: { code: string } }>().error.code).toBe('AUTH_RATE_LIMITED');
+    expect(locked.headers['retry-after']).toBeDefined();
+  });
+
+  it('缺字段返回 400 REQ_SCHEMA_INVALID', async () => {
+    const harness = makeApp();
+    app = harness.app;
+    const session = await registerUser(app);
+
+    const res = await change(app, session, { current_password: OLD });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: { code: string } }>().error.code).toBe('REQ_SCHEMA_INVALID');
+  });
+});
+
 describe('账号级端点拦截匿名身份（13.0、TP-1-37）', () => {
   it('匿名身份访问改口令端点返回 403 AUTH_ANONYMOUS_FORBIDDEN', async () => {
     const harness = makeApp();

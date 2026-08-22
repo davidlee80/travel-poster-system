@@ -748,3 +748,166 @@ describe('P7 匿名入口关闭（FEATURE_ANONYMOUS_ENABLED=false）', () => {
     expect(closed.users.count()).toBe(1);
   });
 });
+
+describe('改口令（13.9.2）', () => {
+  const OLD = 'correcthorsebattery';
+  const NEW = 'a-different-long-passphrase';
+
+  /** 注册一个用户，返回 harness、user_id 与首个会话令牌 */
+  async function withUser(config: QuotaConfig = quotaConfig()) {
+    const h = makeHarness(config);
+    const reg = await h.service.register({
+      email: 'user@example.com',
+      password: OLD,
+      displayName: null,
+      anonCookie: undefined,
+    });
+    if (reg.outcome !== 'registered') throw new Error('注册夹具失败');
+    return {
+      ...h,
+      userId: reg.identity.userId,
+      session: cookieValue(reg.cookies, COOKIE_NAMES.session) as string,
+    };
+  }
+
+  it('吊销该用户在其他设备上的会话', async () => {
+    /*
+     * 这一条是改口令的全部意义所在。用户改口令通常正是因为怀疑口令外泄，
+     * 而对方手上那个会话不受口令影响 —— 30 天滑动过期意味着只要他还在用
+     * 就永不过期。只改哈希的实现同样会返回 `changed`，从响应上看不出区别。
+     */
+    const h = await withUser();
+
+    // 第二台设备：用旧口令登录一次
+    const second = await h.service.login({
+      email: 'user@example.com',
+      password: OLD,
+      anonCookie: undefined,
+      ip: null,
+    });
+    if (second.outcome !== 'logged_in') throw new Error('第二次登录夹具失败');
+    const otherDevice = cookieValue(second.cookies, COOKIE_NAMES.session) as string;
+
+    expect(await h.sessions.get(otherDevice)).toBe(h.userId);
+
+    const changed = await h.service.changePassword({
+      userId: h.userId,
+      currentPassword: OLD,
+      newPassword: NEW,
+      ip: null,
+    });
+
+    expect(changed.outcome).toBe('changed');
+    expect(await h.sessions.get(otherDevice)).toBeNull();
+    // 发起改口令的这台设备拿到了新会话，仍在登录态
+    if (changed.outcome === 'changed') {
+      const fresh = cookieValue(changed.cookies, COOKIE_NAMES.session) as string;
+      expect(await h.sessions.get(fresh)).toBe(h.userId);
+    }
+  });
+
+  it('新会话是在吊销之后签发的（顺序反了会把自己也登出）', async () => {
+    const h = await withUser();
+    const changed = await h.service.changePassword({
+      userId: h.userId,
+      currentPassword: OLD,
+      newPassword: NEW,
+      ip: null,
+    });
+
+    expect(changed.outcome).toBe('changed');
+    if (changed.outcome === 'changed') {
+      const fresh = cookieValue(changed.cookies, COOKIE_NAMES.session);
+      expect(fresh).not.toBe(h.session);
+      expect(await h.sessions.get(fresh as string)).toBe(h.userId);
+    }
+  });
+
+  it('旧口令错不改哈希', async () => {
+    const h = await withUser();
+    const before = h.users.peek(h.userId)?.password_hash;
+
+    const result = await h.service.changePassword({
+      userId: h.userId,
+      currentPassword: 'not-the-current-one',
+      newPassword: NEW,
+      ip: null,
+    });
+
+    expect(result.outcome).toBe('current_password_invalid');
+    expect(h.users.peek(h.userId)?.password_hash).toBe(before);
+  });
+
+  it('新口令太弱时不改哈希、不动会话', async () => {
+    const h = await withUser();
+    const before = h.users.peek(h.userId)?.password_hash;
+
+    const result = await h.service.changePassword({
+      userId: h.userId,
+      currentPassword: OLD,
+      newPassword: 'short',
+      ip: null,
+    });
+
+    expect(result.outcome).toBe('password_too_weak');
+    expect(h.users.peek(h.userId)?.password_hash).toBe(before);
+    // 一次失败的改口令不该把用户登出
+    expect(await h.sessions.get(h.session)).toBe(h.userId);
+  });
+
+  it('口令错误计入登录失败限流（与登录共用计数器）', async () => {
+    const h = await withUser(quotaConfig({ emailLoginFailuresPerHour: 1 }));
+
+    const first = await h.service.changePassword({
+      userId: h.userId,
+      currentPassword: 'wrong-1',
+      newPassword: NEW,
+      ip: null,
+    });
+    expect(first.outcome).toBe('current_password_invalid');
+
+    const second = await h.service.changePassword({
+      userId: h.userId,
+      currentPassword: 'wrong-2',
+      newPassword: NEW,
+      ip: null,
+    });
+    expect(second.outcome).toBe('rate_limited');
+
+    /*
+     * 换到登录端点也应该被拦住 —— 不共用计数器的话，攻击者在两个端点之间
+     * 来回切换就能让额度翻倍。
+     */
+    const login = await h.service.login({
+      email: 'user@example.com',
+      password: 'wrong-3',
+      anonCookie: undefined,
+      ip: null,
+    });
+    expect(login.outcome).toBe('rate_limited');
+  });
+
+  it('账号已注销时返回 account_unavailable 而不是 changed', async () => {
+    /*
+     * 返回 changed 的表现是用户以为口令换了，而旧口令依然有效 ——
+     * 一个「以为自己安全了」的状态比明确的失败糟得多。
+     */
+    const h = await withUser();
+    const row = h.users.peek(h.userId);
+    if (row === undefined) throw new Error('夹具行不存在');
+    // 直接改状态：仓储层没有注销接口（删账号在 P5 之后）
+    (h.users as unknown as { rows: Map<string, unknown> }).rows.set(h.userId, {
+      ...row,
+      status: 'DELETED',
+    });
+
+    const result = await h.service.changePassword({
+      userId: h.userId,
+      currentPassword: OLD,
+      newPassword: NEW,
+      ip: null,
+    });
+
+    expect(result.outcome).toBe('account_unavailable');
+  });
+});

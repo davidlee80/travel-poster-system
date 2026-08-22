@@ -21,9 +21,26 @@ export interface SessionStore {
   create(userId: string): Promise<CreatedSession>;
   /** 返回 user_id，无效或过期返回 null */
   get(token: string): Promise<string | null>;
-  /** 滑动续期 */
-  touch(token: string): Promise<void>;
+  /**
+   * 滑动续期。
+   *
+   * `userId` 由调用方传入而不是现查 —— 调用方刚从 `get()` 拿到它（见
+   * `IdentityService.resolve` 分支 1），而 Redis 实现需要它把
+   * `revokeAllForUser` 的反向索引一起续期。索引先于会话过期的后果是那些
+   * 会话再也吊销不掉：改口令时它们会活下来，而改口令的全部意义就是
+   * 让别人手上那个会话失效。
+   */
+  touch(token: string, userId: string): Promise<void>;
   revoke(token: string): Promise<void>;
+  /**
+   * 吊销该用户的**全部**会话（改口令）。
+   *
+   * 不做这件事等于改口令无效：用户改口令通常正是因为怀疑口令外泄，
+   * 而对方手上那个会话不受口令影响 —— 30 天滑动过期意味着只要他还在用，
+   * 就永远不过期。调用方在此之后应重新 `create()` 一个，
+   * 让当前这台设备留在登录态。
+   */
+  revokeAllForUser(userId: string): Promise<void>;
 }
 
 export const SESSION_TTL_SECONDS = 30 * 86_400;
@@ -54,7 +71,8 @@ export class InMemorySessionStore implements SessionStore {
     return Promise.resolve(entry?.userId ?? null);
   }
 
-  async touch(token: string): Promise<void> {
+  /** `_userId` 只有 Redis 实现需要（续期反向索引），进程内实现自己就有归属 */
+  async touch(token: string, _userId: string): Promise<void> {
     const hash = hashToken(token);
     const entry = this.read(token);
     if (entry) {
@@ -68,6 +86,14 @@ export class InMemorySessionStore implements SessionStore {
 
   async revoke(token: string): Promise<void> {
     this.sessions.delete(hashToken(token));
+    return Promise.resolve();
+  }
+
+  async revokeAllForUser(userId: string): Promise<void> {
+    // 遍历中删除 Map 的键是安全的（迭代器按插入序推进，删掉的键不会被再访问）
+    for (const [hash, entry] of this.sessions) {
+      if (entry.userId === userId) this.sessions.delete(hash);
+    }
     return Promise.resolve();
   }
 

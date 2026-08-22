@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { login, register } from '@/lib/api-client';
+import { PasswordChangeForm } from './PasswordChangeForm';
 import { useSession } from './SessionProvider';
 
 /**
@@ -29,6 +30,7 @@ export function AuthPanel() {
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<{ message: string; field?: string } | null>(null);
   const [pending, setPending] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
 
   if (status.kind === 'loading') {
     return <div className="auth-panel auth-panel--loading">正在加载…</div>;
@@ -57,9 +59,22 @@ export function AuthPanel() {
           <span className="auth-panel__name">{session.display_name ?? session.email}</span>
           <span className="auth-panel__quota">本月剩余 {session.quota.monthly_remaining} 次</span>
         </div>
-        <button type="button" className="auth-panel__link" onClick={() => void logout()}>
-          退出登录
-        </button>
+
+        <div className="auth-panel__row">
+          <button
+            type="button"
+            className="auth-panel__link"
+            aria-expanded={changingPassword}
+            onClick={() => setChangingPassword((open) => !open)}
+          >
+            修改密码
+          </button>
+          <button type="button" className="auth-panel__link" onClick={() => void logout()}>
+            退出登录
+          </button>
+        </div>
+
+        {changingPassword && <PasswordChangeForm onDone={() => setChangingPassword(false)} />}
       </div>
     );
   }
@@ -191,6 +206,21 @@ export function AuthPanel() {
       <button type="submit" className="auth-panel__submit" disabled={pending}>
         {pending ? '处理中…' : mode === 'register' ? '注册并保存计划' : '登录'}
       </button>
+
+      {mode === 'register' && (
+        <p className="auth-panel__legal">
+          注册即表示你已阅读并同意
+          {/*
+            target="_blank" 是刻意的：注册表单已经填了邮箱与口令，同标签页跳走
+            回来时输入全没了 —— 用户于是学会「不点它」，而这条链接的全部意义
+            就是让他能点。
+          */}
+          <a href="/legal" target="_blank" rel="noopener noreferrer">
+            《用户协议与隐私政策》
+          </a>
+          。
+        </p>
+      )}
 
       {mode === 'register' && (
         <p className="auth-panel__note">注册后当前访客身份下已生成的计划会自动保留。</p>

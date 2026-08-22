@@ -274,6 +274,49 @@ describeIntegration('users 表约束（集成，需 PostgreSQL）', () => {
     });
   });
 
+  describe('改口令（13.9.2）', () => {
+    it('更新哈希并返回 true', async () => {
+      const row = await repo.createRegistered(registeredInput());
+
+      expect(await repo.updatePasswordHash(row.id, '$argon2id$new')).toBe(true);
+      expect((await repo.findById(row.id))?.password_hash).toBe('$argon2id$new');
+    });
+
+    it('不改配额、不写 upgraded_at', async () => {
+      /*
+       * 改口令借用 users 的 UPDATE，很容易顺手把「注册时才该动」的列一起写了。
+       * 配额被重置的表现是用户改一次口令就多出一批额度。
+       */
+      const row = await repo.createRegistered(registeredInput());
+      await repo.updatePasswordHash(row.id, '$argon2id$new');
+
+      const after = await repo.findById(row.id);
+      expect(after?.daily_plan_quota).toBe(row.daily_plan_quota);
+      expect(after?.monthly_plan_quota).toBe(row.monthly_plan_quota);
+      expect(after?.upgraded_at).toBeNull();
+    });
+
+    it('已注销的账号返回 false 且不改哈希', async () => {
+      /*
+       * 返回 true 的表现最坏：调用方据此回 204，用户以为口令换了。
+       * 匿名行由 shape 约束兜住（带口令会被数据库拒），
+       * 但 DELETED / SUSPENDED 没有那层保护，只能靠 WHERE 条件。
+       */
+      const row = await repo.createRegistered(registeredInput());
+      await pool.query(`UPDATE users SET status = 'DELETED' WHERE id = $1`, [row.id]);
+
+      expect(await repo.updatePasswordHash(row.id, '$argon2id$new')).toBe(false);
+      expect((await repo.findById(row.id))?.password_hash).toBe('$argon2id$fake');
+    });
+
+    it('匿名行返回 false（不会撞 shape 约束报错）', async () => {
+      const anon = await repo.createAnonymous(anonInput());
+
+      expect(await repo.updatePasswordHash(anon.id, '$argon2id$new')).toBe(false);
+      expect((await repo.findById(anon.id))?.password_hash).toBeNull();
+    });
+  });
+
   describe('归并（13.9.4）', () => {
     it('标记 MERGED 并指向目标；幂等', async () => {
       const anon = await repo.createAnonymous(anonInput());

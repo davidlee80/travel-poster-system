@@ -62,6 +62,20 @@ export const AUTH_ERRORS = {
     retryable: false,
     message: '密码强度不足，请使用至少 10 个字符且不易被猜到的密码。',
   },
+  AUTH_CURRENT_PASSWORD_INVALID: {
+    /*
+     * 400 而**不是** 401，尽管它就是「口令不对」。
+     *
+     * 401 在这套前端里有一个全局含义：会话已经不作数了，去重新解析身份
+     * （见 `Planner` 的 `reauthOn401`）。改口令时输错一个字如果回 401，
+     * 用户会因为一个笔误被当成掉线处理。
+     *
+     * 400 + `field: 'current_password'` 让它落到该落的地方：那一个输入框。
+     */
+    httpStatus: 400,
+    retryable: false,
+    message: '当前密码不正确。',
+  },
   AUTH_ANONYMOUS_ALREADY_UPGRADED: {
     httpStatus: 409,
     retryable: false,

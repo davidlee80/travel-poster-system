@@ -44,6 +44,14 @@ COPY tools/ tools/
 COPY packages/ packages/
 COPY apps/ apps/
 
+# `/legal` 页面在构建期读这份 markdown 并渲染成静态页（单一真相源仍是 docs
+# 那一份，见 apps/web/src/lib/legal-document.ts）。**只拷这一个文件**而不是
+# 整个 docs/：设计稿与计划文档进镜像层没有意义，而它们是这个仓库里最大的文本。
+#
+# 少了这一行的表现是构建直接失败（readFileSync 抛错）—— 这是刻意的，
+# 兜底成「渲染一个空政策页」会让缺失的政策悄悄上线。
+COPY "docs/用户协议与隐私政策.md" docs/
+
 RUN pnpm --filter "@tps/web..." run build
 
 # ── 运行层 ────────────────────────────────────────────────
