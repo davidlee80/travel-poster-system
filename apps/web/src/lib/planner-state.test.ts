@@ -13,6 +13,7 @@ import {
   buildPlannerRequest,
   criterionForCode,
   overallProgress,
+  submitBlocker,
   plannerReducer,
   stepIsComplete,
   stepScore,
@@ -398,6 +399,98 @@ describe('节奏与路线（第 4 步）', () => {
     });
     expect(state.routeShape).toBe(ROUTE_SHAPES[0]!.id);
     expect(stepScore(state, 'pace')).toBe(STEP_CRITERIA.pace.route);
+  });
+});
+
+describe('生成按钮的激活条件', () => {
+  /** 只填必填 4 项，别的一律不动 */
+  const onlyRequired = run(
+    INITIAL_PLANNER_STATE,
+    { type: 'setText', field: 'origin', value: '上海' },
+    { type: 'setText', field: 'destination', value: '杭州' },
+    { type: 'setText', field: 'startDate', value: '2026-10-01' },
+    { type: 'setText', field: 'endDate', value: '2026-10-03' },
+  );
+  const ready = { signedIn: true, busy: false };
+
+  it('必填 4 项填完即可提交 —— 辅助选项一个都不是必要条件', () => {
+    /*
+     * 这是这套界面的产品口径，也是契约第 3 节的承诺：「一份只带 11 项必填字段
+     * 的请求**必须**能生成出计划」。11 项里需要用户填的就这 4 个，
+     * 其余是常量、现场生成或有合法默认值。
+     *
+     * 因此完成度停在 34%、一个标签都没选、预算档位没点过 —— 照样能提交。
+     */
+    expect(submitBlocker(onlyRequired, ready)).toBeNull();
+
+    // 顺手把「远没填完」这件事钉住，否则上面那条断言可能只是因为填得太满
+    expect(overallProgress(onlyRequired)).toBeLessThan(40);
+    expect(Object.keys(onlyRequired.conditions)).toEqual([]);
+    expect(onlyRequired.budgetTier).toBeUndefined();
+    expect(onlyRequired.routeShape).toBeUndefined();
+  });
+
+  it('这些辅助选项都不影响可提交性', () => {
+    const auxiliary = [
+      { type: 'cycleCondition', code: 'interest.food' },
+      { type: 'selectBudgetTier', tier: 'LUXURY' },
+      { type: 'setRouteShape', value: 'island' },
+      { type: 'setPaceIntensity', value: 5 },
+      { type: 'setWalkingLimit', value: 8 },
+      { type: 'toggleIncludedItem', item: 'SHOPPING' },
+      { type: 'toggleExistingBooking', value: 'LODGING' },
+      { type: 'setText', field: 'customText', value: '不要红眼航班' },
+      { type: 'toggleNoSpecialRequirements' },
+      { type: 'adjustTraveler', kind: 'children', delta: 1 },
+    ] as const;
+
+    for (const action of auxiliary) {
+      const state = plannerReducer(onlyRequired, action);
+      expect(submitBlocker(state, ready), `${action.type} 不该改变可提交性`).toBeNull();
+    }
+  });
+
+  it('缺任一必填项都拦住', () => {
+    for (const field of ['origin', 'destination', 'startDate', 'endDate'] as const) {
+      const state = plannerReducer(onlyRequired, { type: 'setText', field, value: '' });
+      expect(submitBlocker(state, ready), `缺 ${field} 应当拦住`).toBe('MISSING_FIELDS');
+    }
+  });
+
+  it('只有空白字符不算填了', () => {
+    const state = plannerReducer(onlyRequired, {
+      type: 'setText',
+      field: 'destination',
+      value: '   ',
+    });
+    expect(submitBlocker(state, ready)).toBe('MISSING_FIELDS');
+  });
+
+  it('未登录优先于缺必填项 —— 填完了他还是发不出去', () => {
+    expect(submitBlocker(INITIAL_PLANNER_STATE, { signedIn: false, busy: false })).toBe(
+      'NOT_SIGNED_IN',
+    );
+    expect(submitBlocker(onlyRequired, { signedIn: false, busy: false })).toBe('NOT_SIGNED_IN');
+  });
+
+  it('生成中优先于一切', () => {
+    expect(submitBlocker(INITIAL_PLANNER_STATE, { signedIn: false, busy: true })).toBe('BUSY');
+  });
+
+  it('日期倒置**不**在前端拦 —— 由服务端 N-02 给出精确的 field', () => {
+    /*
+     * 「填了但返回日期早于出发日期」算已填写。前端灰掉一个没有解释的按钮，
+     * 不如让后端回「返回日期不能早于出发日期」+ field=trip.dates.end_date。
+     * 前端不复制 N-01～N-12（见 missingRequiredFields 的说明）。
+     */
+    const inverted = run(
+      onlyRequired,
+      { type: 'setText', field: 'startDate', value: '2026-10-05' },
+      { type: 'setText', field: 'endDate', value: '2026-10-01' },
+    );
+    expect(submitBlocker(inverted, ready)).toBeNull();
+    // 但完成度不给分 —— 那一处确实按 N-02 的口径判
+    expect(stepIsComplete(inverted, 'basic')).toBe(false);
   });
 });
 

@@ -9,6 +9,7 @@ import {
   INITIAL_PLANNER_STATE,
   buildPlannerRequest,
   plannerReducer,
+  submitBlocker,
   type StepId,
 } from '@/lib/planner-state';
 import {
@@ -178,10 +179,15 @@ export function Planner(): React.ReactElement {
   }
 
   async function submit(): Promise<void> {
-    const missing = missingRequiredFields(state);
-    if (missing.length > 0) {
-      setPhase({ kind: 'error', message: `请填写：${missing.join('、')}`, retryable: false });
-      // 缺的一定在第 1 步，直接把用户送回去 —— 否则他要自己找哪里红了
+    /*
+     * 不变量而不是 UX：按钮在缺必填项时是禁用的（见 `submitBlocker`），
+     * 因此这一段正常走不到。留着是因为这个函数会构造并发出一个网络请求 ——
+     * 「明知不合法还是发出去」不该只靠一个 `disabled` 属性拦住，
+     * 而将来多一个提交入口（回车、快捷键）时它就是唯一的防线。
+     */
+    const blocked = missingRequiredFields(state);
+    if (blocked.length > 0) {
+      setPhase({ kind: 'error', message: `请填写：${blocked.join('、')}`, retryable: false });
       jump('basic');
       return;
     }
@@ -235,6 +241,16 @@ export function Planner(): React.ReactElement {
 
   const busy = phase.kind === 'submitting' || phase.kind === 'generating';
 
+  /*
+   * 激活条件：必填 4 项 + 已登录 + 不在生成中。辅助选项一个都不参与 ——
+   * 推导与理由在 `submitBlocker`。
+   *
+   * `missing` 单独算一份是给右栏就地列出缺什么用的：按钮禁用之后，
+   * 那个「请填写：…」的错误弹层不会再出现了。
+   */
+  const blocker = submitBlocker(state, { signedIn, busy });
+  const missing = missingRequiredFields(state);
+
   return (
     <div className="planner">
       <PlannerTopBar
@@ -268,8 +284,9 @@ export function Planner(): React.ReactElement {
           state={state}
           onCycle={cycle}
           onSubmit={() => void submit()}
-          busy={busy}
-          signedIn={signedIn}
+          blocker={blocker}
+          missing={missing}
+          onJumpToMissing={() => jump('basic')}
           open={summaryOpen}
         />
       </div>

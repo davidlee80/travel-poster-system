@@ -3,7 +3,13 @@
 import { CONDITION_LABEL } from '@tps/presentation';
 import type { ConditionCode } from '@tps/schemas';
 
-import { budgetTotal, tripDays, travelerCount, type PlannerState } from '@/lib/planner-state';
+import {
+  budgetTotal,
+  tripDays,
+  travelerCount,
+  type PlannerState,
+  type SubmitBlocker,
+} from '@/lib/planner-state';
 import type { ConditionStance } from '@/lib/travel-request-form';
 
 /**
@@ -47,6 +53,19 @@ function money(value: number): string {
 }
 
 /**
+ * 按钮的 `title`。禁用的按钮**必须说明原因** —— 一个灰掉且没有解释的按钮
+ * 与「功能坏了」在用户眼里没有区别。
+ *
+ * `'READY'` 是「没有阻塞」那一档，给 undefined 让浏览器不显示 tooltip。
+ */
+const BLOCKER_TITLE: Record<SubmitBlocker | 'READY', string | undefined> = {
+  READY: undefined,
+  BUSY: '正在生成，请稍候',
+  NOT_SIGNED_IN: '生成旅行计划需要先注册或登录',
+  MISSING_FIELDS: '还有必填项没填 —— 出发地、目的地与日期',
+};
+
+/**
  * 一条本地可判定的冲突提示。
  *
  * **只做一条，且只提示不阻断。** 完整的冲突判定是服务端 N-01～N-12 与
@@ -65,8 +84,12 @@ export interface ConditionSummaryProps {
   readonly state: PlannerState;
   readonly onCycle: (code: ConditionCode) => void;
   readonly onSubmit: () => void;
-  readonly busy: boolean;
-  readonly signedIn: boolean;
+  /** 为什么不能提交；null 表示可以。推导在 `planner-state.ts` 的 `submitBlocker` */
+  readonly blocker: SubmitBlocker | null;
+  /** `blocker === 'MISSING_FIELDS'` 时缺的是哪几项，要就地列出来 */
+  readonly missing: readonly string[];
+  /** 把用户送到第 1 步（必填项全在那里） */
+  readonly onJumpToMissing: () => void;
   readonly open: boolean;
 }
 
@@ -74,8 +97,9 @@ export function ConditionSummary({
   state,
   onCycle,
   onSubmit,
-  busy,
-  signedIn,
+  blocker,
+  missing,
+  onJumpToMissing,
   open,
 }: ConditionSummaryProps): React.ReactElement {
   const entries = Object.entries(state.conditions) as readonly [ConditionCode, ConditionStance][];
@@ -159,17 +183,22 @@ export function ConditionSummary({
       </div>
 
       <div className="planner-right__actions">
+        {/*
+          激活条件**只有必填项**（加上「已登录」这个 P7 的硬前提）——
+          完成度、标签、预算档位、路线结构、节奏、兴趣一个都不参与。
+          推导在 `planner-state.ts` 的 `submitBlocker`，那里也写了为什么。
+        */}
         <button
           type="button"
           className="planner-button planner-button--primary planner-button--large"
-          disabled={busy || !signedIn}
-          title={signedIn ? undefined : '生成旅行计划需要先注册或登录'}
+          disabled={blocker !== null}
+          title={BLOCKER_TITLE[blocker ?? 'READY']}
           onClick={onSubmit}
         >
-          {busy ? '生成中…' : '生成旅行方案'}
+          {blocker === 'BUSY' ? '生成中…' : '生成旅行方案'}
         </button>
 
-        {signedIn ? null : (
+        {blocker === 'NOT_SIGNED_IN' ? (
           <p className="planner-right__note" role="note">
             生成旅行计划需要先注册或登录 —— 计划会保存在你的账号下，换设备也能打开。{' '}
             {/*
@@ -182,7 +211,20 @@ export function ConditionSummary({
               去注册或登录
             </a>
           </p>
-        )}
+        ) : null}
+
+        {blocker === 'MISSING_FIELDS' ? (
+          /*
+            必须**就地列出缺什么**。按钮禁用之后那个「请填写：…」的错误弹层
+            再也不会出现了 —— 只灰掉按钮不说原因，用户会以为功能坏了。
+          */
+          <p className="planner-right__note" role="note">
+            还需填写：<strong>{missing.join('、')}</strong>。{' '}
+            <button type="button" className="planner-right__jump" onClick={onJumpToMissing}>
+              去第 1 步填写
+            </button>
+          </p>
+        ) : null}
       </div>
     </aside>
   );

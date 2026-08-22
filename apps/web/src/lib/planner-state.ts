@@ -11,6 +11,7 @@ import {
 import {
   INITIAL_FORM_STATE,
   buildTravelRequest,
+  missingRequiredFields,
   type BuildRequestOptions,
   type ConditionStance,
   type TravelRequestFormState,
@@ -483,6 +484,58 @@ export function stepIsEdited(state: PlannerState, step: StepId): boolean {
 export function overallProgress(state: PlannerState): number {
   const total = STEP_IDS.reduce((sum, step) => sum + stepScore(state, step), 0);
   return Math.max(0, Math.min(100, total));
+}
+
+// ── 提交闸门 ────────────────────────────────────────────────
+
+/**
+ * 为什么不能提交。`null` = 可以提交。
+ *
+ * ## 激活条件只有必填项
+ *
+ * 必填项就是契约的 11 个必填字段里**需要用户填的那 4 个**（出发地、目的地、
+ * 出发日期、返回日期）—— 其余 7 个要么是常量（`schema_version`）、要么由前端
+ * 现场生成（`client_request_id`、`timezone`）、要么有合法默认值（成人 2 人、
+ * `budget.basis`、人均每日 800～1500）。
+ *
+ * **辅助选项一个都不参与**：完成度百分比、条件标签、预算档位、路线结构、
+ * 节奏强度、兴趣、特殊需求文字，全都不影响这个闸门。只填 4 项就能生成 ——
+ * 那也正是契约第 3 节承诺的「一份只带 11 项的请求必须能生成出计划」。
+ *
+ * ## 为什么是禁用按钮而不是点了再拒
+ *
+ * 原来这个闸门只在 `submit()` 里，按钮恒亮。空表单点下去弹一个「请填写：…」
+ * 的错误层 —— 而 `Planner` 自己的注释早就写了「首屏禁用比先允许点、再发现
+ * 不行好」（那条原则当时只用在登录态上）。禁用 + 就地列出缺什么，
+ * 比让用户先撞一次墙再回头找强。
+ *
+ * ## 日期倒置不在这里拦
+ *
+ * 「填了但返回日期早于出发日期」算**已填写**，闸门放行，由服务端 N-02 拒 ——
+ * 它给的 `field` 是 `trip.dates.end_date`，文案是「返回日期不能早于出发日期」，
+ * 比前端灰掉一个没有解释的按钮精确。前端不复制 N-01～N-12（见
+ * `missingRequiredFields` 的说明）。
+ */
+export type SubmitBlocker =
+  /** 正在生成中 */
+  | 'BUSY'
+  /** 未登录或身份还没解析出来（P7：未注册请求一律 401） */
+  | 'NOT_SIGNED_IN'
+  /** 必填项还有空的 */
+  | 'MISSING_FIELDS';
+
+export function submitBlocker(
+  state: PlannerState,
+  context: { readonly signedIn: boolean; readonly busy: boolean },
+): SubmitBlocker | null {
+  if (context.busy) return 'BUSY';
+  /*
+   * 登录排在必填项之前：未登录的访客该先看到「需要注册」，
+   * 而不是先被要求把表单填完 —— 填完了他还是发不出去。
+   */
+  if (!context.signedIn) return 'NOT_SIGNED_IN';
+  if (missingRequiredFields(state).length > 0) return 'MISSING_FIELDS';
+  return null;
 }
 
 // ── 派生：给右栏摘要用 ──────────────────────────────────────

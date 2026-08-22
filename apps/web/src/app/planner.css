@@ -1096,11 +1096,28 @@
   line-height: 1.6;
 }
 
-/* 提示里那句「去注册或登录」。加粗且用主色 —— 它是这段文字里唯一可点的东西 */
-.planner-right__auth-link {
-  color: var(--brand);
+/*
+ * 提示里那两个可点的东西（「去注册或登录」「去第 1 步填写」）。
+ * 加粗且用主色 —— 它们是各自那段文字里唯一能点的部分。
+ *
+ * `--primary` 而不是 `--brand`：后者不存在（`.planner` 只定义了 `--primary`
+ * 那一套）。写错的变量不报错，只是让 `color` 声明整条失效 ——
+ * 表现是链接只有下划线、颜色跟正文一样灰。
+ */
+.planner-right__auth-link,
+.planner-right__jump {
+  color: var(--primary);
   font-weight: 700;
   white-space: nowrap;
+}
+
+/* 它是 button 而不是 a（要触发 jump 以便同时高亮左栏），因此得清掉按钮外观 */
+.planner-right__jump {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+  text-decoration: underline;
 }
 
 /* ── 生成等待弹层 ─────────────────────────────────────────── */
