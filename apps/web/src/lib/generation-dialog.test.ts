@@ -121,6 +121,37 @@ describe('error', () => {
     expect(fatal).not.toBe(retryable);
   });
 
+  it('未登录（401）不给「调整条件」那句 —— 调整条件解决不了未登录', () => {
+    /*
+     * 401 同样是 `retryable: false`，因此不特殊处理时它会与「日期非法」
+     * 「预算太低」共用第二行「请按上面的提示调整条件后再试」。
+     * 用户于是去改日期、改预算，而真正要做的是登录 ——
+     * 一句合理但错误的指引比没有指引更费时间。
+     */
+    const auth = dialogViewFor({
+      kind: 'error',
+      message: '请先注册或登录后再使用。',
+      retryable: false,
+      needsAuth: true,
+    })?.lines[1];
+    const fatal = dialogViewFor({ kind: 'error', message: 'x', retryable: false })?.lines[1];
+
+    expect(auth).not.toBe(fatal);
+    expect(auth).toContain('登录');
+    // 必须说清表单不会丢，否则用户不敢关掉弹层去登录
+    expect(auth).toContain('不会丢');
+  });
+
+  it('needsAuth 优先于 retryable（401 落到 fatal 那一档也算错）', () => {
+    const view = dialogViewFor({
+      kind: 'error',
+      message: 'x',
+      retryable: true,
+      needsAuth: true,
+    });
+    expect(view?.lines[1]).toContain('登录');
+  });
+
   it('可以关闭，且**完全不画**进度条', () => {
     /*
      * percent 为 null 是「不显示」，与 submitting 的 'indeterminate'

@@ -27,7 +27,19 @@ export type GenerationPhase =
   | { readonly kind: 'submitting' }
   | { readonly kind: 'generating'; readonly progress: number; readonly message: string }
   | { readonly kind: 'ready'; readonly planId: string }
-  | { readonly kind: 'error'; readonly message: string; readonly retryable: boolean };
+  | {
+      readonly kind: 'error';
+      readonly message: string;
+      readonly retryable: boolean;
+      /**
+       * 是否是「未登录 / 会话失效」类失败（HTTP 401）。
+       *
+       * 单独一位而不是只看 `retryable`：401 也是 `retryable: false`，于是它会
+       * 和「日期非法」「预算太低」共用第二行文案「请按上面的提示调整条件」
+       * —— 而未登录不是条件问题，调整条件一万次也不会好。
+       */
+      readonly needsAuth?: boolean;
+    };
 
 export interface GenerationDialogView {
   readonly tone: 'working' | 'done' | 'error';
@@ -118,16 +130,30 @@ export function dialogViewFor(phase: GenerationPhase): GenerationDialogView | nu
       return {
         tone: 'error',
         title: '生成未完成',
-        lines: [
-          phase.message,
-          phase.retryable ? '这类问题多是临时的，可以直接重试。' : '请按上面的提示调整条件后再试。',
-        ],
+        lines: [phase.message, errorHint(phase)],
         // 失败态不画进度条：一根扫来扫去的跑马灯读起来是「还在工作」
         percent: null,
         dismissible: true,
         planId: null,
       };
   }
+}
+
+/**
+ * 第二行：该怎么办。
+ *
+ * 三档而不是两档。`needsAuth` 必须先判 —— 401 同样是 `retryable: false`，
+ * 落到「请按上面的提示调整条件」那一档时给的是错误建议：用户会去改日期、
+ * 改预算，而真正要做的是登录。
+ *
+ * 「已填写的内容不会丢」是必须说的：关掉弹层去登录时表单状态确实还在
+ * （`Planner` 的 reducer 不因 401 重置），不说的话用户不敢关。
+ */
+function errorHint(phase: { readonly retryable: boolean; readonly needsAuth?: boolean }): string {
+  if (phase.needsAuth === true) {
+    return '在右上角登录后可以直接重新提交，已填写的内容不会丢。';
+  }
+  return phase.retryable ? '这类问题多是临时的，可以直接重试。' : '请按上面的提示调整条件后再试。';
 }
 
 /**

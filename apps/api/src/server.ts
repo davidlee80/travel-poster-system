@@ -134,6 +134,51 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     done();
   });
 
+  /*
+   * 容忍 `content-type: application/json` + 空请求体。
+   *
+   * Fastify 默认对这种请求回 400 `FST_ERR_CTP_EMPTY_JSON_BODY`。而
+   * `/auth/logout` 这类端点**不需要请求体** —— 一个统一给所有请求加
+   * JSON content-type 的客户端（我们自己的 api-client 就是这么写的，
+   * 见 `apps/web/src/lib/api-client.ts`）在这里必然撞墙。
+   *
+   * 症状极其隐蔽：登出请求拿到 400，而前端不看登出的返回值（它接着去重新
+   * 取身份，而身份还在），于是**「退出登录」按钮点了没反应**，没有任何报错。
+   * 这个 bug 从 TP-1-40 起一直存在，而端点层测试测不到它 ——
+   * `app.inject` 不传 payload 时根本不发 content-type，走不到这个解析器。
+   *
+   * 这一层放在服务端而不是只修客户端：13.x 明确邀请第三方替换前端呈现层，
+   * 而「给所有 POST 加 JSON content-type」是最常见的写法之一。
+   *
+   * 空体解析成 `undefined`，于是需要请求体的端点走各自的 Zod 校验，
+   * 返回 13.7 形态的 `REQ_SCHEMA_INVALID` —— 比 Fastify 那个自带形态
+   * （不符合 13.0 的错误信封）更贴合契约。
+   */
+  app.addContentTypeParser(
+    'application/json',
+    { parseAs: 'string' },
+    (_request, body: string, done) => {
+      if (body.length === 0) {
+        done(null, undefined);
+        return;
+      }
+      try {
+        done(null, JSON.parse(body));
+      } catch {
+        /*
+         * 畸形 JSON 仍然是 400，与内置解析器一致。
+         *
+         * `statusCode` 必须自己带上：Fastify 只看错误对象上的这个字段，
+         * 而 `JSON.parse` 抛的 SyntaxError 没有它 —— 少了这两行，
+         * 一个手抖打错的请求体会变成 500，被当作服务端故障告警。
+         */
+        const error = new Error('请求体不是合法的 JSON') as Error & { statusCode?: number };
+        error.statusCode = 400;
+        done(error, undefined);
+      }
+    },
+  );
+
   /**
    * 存活探针：进程还在就返回 200。
    * 排空期间仍返回 200 —— 否则 K8s 会在优雅停机中途 SIGKILL 掉本实例。

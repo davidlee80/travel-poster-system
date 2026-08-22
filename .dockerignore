@@ -18,6 +18,11 @@ dist
 .git
 .github
 docs
+# 唯一的例外：web 镜像在构建期读这一份 markdown 渲染 /legal 页面
+# （单一真相源仍是 docs 那一份，见 apps/web/src/lib/legal-document.ts）。
+# 否则 web.Dockerfile 那条 COPY 会以 "not found" 失败 ——
+# .dockerignore 的排除发生在 COPY 之前，写了 COPY 也拷不到。
+!docs/用户协议与隐私政策.md
 coverage
 **/coverage
 **/__visual__

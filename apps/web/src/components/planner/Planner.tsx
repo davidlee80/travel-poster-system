@@ -138,7 +138,12 @@ export function Planner(): React.ReactElement {
       if (!result.ok) {
         // 轮询途中会话失效也要重新解析 —— 生成要跑一分多钟，够 Cookie 过期
         reauthOn401(result.status);
-        setPhase({ kind: 'error', message: result.message, retryable: result.retryable });
+        setPhase({
+          kind: 'error',
+          message: result.message,
+          retryable: result.retryable,
+          needsAuth: result.status === 401,
+        });
         return;
       }
       if (result.data.status === 'FAILED') {
@@ -203,7 +208,12 @@ export function Planner(): React.ReactElement {
       const result = await generatePlan(body);
       if (!result.ok) {
         reauthOn401(result.status);
-        setPhase({ kind: 'error', message: result.message, retryable: result.retryable });
+        setPhase({
+          kind: 'error',
+          message: result.message,
+          retryable: result.retryable,
+          needsAuth: result.status === 401,
+        });
         return;
       }
 

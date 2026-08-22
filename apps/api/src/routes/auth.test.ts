@@ -331,6 +331,81 @@ describe('POST /api/v1/auth/logout（13.9.3）', () => {
   });
 });
 
+describe('无请求体的端点容忍 JSON content-type（浏览器实际发的形状）', () => {
+  it('登出：content-type: application/json + 空体 → 204', async () => {
+    /*
+     * 这是一个真实存在过的 bug：前端的 `request()` 给所有请求无条件加了
+     * `content-type: application/json`，而 `logout()` 没有请求体 ——
+     * Fastify 默认对此回 400 `FST_ERR_CTP_EMPTY_JSON_BODY`。
+     *
+     * 症状是**「退出登录」按钮点了没反应**且没有任何报错：调用方不看登出的
+     * 返回值，它接着去重新取身份，而身份还在。
+     *
+     * 现有的登出用例测不到它 —— `app.inject` 不传 payload 时不发
+     * content-type，走不到那个解析器。因此这一条必须显式带上头。
+     */
+    const harness = makeApp();
+    app = harness.app;
+
+    const reg = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: 'user@example.com', password: 'correcthorsebattery' },
+    });
+    const session = setCookieValue(reg.headers, COOKIE_NAMES.session);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      headers: {
+        cookie: `${COOKIE_NAMES.session}=${session as string}`,
+        'content-type': 'application/json',
+      },
+      // 不传 payload —— 浏览器 fetch 在 body 缺省时正是这个形状
+    });
+
+    expect(res.statusCode).toBe(204);
+    expect(setCookieValue(res.headers, COOKIE_NAMES.session)).toBe('');
+  });
+
+  it('空体到需要请求体的端点 → 13.7 形态的 REQ_SCHEMA_INVALID', async () => {
+    /*
+     * 容忍空体不等于放过它：需要请求体的端点仍要拒，只是拒的形状变成 13.0 的
+     * 错误信封（含 code / retryable / request_id），而不是 Fastify 自带的
+     * `{statusCode, code, error, message}` —— 后者不符合契约，
+     * 前端的 `(body).error` 读不出来，只能退回一句「服务暂时不可用」。
+     */
+    const harness = makeApp();
+    app = harness.app;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: { 'content-type': 'application/json' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = res.json<{ error: { code: string; retryable: boolean; request_id: string } }>();
+    expect(body.error.code).toBe('REQ_SCHEMA_INVALID');
+    expect(body.error.retryable).toBe(false);
+    expect(body.error.request_id).toMatch(/\S/);
+  });
+
+  it('畸形 JSON 仍然被拒（容忍空体不等于容忍坏数据）', async () => {
+    const harness = makeApp();
+    app = harness.app;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: { 'content-type': 'application/json' },
+      payload: '{"email": ',
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe('POST /api/v1/auth/password（13.9.2 改口令）', () => {
   const OLD = 'correcthorsebattery';
   const NEW = 'a-different-long-passphrase';

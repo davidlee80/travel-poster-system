@@ -54,7 +54,20 @@ async function request<T>(
       // 身份靠 HttpOnly Cookie，不带 credentials 每次都会被当成新访客
       credentials: 'include',
       headers: {
-        'content-type': 'application/json',
+        /*
+         * 只在**有请求体**时声明 content-type。
+         *
+         * 原来是无条件加的，于是 `logout()`（无请求体）发出的是
+         * 「content-type: application/json + 空体」—— Fastify 对此回 400
+         * `FST_ERR_CTP_EMPTY_JSON_BODY`。而调用方不看登出的返回值
+         * （它接着去重新取身份，而身份还在），表现是**「退出登录」点了
+         * 没反应**，没有任何报错。
+         *
+         * 服务端也做了容忍（见 `apps/api/src/server.ts` 的
+         * `addContentTypeParser`），两边都改是有意的：这一侧是「不声明自己
+         * 没有的东西」，那一侧是「别让第三方前端踩同一个坑」。
+         */
+        ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
         ...init.headers,
       },
     });
