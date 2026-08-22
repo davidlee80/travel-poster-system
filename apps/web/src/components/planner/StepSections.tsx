@@ -1,22 +1,25 @@
 'use client';
 
 import { CONDITION_LABEL } from '@tps/presentation';
-import {
-  CONDITION_CODES_BY_DOMAIN,
-  EXISTING_BOOKING_VALUES,
-  type ConditionCode,
-} from '@tps/schemas';
+import { EXISTING_BOOKING_VALUES, type ConditionCode } from '@tps/schemas';
 
 import {
   BUDGET_DAILY_CEILING,
   BUDGET_DAILY_FLOOR,
+  BUDGET_FOCUS_CODES,
   BUDGET_ITEM_LABEL,
   BUDGET_TIER_PRESETS,
+  CUSTOM_TAG_CODES,
   EXISTING_BOOKING_LABEL,
+  INTEREST_CODES,
+  LODGING_REQUIREMENT_CODES,
+  LODGING_TYPE_CODES,
   PACE_INTENSITY_LABEL,
   ROUTE_SHAPES,
   SENIOR_MOBILITY_LABEL,
   SENIOR_MOBILITY_VALUES,
+  TRANSPORT_CODES,
+  TRAVELER_TAG_CODES,
   budgetTotal,
   tripDays,
   travelerCount,
@@ -356,16 +359,7 @@ export function TravelersSection({
       <div className="planner-subsection">
         <h3 className="planner-subsection__title">同行相关的偏好</h3>
         <TagLegend />
-        <TagRow
-          codes={[
-            'accommodation.family_room',
-            'accessibility.child_car_seat',
-            'schedule.daily_rest',
-            'accommodation.single_base',
-          ]}
-          state={state}
-          dispatch={dispatch}
-        />
+        <TagRow codes={TRAVELER_TAG_CODES} state={state} dispatch={dispatch} />
       </div>
     </SectionShell>
   );
@@ -528,11 +522,12 @@ export function BudgetSection({ state, dispatch, registerRef }: SectionProps): R
       <div className="planner-subsection">
         <h3 className="planner-subsection__title">愿意重点花钱的项目</h3>
         <TagLegend />
-        <TagRow
-          codes={[...CONDITION_CODES_BY_DOMAIN.budget, 'interest.shopping']}
-          state={state}
-          dispatch={dispatch}
-        />
+        {/*
+          原来这里额外塞了 `interest.shopping`。它按域属于 interest，于是在**这一步**
+          点「购物」会给第 6 步记分。购物预算在上面的「预算包含哪些项目」里已经
+          有复选框，兴趣标签留在第 6 步。
+        */}
+        <TagRow codes={BUDGET_FOCUS_CODES} state={state} dispatch={dispatch} />
       </div>
     </SectionShell>
   );
@@ -665,23 +660,6 @@ export function PaceSection({ state, dispatch, registerRef }: SectionProps): Rea
 
 // ── 第 5 步 ─────────────────────────────────────────────────
 
-const LODGING_TYPES: readonly ConditionCode[] = [
-  'accommodation.hotel',
-  'accommodation.homestay',
-  'accommodation.apartment',
-  'accommodation.resort',
-  'accommodation.hostel',
-];
-
-const LODGING_REQUIREMENTS: readonly ConditionCode[] = [
-  'accommodation.elevator',
-  'accommodation.private_bath',
-  'accommodation.near_transit',
-  'accommodation.breakfast',
-  'accommodation.kitchen',
-  'accommodation.shared_dorm',
-];
-
 export function TransportSection({
   state,
   dispatch,
@@ -702,7 +680,7 @@ export function TransportSection({
           <strong>交通方式</strong>
           <span>可多选</span>
         </div>
-        <TagRow codes={CONDITION_CODES_BY_DOMAIN.transport} state={state} dispatch={dispatch} />
+        <TagRow codes={TRANSPORT_CODES} state={state} dispatch={dispatch} />
       </div>
 
       <div className="planner-subsection">
@@ -710,7 +688,7 @@ export function TransportSection({
           <strong>住宿类型</strong>
           <span>可多选</span>
         </div>
-        <TagRow codes={LODGING_TYPES} state={state} dispatch={dispatch} />
+        <TagRow codes={LODGING_TYPE_CODES} state={state} dispatch={dispatch} />
       </div>
 
       <div className="planner-subsection">
@@ -718,7 +696,7 @@ export function TransportSection({
           <strong>住宿具体要求</strong>
           <span>可多选</span>
         </div>
-        <TagRow codes={LODGING_REQUIREMENTS} state={state} dispatch={dispatch} />
+        <TagRow codes={LODGING_REQUIREMENT_CODES} state={state} dispatch={dispatch} />
         <p className="planner-hint">
           「合住多人间」设为「不要」即表示需要独立房间 —— 三态里的红色就是明确排除。
         </p>
@@ -756,7 +734,7 @@ export function InterestsSection({
       <div className="planner-subsection">
         <TagLegend />
         <TagRow
-          codes={CONDITION_CODES_BY_DOMAIN.interest}
+          codes={INTEREST_CODES}
           state={state}
           dispatch={dispatch}
           filter={(code) =>
@@ -821,22 +799,18 @@ export function CustomSection({ state, dispatch, registerRef }: SectionProps): R
       </p>
 
       <div className="planner-subsection">
-        <h3 className="planner-subsection__title">饮食与无障碍</h3>
+        <h3 className="planner-subsection__title">饮食、无障碍与作息</h3>
         <p className="planner-hint">
-          这两组是硬约束：勾选后生成时不可违反。原型里没有它们的入口，
+          这些是硬约束：勾选后生成时不可违反。原型里没有它们的入口，
           而海鲜过敏、清真这类诉求只写在文字里不会被校验。
         </p>
+        {/*
+          「儿童安全座椅」与「每日午休」不在这里 —— 它们的入口在第 2 步
+          「同行相关的偏好」，那里才是用户会想到它们的位置。一个 code 有两个
+          入口的话，在其中一个点它会让另一步变绿（见 `TAG_GROUPS`）。
+        */}
         <TagLegend />
-        <TagRow
-          codes={[...CONDITION_CODES_BY_DOMAIN.diet, ...CONDITION_CODES_BY_DOMAIN.accessibility]}
-          state={state}
-          dispatch={dispatch}
-        />
-      </div>
-
-      <div className="planner-subsection">
-        <h3 className="planner-subsection__title">作息</h3>
-        <TagRow codes={CONDITION_CODES_BY_DOMAIN.schedule} state={state} dispatch={dispatch} />
+        <TagRow codes={CUSTOM_TAG_CODES} state={state} dispatch={dispatch} />
       </div>
     </SectionShell>
   );

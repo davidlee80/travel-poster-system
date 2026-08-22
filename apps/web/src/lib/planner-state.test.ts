@@ -1,4 +1,4 @@
-import { TravelRequestUISchema } from '@tps/schemas';
+import { CONDITION_CODE_VALUES, TravelRequestUISchema, type ConditionCode } from '@tps/schemas';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -9,7 +9,9 @@ import {
   STEP_CRITERIA,
   STEP_IDS,
   STEP_WEIGHTS,
+  TAG_GROUPS,
   buildPlannerRequest,
+  criterionForCode,
   overallProgress,
   plannerReducer,
   stepIsComplete,
@@ -53,6 +55,108 @@ describe('七步与完成度权重', () => {
       const sum = Object.values(STEP_CRITERIA[id]).reduce((a, b) => a + b, 0);
       expect(sum, `${id} 的细项权重之和不等于 ${STEP_WEIGHTS[id]}`).toBe(STEP_WEIGHTS[id]);
     }
+  });
+
+  it('46 个条件码在 TAG_GROUPS 里各出现恰好一次', () => {
+    /*
+     * 出现两次 = 同一个标签有两个入口，而在其中一个入口点它会让**另一步**变绿
+     * （历史上就有三处：第 2 步的亲子房/单一住宿基地记到第 5 步、第 3 步的购物
+     * 记到第 6 步）。出现零次 = 那个 code 在界面上无从表达。
+     */
+    const seen = new Map<string, number>();
+    for (const group of TAG_GROUPS) {
+      for (const code of group.codes) seen.set(code, (seen.get(code) ?? 0) + 1);
+    }
+
+    const duplicated = [...seen.entries()].filter(([, count]) => count > 1).map(([code]) => code);
+    expect(duplicated, '这些 code 有多个入口').toEqual([]);
+
+    const missing = CONDITION_CODE_VALUES.filter((code) => !seen.has(code));
+    expect(missing, '这些 code 在界面上没有入口').toEqual([]);
+  });
+
+  it('点一个标签只给它所在的那一步记分', () => {
+    /*
+     * 这是「点了这里、别处变绿」的守卫。原来按域推断归属，而域与界面上的实际
+     * 分组不一致 —— 用户点第 2 步的「亲子房」，第 5 步的圆点亮了。
+     */
+    for (const group of TAG_GROUPS) {
+      for (const code of group.codes) {
+        const state = plannerReducer(INITIAL_PLANNER_STATE, { type: 'cycleCondition', code });
+        const scored = STEP_IDS.filter((step) => stepScore(state, step) > 0);
+
+        if (group.step === null) {
+          expect(scored, `${code} 不该给任何一步记分`).toEqual([]);
+        } else {
+          expect(scored, `${code} 只该给 ${group.step} 记分`).toEqual([group.step]);
+        }
+      }
+    }
+  });
+
+  it('criterionForCode 与 TAG_GROUPS 一致', () => {
+    for (const group of TAG_GROUPS) {
+      for (const code of group.codes as readonly ConditionCode[]) {
+        const criterion = criterionForCode(code);
+        if (group.step === null) {
+          expect(criterion, `${code} 不该有细项`).toBeNull();
+        } else {
+          expect(criterion, `${code} 的细项`).toEqual([group.step, group.criterion]);
+        }
+      }
+    }
+  });
+
+  it('一次真实的完整填写能走到 100%，且七步全部变绿', () => {
+    /*
+     * 这条断言此前**不存在** —— 既有用例只验「权重之和是 100」与「上限不超过
+     * 100」，而那两条对「某个细项压根没有正向路径」完全无感。
+     *
+     * 实际就漏过一个：`custom.confirmed` 的 9 分原本靠原型的「解析为旅行条件」
+     * 按钮达成，按钮删了权重留着，于是写了特殊需求的用户被锁在 91%。
+     *
+     * 用一条走到底的路径守它：任何一个细项失去可达路径，这里就红。
+     */
+    const state = run(
+      INITIAL_PLANNER_STATE,
+      // 第 1 步
+      { type: 'setText', field: 'origin', value: '上海' },
+      { type: 'setText', field: 'destination', value: '杭州' },
+      { type: 'setText', field: 'startDate', value: '2026-10-01' },
+      { type: 'setText', field: 'endDate', value: '2026-10-03' },
+      { type: 'toggleExistingBooking', value: 'LODGING' },
+      /*
+       * 第 2 步：**只有成人**，不加儿童也不加长者。
+       *
+       * 这是第二处缺陷的复现路径：`travelers.details` 的 7 分原来只能由
+       * 儿童年龄／长者行动能力两个控件达成，而它们只在有儿童或长者时才渲染 ——
+       * 两个成人出门的用户拿不到那 7 分，完成度上限 93%，第 2 步永远不变绿。
+       * 现在第 2 步的标签组接到了这个细项（原型本来就是这么接的）。
+       */
+      { type: 'adjustTraveler', kind: 'adults', delta: 1 },
+      { type: 'cycleCondition', code: 'accommodation.single_base' },
+      // 第 3 步
+      { type: 'selectBudgetTier', tier: 'STANDARD' },
+      { type: 'toggleIncludedItem', item: 'SHOPPING' },
+      { type: 'cycleCondition', code: 'budget.lodging_quality' },
+      // 第 4 步
+      { type: 'setPaceIntensity', value: 4 },
+      { type: 'setWalkingLimit', value: 5 },
+      { type: 'setRouteShape', value: 'hub' },
+      // 第 5 步
+      { type: 'cycleCondition', code: 'transport.public_transit' },
+      { type: 'cycleCondition', code: 'accommodation.hotel' },
+      { type: 'cycleCondition', code: 'accommodation.elevator' },
+      // 第 6 步
+      { type: 'cycleCondition', code: 'interest.food' },
+      // 第 7 步：写了真实的特殊需求，**不是**勾「我没有」
+      { type: 'setText', field: 'customText', value: '孩子对花生过敏，长辈腿脚不好。' },
+    );
+
+    for (const id of STEP_IDS) {
+      expect(stepIsComplete(state, id), `${id} 应当已完成`).toBe(true);
+    }
+    expect(overallProgress(state)).toBe(100);
   });
 
   it('默认预填值不计入完成度', () => {
@@ -297,14 +401,91 @@ describe('节奏与路线（第 4 步）', () => {
   });
 });
 
+describe('第 2 步的标签组与儿童年龄共用同一个细项', () => {
+  it('只有成人时也能靠标签组完成第 2 步', () => {
+    /*
+     * `travelers.details` 的另一条路径（儿童年龄／长者行动能力）只在有儿童或
+     * 长者时才渲染控件，因此两个成人出门的用户只剩标签这一条路。
+     * 原来第 2 步的标签按域记到了第 5 步 —— 于是那 7 分谁都拿不到。
+     */
+    const state = run(
+      INITIAL_PLANNER_STATE,
+      { type: 'adjustTraveler', kind: 'adults', delta: 1 },
+      { type: 'cycleCondition', code: 'accommodation.single_base' },
+    );
+    expect(stepIsComplete(state, 'travelers')).toBe(true);
+  });
+
+  it('取消标签不抹掉儿童年龄挣来的分', () => {
+    /*
+     * 两个来源共用一个细项，因此撤位要小心：把标签点上再取消，
+     * 不能连带把「填了儿童年龄」那一份也撤掉 —— 那个输入框里的值还在。
+     */
+    const state = run(
+      INITIAL_PLANNER_STATE,
+      { type: 'adjustTraveler', kind: 'children', delta: 1 },
+      { type: 'setChildAge', value: 6 },
+      // 点四次回到未选
+      { type: 'cycleCondition', code: 'accommodation.family_room' },
+      { type: 'cycleCondition', code: 'accommodation.family_room' },
+      { type: 'cycleCondition', code: 'accommodation.family_room' },
+      { type: 'cycleCondition', code: 'accommodation.family_room' },
+    );
+    expect(state.conditions['accommodation.family_room']).toBeUndefined();
+    expect(stepIsComplete(state, 'travelers')).toBe(true);
+  });
+
+  it('纯标签驱动的细项，取消最后一个仍然退回未达成', () => {
+    // 只有第 2 步那一组是双来源，其余各组不该跟着变宽松
+    const state = run(
+      INITIAL_PLANNER_STATE,
+      { type: 'cycleCondition', code: 'interest.food' },
+      { type: 'cycleCondition', code: 'interest.food' },
+      { type: 'cycleCondition', code: 'interest.food' },
+      { type: 'cycleCondition', code: 'interest.food' },
+    );
+    expect(state.conditions['interest.food']).toBeUndefined();
+    expect(stepIsComplete(state, 'interests')).toBe(false);
+    expect(stepScore(state, 'interests')).toBe(0);
+  });
+});
+
 describe('第 7 步：特殊需求', () => {
-  it('写了文字即达成 input 细项', () => {
+  it('写了文字就把整步算完（回归：曾经只给 4/13）', () => {
+    /*
+     * 原型这一步是 `{ input: 4, confirmed: 9 }`，那 9 分靠「解析为旅行条件 →
+     * 确认并添加」达成。那个按钮被删掉后权重留了下来，于是写了文字的用户
+     * 最高只能拿 4/13、第 7 步永远不变绿，而勾「我没有」反而满分 ——
+     * 越认真的用户分越低，且没有任何办法补上。
+     */
     const state = plannerReducer(INITIAL_PLANNER_STATE, {
       type: 'setText',
       field: 'customText',
       value: '孩子对花生过敏',
     });
-    expect(stepScore(state, 'custom')).toBe(STEP_CRITERIA.custom.input);
+    expect(stepScore(state, 'custom')).toBe(STEP_WEIGHTS.custom);
+    expect(stepIsComplete(state, 'custom')).toBe(true);
+  });
+
+  it('清空文字后退回未达成', () => {
+    const state = run(
+      INITIAL_PLANNER_STATE,
+      { type: 'setText', field: 'customText', value: '孩子对花生过敏' },
+      { type: 'setText', field: 'customText', value: '   ' },
+    );
+    expect(stepIsComplete(state, 'custom')).toBe(false);
+  });
+
+  it('写文字与勾「我没有」两条路径等价 —— 都是明确回答', () => {
+    const byText = plannerReducer(INITIAL_PLANNER_STATE, {
+      type: 'setText',
+      field: 'customText',
+      value: '不要红眼航班',
+    });
+    const byCheckbox = plannerReducer(INITIAL_PLANNER_STATE, {
+      type: 'toggleNoSpecialRequirements',
+    });
+    expect(stepScore(byText, 'custom')).toBe(stepScore(byCheckbox, 'custom'));
   });
 
   it('勾「没有其他特殊需求」直接把整步算完，并清空文字', () => {
@@ -321,14 +502,21 @@ describe('第 7 步：特殊需求', () => {
     expect(stepIsComplete(state, 'custom')).toBe(true);
   });
 
-  it('勾了「没有」之后又开始打字，则取消该勾选', () => {
+  it('勾了「没有」之后又开始打字，则取消该勾选但整步仍算完成', () => {
+    /*
+     * 两者互斥，因此勾选被取消 —— 但用户此刻给出的是另一种明确回答，
+     * 这一步照样算完。
+     *
+     * 这条断言原来写的是 `stepIsComplete(...) === false`，把缺陷本身编码进了
+     * 测试：那正是「写了文字反而不算完成」的表现。
+     */
     const state = run(
       INITIAL_PLANNER_STATE,
       { type: 'toggleNoSpecialRequirements' },
       { type: 'setText', field: 'customText', value: '老人走不了太多路' },
     );
     expect(state.noSpecialRequirements).toBe(false);
-    expect(stepIsComplete(state, 'custom')).toBe(false);
+    expect(stepIsComplete(state, 'custom')).toBe(true);
   });
 });
 

@@ -1,6 +1,6 @@
 import {
   BUDGET_INCLUDED_ITEM_VALUES,
-  conditionDomain,
+  CONDITION_CODES_BY_DOMAIN,
   type BudgetIncludedItem,
   type BudgetTier,
   type ConditionCode,
@@ -83,7 +83,24 @@ export const STEP_CRITERIA = {
   pace: { intensity: 4, limits: 4, route: 4 },
   transport: { mode: 6, lodging: 4, requirements: 5 },
   interests: { selection: 10 },
-  custom: { input: 4, confirmed: 9 },
+  /*
+   * 原型这一步是 `{ input: 4, confirmed: 9 }`：写了文字得 4 分，点「解析为旅行
+   * 条件 → 确认并添加」再得 9 分。那个按钮在本实现里被删掉了（它是 7 条关键词
+   * `if`，产出的标签不在 46 码字典内，发出去会被拒），**而 9 分的权重当时留了
+   * 下来** —— 于是 `confirmed` 只剩「勾我没有其他特殊需求」一条正向路径，
+   * 认真写了特殊需求的用户反而会把它显式清掉。
+   *
+   * 结果是方向反的：写了文字最高 91%、第 7 步永远不变绿；勾「我没有」才 100%。
+   * 越认真的用户分越低，而且他没有任何办法补上那 9 分。
+   *
+   * 合并成一项 13 分。删掉这个二级划分而不是给它另找一个达成条件：
+   * 解析按钮没了之后这一步只有一个动作 ——「就特殊需求给出明确回答」，
+   * 而「写了字」与「写完了」在这里无从区分。
+   *
+   * 用第 7 步自己那三组标签（饮食／无障碍／作息）当第二级也不行：
+   * 没有忌口、不需要无障碍的用户会被同样的方式卡住，只是换了个位置。
+   */
+  custom: { answered: 13 },
 } as const satisfies Record<StepId, Record<string, number>>;
 
 // ── 预算档位 ────────────────────────────────────────────────
@@ -193,6 +210,142 @@ export const ROUTE_SHAPES: readonly RouteShape[] = [
   { id: 'island', name: '跳岛', glyph: '● ● ●' },
   { id: 'improvise', name: '边走边定', glyph: '?' },
 ];
+
+// ── 标签分组：渲染位置与完成度记账的唯一来源 ────────────────
+
+/**
+ * 每一步渲染哪些条件标签，以及那一组算进哪个细项。
+ *
+ * ## 为什么这张表必须存在
+ *
+ * 「标签渲染在哪一步」原来写在 `StepSections.tsx`，「点它给哪一步记分」原来靠
+ * **按域推断**。两份信息各写一遍，于是分叉了三处：
+ *
+ * ```text
+ * 第 2 步的「亲子房」「单一住宿基地」  → 按域落到 accommodation → 给第 5 步记分
+ * 第 2 步的「儿童安全座椅」「每日午休」→ 按域落到 accessibility/schedule → 谁都不记
+ * 第 3 步的「购物」                    → 按域落到 interest → 给第 6 步记分
+ * ```
+ *
+ * 后果是**点了这里、别处变绿**，而按域推断那段代码的注释写的正是
+ * 「避免勾了公共交通却让兴趣那步变绿」—— 意图被自己的实现违反了。
+ * 更糟的是第 2 步的标签组因此对第 2 步毫无贡献，而 `travelers.details` 的另一条
+ * 路径（儿童年龄／长者行动能力）只在有儿童或长者时才渲染 ——
+ * 于是**两个成人出门的用户拿不到那 7 分，完成度上限 93%，第 2 步永远不变绿**。
+ *
+ * 现在把两件事合成一张表：界面从这里取要渲染的 code，记账也从这里查归属。
+ * `criterion: null` 表示那一组不参与完成度。
+ *
+ * 46 个 code 在这张表里**恰好各出现一次**，由测试断言 —— 重复出现就意味着
+ * 同一个标签有两个入口，而在其中一个入口点它会让另一步变绿。
+ */
+export const TAG_GROUPS = [
+  {
+    /** 第 2 步「同行相关的偏好」。原型把这一组接到 travelers.details */
+    codes: [
+      'accommodation.family_room',
+      'accessibility.child_car_seat',
+      'schedule.daily_rest',
+      'accommodation.single_base',
+    ],
+    step: 'travelers',
+    criterion: 'details',
+    /*
+     * `travelers.details` 还有另一个来源：儿童年龄与长者行动能力两个控件。
+     *
+     * 因此取消这一组的最后一个标签时**不撤销**这个细项 —— 否则「填了儿童年龄、
+     * 点了个标签又取消」会把年龄那一份也抹掉，而那个输入框里的值还在。
+     * 其余各组是纯标签驱动的，取消最后一个应当退回未达成。
+     */
+    alsoSetByControls: true,
+  },
+  {
+    /** 第 3 步「愿意重点花钱的项目」。不含 interest.shopping —— 它在第 6 步 */
+    codes: [...CONDITION_CODES_BY_DOMAIN.budget],
+    step: 'budget',
+    criterion: 'focus',
+    alsoSetByControls: false,
+  },
+  {
+    codes: [...CONDITION_CODES_BY_DOMAIN.transport],
+    step: 'transport',
+    criterion: 'mode',
+    alsoSetByControls: false,
+  },
+  {
+    codes: [
+      'accommodation.hotel',
+      'accommodation.homestay',
+      'accommodation.apartment',
+      'accommodation.resort',
+      'accommodation.hostel',
+    ],
+    step: 'transport',
+    criterion: 'lodging',
+    alsoSetByControls: false,
+  },
+  {
+    codes: [
+      'accommodation.elevator',
+      'accommodation.private_bath',
+      'accommodation.near_transit',
+      'accommodation.breakfast',
+      'accommodation.kitchen',
+      'accommodation.shared_dorm',
+    ],
+    step: 'transport',
+    criterion: 'requirements',
+    alsoSetByControls: false,
+  },
+  {
+    codes: [...CONDITION_CODES_BY_DOMAIN.interest],
+    step: 'interests',
+    criterion: 'selection',
+    alsoSetByControls: false,
+  },
+  {
+    /*
+     * 第 7 步「饮食与无障碍」「作息」。**不参与完成度**。
+     *
+     * 让它们记分会把「没有忌口、不需要无障碍」的用户卡在未完成 ——
+     * 与被修掉的 `custom.confirmed` 是同一个形状的坑。这一步靠
+     * `custom.answered`（写了文字 或 勾「我没有」）算完。
+     *
+     * `child_car_seat` 与 `daily_rest` 不在这里：它们的入口在第 2 步，
+     * 那里才是用户会想到它们的位置。
+     */
+    codes: [
+      ...CONDITION_CODES_BY_DOMAIN.diet,
+      'accessibility.wheelchair',
+      'accessibility.stroller',
+      'accessibility.low_walking',
+      'schedule.no_late_night',
+    ],
+    step: null,
+    criterion: null,
+    alsoSetByControls: false,
+  },
+] as const satisfies readonly {
+  readonly codes: readonly ConditionCode[];
+  readonly step: StepId | null;
+  readonly criterion: string | null;
+  /**
+   * 该细项是否还有标签之外的来源 —— 有的话取消最后一个标签不撤销它。
+   *
+   * 每组都要显式写（不是可选字段）：`as const` 之下缺这个键的组会让联合类型上
+   * 取不到它，而补 `?` 只会把「忘了想这件事」变成静默的 false。
+   */
+  readonly alsoSetByControls: boolean;
+}[];
+
+/** 便捷别名，供 `StepSections` 取每一组要渲染的 code */
+export const TRAVELER_TAG_CODES = TAG_GROUPS[0].codes;
+export const BUDGET_FOCUS_CODES = TAG_GROUPS[1].codes;
+export const TRANSPORT_CODES = TAG_GROUPS[2].codes;
+export const LODGING_TYPE_CODES = TAG_GROUPS[3].codes;
+export const LODGING_REQUIREMENT_CODES = TAG_GROUPS[4].codes;
+export const INTEREST_CODES = TAG_GROUPS[5].codes;
+export const CUSTOM_TAG_CODES = TAG_GROUPS[6].codes;
 
 // ── 长者行动能力 ────────────────────────────────────────────
 
@@ -411,37 +564,33 @@ const NEXT_STANCE: Record<ConditionStance | 'NONE', ConditionStance | undefined>
 };
 
 /**
- * 条件所属的域 → 它计入哪一步的哪个细项。
+ * 一个 code 影响哪个细项。返回 null 表示不参与完成度。
  *
- * 按域而不是一律计到「兴趣」：勾了公共交通却让兴趣那步变绿，
- * 而用户点的是另一个区块。
- *
- * `accommodation` 域按 code 再分一次（类型 vs 具体要求），因此不在这张表里。
+ * 直接查 `TAG_GROUPS`（标签渲染位置的同一份数据），**不再按域推断** ——
+ * 按域推断与界面上的实际分组不一致，表现为「点了这一步的标签、另一步变绿」。
+ * 逐条差异见 `TAG_GROUPS` 的说明。
  */
-const DOMAIN_CRITERION: Partial<Record<string, readonly [StepId, string]>> = {
-  interest: ['interests', 'selection'],
-  transport: ['transport', 'mode'],
-  budget: ['budget', 'focus'],
-};
-
-/** 住宿类型五项。其余 accommodation 码算「具体要求」 */
-const LODGING_TYPE_CODES: readonly ConditionCode[] = [
-  'accommodation.hotel',
-  'accommodation.homestay',
-  'accommodation.apartment',
-  'accommodation.resort',
-  'accommodation.hostel',
-];
-
-/** 一个 code 影响哪个细项。返回 null 表示不参与完成度（如 accessibility/diet 由别处驱动） */
-function criterionForCode(code: ConditionCode): readonly [StepId, string] | null {
-  const domain = conditionDomain(code);
-  if (domain === 'accommodation') {
-    return LODGING_TYPE_CODES.includes(code)
-      ? ['transport', 'lodging']
-      : ['transport', 'requirements'];
+export function criterionForCode(code: ConditionCode): readonly [StepId, string] | null {
+  for (const group of TAG_GROUPS) {
+    /*
+     * 先放宽成 `ConditionCode[]`：`TAG_GROUPS` 是 `as const`，因此 `codes` 是
+     * 字面量元组，`includes` 会把入参收窄到该组自己的成员 —— 跨七组求交集
+     * 就成了 `never`，任何 code 都传不进去。
+     */
+    const codes: readonly ConditionCode[] = group.codes;
+    if (!codes.includes(code)) continue;
+    return group.step === null || group.criterion === null ? null : [group.step, group.criterion];
   }
-  return DOMAIN_CRITERION[domain] ?? null;
+  return null;
+}
+
+/** 这个 code 所在的组是否还有别的来源喂同一个细项 */
+function groupAlsoSetByControls(code: ConditionCode): boolean {
+  for (const group of TAG_GROUPS) {
+    const codes: readonly ConditionCode[] = group.codes;
+    if (codes.includes(code)) return group.alsoSetByControls;
+  }
+  return false;
 }
 
 /** 该细项现在还有没有选中的标签 —— 取消最后一个时要退回未达成 */
@@ -626,6 +775,15 @@ export function plannerReducer(state: PlannerState, action: PlannerAction): Plan
       const criterion = criterionForCode(action.code);
       if (criterion === null) return { ...state, conditions };
 
+      /*
+       * 还有标签在选中 → 置位；全取消了 → 通常撤位。
+       *
+       * 例外是 `alsoSetByControls` 的组（第 2 步）：那个细项另有来源（儿童年龄、
+       * 长者行动能力），撤位会把别人挣的分一起抹掉，而那两个输入框里的值还在。
+       */
+      const stillSelected = anySelectedFor(conditions, criterion);
+      const keep = stillSelected || groupAlsoSetByControls(action.code);
+
       return {
         ...state,
         conditions,
@@ -633,31 +791,26 @@ export function plannerReducer(state: PlannerState, action: PlannerAction): Plan
          * `criterion[1] as never`：`setCriterion` 的第三参按步骤收窄到该步的
          * 细项名，而这里的步骤是运行期算出来的（`criterionForCode`），
          * 编译期无法把两者关联。`as never` 是这个泛型签名下唯一能通过的写法 ——
-         * 对应关系由 `criterionForCode` 与 `STEP_CRITERIA` 一起保证，
-         * 且「标签按域计入对应步骤」有测试守着。
+         * 对应关系由 `TAG_GROUPS` 与 `STEP_CRITERIA` 一起保证，
+         * 且「标签只给自己那一步记分」有测试守着。
          */
-        completed: setCriterion(
-          state.completed,
-          criterion[0],
-          criterion[1] as never,
-          anySelectedFor(conditions, criterion),
-        ),
+        completed: setCriterion(state.completed, criterion[0], criterion[1] as never, keep),
       };
     }
 
     case 'toggleNoSpecialRequirements': {
       const noSpecialRequirements = !state.noSpecialRequirements;
       /*
-       * 「我没有」是一个明确的回答，与「还没填」不同 —— 因此它直接把整步算完。
-       * 不给满分的话，认真回答了「没有」的用户永远卡在 87%。
+       * 「我没有」是一个明确的回答，与「还没填」不同 —— 因此它把整步算完。
+       *
+       * 取消勾选时退回未达成：勾选时已经把 `customText` 清空了，所以此刻这一步
+       * 确实什么都没有。这里不去看 `customText` 是因为它必然是空串。
        */
-      let completed = setCriterion(state.completed, 'custom', 'input', noSpecialRequirements);
-      completed = setCriterion(completed, 'custom', 'confirmed', noSpecialRequirements);
       return {
         ...state,
         noSpecialRequirements,
         customText: noSpecialRequirements ? '' : state.customText,
-        completed,
+        completed: setCriterion(state.completed, 'custom', 'answered', noSpecialRequirements),
       };
     }
 
@@ -698,11 +851,16 @@ function recomputeText(state: PlannerState, field: TextField | 'destination'): P
 
   if (field === 'customText') {
     const hasText = state.customText.trim().length > 0;
-    completed = setCriterion(completed, 'custom', 'input', hasText);
-    // 打字即取消「我没有其他特殊需求」
-    if (hasText) completed = setCriterion(completed, 'custom', 'confirmed', false);
+    /*
+     * 写了文字就是给出了明确回答，整步算完 —— 与勾「我没有」等价。
+     *
+     * 原来这里只给 `input` 的 4 分，还额外把 `confirmed` 清掉，于是写了文字
+     * 的用户被锁在 91%（见 `STEP_CRITERIA.custom` 的说明）。
+     */
+    completed = setCriterion(completed, 'custom', 'answered', hasText);
     return {
       ...state,
+      // 打字即取消「我没有其他特殊需求」—— 两者是互斥的回答
       noSpecialRequirements: hasText ? false : state.noSpecialRequirements,
       completed,
     };
