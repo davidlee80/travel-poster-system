@@ -38,6 +38,24 @@ pnpm build
 pnpm test
 ```
 
+### 用浏览器点这个应用
+
+上面那套只起基础设施。要真的在浏览器里走一遍「填表 → 生成 → 看计划 → 导出」，
+需要五个应用容器**加一层反代**：
+
+```bash
+node tools/gen-local-env.mjs      # 首次：生成 .env.deploy（含两把 32 字节密钥）
+pnpm mvp:build && pnpm mvp:up
+# 然后开 http://localhost:8080
+```
+
+**是 8080，不是 3000。** `NEXT_PUBLIC_API_BASE` 在 web 镜像里固化为空串，
+浏览器发的是同源 `/api/v1/...`；生产上由 Nginx 转给 api，本地由
+`deploy/local-proxy.yml` 里的 nginx 承担。直接开 3000 端口时每个 API 请求都
+404，页面右上角报「网络连接失败」，一步也走不下去。
+
+`pnpm mvp:down` 停栈。
+
 ## 常用命令
 
 | 命令                                          | 作用                   |
@@ -49,6 +67,7 @@ pnpm test
 | `pnpm format` / `format:check`                | Prettier               |
 | `pnpm verify:linux-guardrails`                | 跨平台护栏反向测试     |
 | `pnpm infra:up` / `infra:down` / `infra:logs` | 本地基础设施           |
+| `pnpm mvp:up` / `mvp:down` / `mvp:build`      | 整栈 + 反代（见上）    |
 | `pnpm db:migrate` / `db:status`               | 数据库迁移             |
 
 ## 仓库结构

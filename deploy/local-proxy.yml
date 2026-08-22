@@ -1,0 +1,64 @@
+# 本地反代叠加层：让浏览器能真的点这个应用
+#
+#   docker compose -f infrastructure/docker-compose.yml \
+#                  -f deploy/mvp-apps.yml \
+#                  -f deploy/local-proxy.yml \
+#                  --env-file .env.deploy up -d
+#
+# 或者直接 `pnpm mvp:up`（package.json 里已经把三个 -f 串好了）。
+# 起来之后开 http://localhost:8080 —— **不是** 3000。
+#
+# ## 为什么需要它
+#
+# `NEXT_PUBLIC_API_BASE` 在 web 镜像里固化为空串，浏览器发的是同源
+# `/api/v1/...`；生产上由 Nginx 转给 api，本地没有那一层，于是直接开
+# 3000 端口时每个 API 请求都 404。理由与逐条差异见 `local-proxy.nginx.conf`。
+#
+# ## 为什么是第三个叠加层而不是并进 mvp-apps.yml
+#
+# 生产用的是宿主上的 Nginx（连着 Let's Encrypt 证书，还要承载别的站点），
+# 不是容器里的。把它写进 `mvp-apps.yml` 会让云服务器上多起一个永远不该
+# 接流量的容器，而那个容器监听 80 端口 —— 恰好和宿主 Nginx 抢。
+#
+# ## 路径按项目目录解析
+#
+# 项目目录是第一个 -f 文件所在的 `infrastructure/`，所以下面的 `..` 指仓库根
+# （与 mvp-apps.yml 的 `context: ..` 同一回事）。
+
+services:
+  local-proxy:
+    # 用规范名而不是某个镜像站的地址，与 infrastructure/docker-compose.yml 一致。
+    # 国内网络拉不动 Docker Hub 时，先经镜像站拉再打标（那三个基础设施镜像
+    # 在本机就是这么来的）：
+    #
+    #   docker pull docker.m.daocloud.io/library/nginx:1.27-alpine
+    #   docker tag  docker.m.daocloud.io/library/nginx:1.27-alpine nginx:1.27-alpine
+    image: nginx:1.27-alpine
+    container_name: tps-local-proxy
+    restart: unless-stopped
+    # 只绑 127.0.0.1：这是开发便利设施，没有任何理由暴露到局域网
+    ports:
+      - '127.0.0.1:8080:80'
+    volumes:
+      - ../deploy/local-proxy.nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      # 打 /api/v1/auth/session：它同时验证「nginx 活着」与「/api 真的转到了
+      # api」。打 nginx 自己的 / 只能证明前者，而配错 upstream 恰恰是这个
+      # 文件唯一会出的错 —— 那种情况下健康检查仍然会绿。
+      #
+      # 401 是**预期**的正确响应（P7：未注册请求一律 401），因此判据是
+      # 「拿到了 401」而不是「拿到了 2xx」。
+      test:
+        [
+          'CMD-SHELL',
+          'wget -q -S -O /dev/null http://127.0.0.1/api/v1/auth/session 2>&1 | grep -q "401"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
