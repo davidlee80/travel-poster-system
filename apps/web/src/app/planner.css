@@ -1096,38 +1096,203 @@
   line-height: 1.6;
 }
 
-/* ── 生成状态 ─────────────────────────────────────────────── */
+/* ── 生成等待弹层 ─────────────────────────────────────────── */
 
-.planner-status {
-  margin-top: 12px;
+/*
+ * 取代了原来的 `.planner-status` 内联卡片。那张卡片在主栏最后一张表单卡
+ * 之后，而提交按钮在右栏 sticky 区 —— 用户在第 1 步就能点，四千像素之下
+ * 的进度条他看不到（见 GenerationDialog 的注释）。
+ */
+
+.planner-dialog {
+  position: fixed;
+  inset: 0;
+  /* 高于右栏抽屉（70）与移动端摘要按钮（60） */
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 20px;
 }
 
-.planner-status__bar {
-  height: 8px;
+.planner-dialog__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(16 26 46 / 55%);
+  /* 遮罩本身淡入即可；面板另有自己的动画 */
+  animation: planner-dialog-fade 0.16s ease;
+}
+
+.planner-dialog__panel {
+  position: relative;
+  width: min(460px, 100%);
+  padding: 26px 26px 22px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 24px 60px rgb(16 26 46 / 26%);
+  animation: planner-dialog-rise 0.2s ease;
+}
+
+/*
+ * 焦点环去掉：面板本身是 tabIndex=-1，只为承接程序化焦点（打开时把焦点
+ * 移进来）。给它画一圈蓝框会让用户以为那是个可操作元素。
+ * 里面真正可聚焦的元素（关闭按钮、查看链接）仍走全局的 :focus-visible。
+ */
+.planner-dialog__panel:focus {
+  outline: none;
+}
+
+@keyframes planner-dialog-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes planner-dialog-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+/* 尊重系统的「减少动态效果」设置 */
+@media (prefers-reduced-motion: reduce) {
+  .planner-dialog__panel,
+  .planner-dialog__scrim {
+    animation: none;
+  }
+}
+
+.planner-dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.planner-dialog__title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.planner-dialog__panel--done .planner-dialog__title {
+  color: var(--success);
+}
+
+.planner-dialog__panel--error .planner-dialog__title {
+  color: var(--danger);
+}
+
+.planner-dialog__close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  color: var(--muted);
+  background: #f2f5f9;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.planner-dialog__close:hover {
+  color: var(--ink);
+  background: #e7ecf3;
+}
+
+/* 两行文字，在进度条上方 */
+.planner-dialog__lines {
+  margin: 16px 0 18px;
+}
+
+.planner-dialog__line {
+  margin: 0;
+}
+
+.planner-dialog__line--primary {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.planner-dialog__line--secondary {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.planner-dialog__meter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.planner-dialog__track {
+  flex: 1 1 auto;
+  height: 9px;
   overflow: hidden;
   border-radius: 99px;
   background: #e4e9f1;
 }
 
-.planner-status__fill {
+.planner-dialog__fill {
+  width: 0;
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, var(--primary), #73a4ff);
   transition: width 0.3s ease;
 }
 
-.planner-status p {
-  margin: 8px 0 0;
+.planner-dialog__panel--done .planner-dialog__fill {
+  background: linear-gradient(90deg, var(--success), #5bca94);
+}
+
+/*
+ * 进度未知（提交中，还没有 job_id 可查）：跑一条来回的高亮块。
+ * 画成 0% 的静止条会被读成「卡住了」。
+ */
+.planner-dialog__track.is-indeterminate .planner-dialog__fill {
+  width: 38%;
+  animation: planner-dialog-sweep 1.1s ease-in-out infinite;
+}
+
+@keyframes planner-dialog-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(265%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .planner-dialog__track.is-indeterminate .planner-dialog__fill {
+    /* 不动的话至少让它占满，表达「在进行中」而不是「停在 38%」 */
+    width: 100%;
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+.planner-dialog__percent {
+  flex: 0 0 auto;
+  min-width: 40px;
   color: var(--muted);
+  text-align: right;
   font-size: 12px;
+  font-weight: 700;
+  /* 等宽数字：百分比变化时进度条右端不会左右抖 */
+  font-variant-numeric: tabular-nums;
 }
 
-.planner-status--error p {
-  color: var(--danger);
-}
-
-.planner-status--done p {
-  color: var(--success);
+.planner-dialog__cta {
+  width: 100%;
+  margin-top: 20px;
+  text-decoration: none;
 }
 
 .planner-mobile-summary {

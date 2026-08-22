@@ -4,6 +4,7 @@ import type { ConditionCode } from '@tps/schemas';
 import { useCallback, useMemo, useReducer, useRef, useState } from 'react';
 
 import { generatePlan, getJobStatus } from '@/lib/api-client';
+import type { GenerationPhase } from '@/lib/generation-dialog';
 import {
   INITIAL_PLANNER_STATE,
   buildPlannerRequest,
@@ -17,6 +18,7 @@ import {
 } from '@/lib/travel-request-form';
 import { useSession } from '../SessionProvider';
 import { ConditionSummary } from './ConditionSummary';
+import { GenerationDialog } from './GenerationDialog';
 import { PlannerTopBar } from './PlannerTopBar';
 import { StepNavigation } from './StepNavigation';
 import {
@@ -61,12 +63,13 @@ const READABLE_STATUSES = new Set([
   'COMPLETED',
 ]);
 
-type Phase =
-  | { readonly kind: 'idle' }
-  | { readonly kind: 'submitting' }
-  | { readonly kind: 'generating'; readonly progress: number; readonly message: string }
-  | { readonly kind: 'ready'; readonly planId: string }
-  | { readonly kind: 'error'; readonly message: string; readonly retryable: boolean };
+/**
+ * 提交之后的阶段。
+ *
+ * 定义搬到了 `@/lib/generation-dialog` —— 弹层的文案与进度推导是纯逻辑，
+ * 放在那里才能被单测覆盖（apps/web 的 vitest 环境是 node，组件测不了）。
+ */
+type Phase = GenerationPhase;
 
 export function Planner(): React.ReactElement {
   const { status } = useSession();
@@ -161,20 +164,42 @@ export function Planner(): React.ReactElement {
     setPhase({ kind: 'submitting' });
     setSummaryOpen(false);
 
-    // 13.8：每次提交换新 client_request_id，否则会拿回上一次的结果
-    const body = buildPlannerRequest(state, {
-      clientRequestId: newClientRequestId(),
-      timezone,
-    });
+    /*
+     * 整段包在 try 里，是因为等待弹层在 `submitting` / `generating` 期间
+     * **不允许关闭**（关掉了用户就再也看不到结果）。这意味着任何未捕获的
+     * 异常都会把用户永久困在一个不动的弹层后面 —— 而在这之前同一个异常
+     * 只表现为「点了按钮没反应」，用户至少还能重试。
+     *
+     * 实际撞到过一次：`crypto.randomUUID` 在明文 HTTP 下不存在，
+     * `newClientRequestId()` 抛 TypeError，请求压根没发出（见那个函数的注释）。
+     */
+    try {
+      // 13.8：每次提交换新 client_request_id，否则会拿回上一次的结果
+      const body = buildPlannerRequest(state, {
+        clientRequestId: newClientRequestId(),
+        timezone,
+      });
 
-    const result = await generatePlan(body);
-    if (!result.ok) {
-      setPhase({ kind: 'error', message: result.message, retryable: result.retryable });
-      return;
+      const result = await generatePlan(body);
+      if (!result.ok) {
+        setPhase({ kind: 'error', message: result.message, retryable: result.retryable });
+        return;
+      }
+
+      cancelled.current = false;
+      await poll(result.data.job_id, result.data.plan_id);
+    } catch (error) {
+      /*
+       * 原始信息带上去而不是只说「出错了」：这条路径上的异常都是浏览器环境
+       * 问题（缺 API、被扩展拦掉），而那类问题只有原文能给出排查方向。
+       * 标成可重试是对的 —— 换个浏览器或改成 HTTPS 之后它就好了。
+       */
+      setPhase({
+        kind: 'error',
+        message: `提交时出错：${error instanceof Error ? error.message : String(error)}`,
+        retryable: true,
+      });
     }
-
-    cancelled.current = false;
-    await poll(result.data.job_id, result.data.plan_id);
   }
 
   const busy = phase.kind === 'submitting' || phase.kind === 'generating';
@@ -201,39 +226,11 @@ export function Planner(): React.ReactElement {
           <InterestsSection state={state} dispatch={dispatch} registerRef={registerRef} />
           <CustomSection state={state} dispatch={dispatch} registerRef={registerRef} />
 
-          {phase.kind === 'generating' ? (
-            <div className="planner-panel planner-card planner-status" role="status">
-              <div className="planner-status__bar">
-                <div className="planner-status__fill" style={{ width: `${phase.progress}%` }} />
-              </div>
-              <p>
-                {phase.message}（{phase.progress}%）
-              </p>
-            </div>
-          ) : null}
-
-          {phase.kind === 'ready' ? (
-            <div
-              className="planner-panel planner-card planner-status planner-status--done"
-              role="status"
-            >
-              <p>
-                计划已生成。<a href={`/plans/${phase.planId}`}>查看完整计划</a>
-              </p>
-            </div>
-          ) : null}
-
-          {phase.kind === 'error' ? (
-            <div
-              className="planner-panel planner-card planner-status planner-status--error"
-              role="alert"
-            >
-              <p>
-                {phase.message}
-                {phase.retryable ? '（可以重试）' : ''}
-              </p>
-            </div>
-          ) : null}
+          {/*
+            这里原本有三张内联状态卡（进度 / 已生成 / 失败）。它们都被
+            `GenerationDialog` 取代了 —— 位置在主栏最后一张表单卡之后，
+            而用户在第 1 步就能点提交按钮，四千像素之下的卡片他看不到。
+          */}
         </main>
 
         <ConditionSummary
@@ -254,6 +251,12 @@ export function Planner(): React.ReactElement {
       >
         查看已选条件
       </button>
+
+      {/*
+        提交之后的全过程都在弹层里。关闭时把阶段推回 idle 而不是只藏弹层 ——
+        留着 `ready` 会让用户下次提交前那一瞬间又看到上一次的成功提示。
+      */}
+      <GenerationDialog phase={phase} onClose={() => setPhase({ kind: 'idle' })} />
     </div>
   );
 }

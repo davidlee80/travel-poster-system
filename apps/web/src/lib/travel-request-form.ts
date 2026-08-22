@@ -108,9 +108,35 @@ export const INITIAL_FORM_STATE: TravelRequestFormState = {
  *
  * 13.8：幂等键含它，用户显式点「重新生成」时客户端**必须换新值**，
  * 否则会拿回旧结果。因此它由每次提交现场生成，而不是挂在组件状态上。
+ *
+ * ## 为什么不能只用 `crypto.randomUUID()`
+ *
+ * 它**只在安全上下文里存在**（HTTPS、localhost、file://）。明文 HTTP 加一个
+ * 域名访问时 `crypto.randomUUID` 是 `undefined`，调用它抛 TypeError ——
+ * 而「先把站点跑起来、之后再配证书」是部署说明里受支持的中间态
+ * （`deploy/mvp.env.example` 的 `COOKIE_SECURE=false` 那一行就是为它留的）。
+ *
+ * 少了这个回退，那段时间里点「生成旅行方案」会静默抛错：请求压根没发出，
+ * 而用户看到的是一个不动的等待弹层。
+ *
+ * `getRandomValues` 与它不同，**不受安全上下文限制**，因此回退用它。
+ * 契约只要求 `client_request_id` 是 ≤100 字符的非空串，不要求 UUID 形态。
  */
 export function newClientRequestId(): string {
-  return `web-${crypto.randomUUID()}`;
+  const webCrypto = globalThis.crypto;
+  if (typeof webCrypto?.randomUUID === 'function') {
+    return `web-${webCrypto.randomUUID()}`;
+  }
+
+  const bytes = new Uint8Array(16);
+  /*
+   * 这里不再兜底到 `Math.random`：`crypto` 整个不存在的浏览器跑不了这个应用
+   * 的其他部分，而静默返回一个可预测的值更糟 —— 幂等键会重复，用户点
+   * 「重新生成」永远拿回上一次的结果，且没有任何报错。让它抛，
+   * 由 `submit()` 的 catch 变成用户可见的失败。
+   */
+  webCrypto.getRandomValues(bytes);
+  return `web-${[...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
 /**

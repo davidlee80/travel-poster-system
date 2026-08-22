@@ -6,6 +6,7 @@ import {
   buildTravelRequest,
   conditionToContract,
   missingRequiredFields,
+  newClientRequestId,
   type ConditionSelection,
   type TravelRequestFormState,
 } from './travel-request-form.js';
@@ -298,5 +299,40 @@ describe('P8：三态条件（偏好 / 必须 / 不要）', () => {
      */
     const request = resolved(filled({ conditions: { 'interest.nightlife': 'EXCLUDE' } }));
     expect(request.conditions.some((condition) => condition.value === false)).toBe(true);
+  });
+});
+
+describe('newClientRequestId', () => {
+  /*
+   * `crypto.randomUUID` 只在**安全上下文**里存在。明文 HTTP + 域名下它是
+   * undefined —— 而那是部署说明里受支持的中间态（证书配好之前）。
+   *
+   * 这一组守的就是那条路径：不回退的话点「生成旅行方案」抛 TypeError，
+   * 请求压根没发出，而用户看到的是一个不动的等待弹层。
+   */
+  it('安全上下文下用 randomUUID', () => {
+    expect(newClientRequestId()).toMatch(/^web-[0-9a-f-]{36}$/);
+  });
+
+  it('randomUUID 不可用时回落到 getRandomValues，且仍然唯一', () => {
+    const real = globalThis.crypto;
+    // 只藏掉 randomUUID，保留 getRandomValues —— 后者不受安全上下文限制
+    const insecure = {
+      getRandomValues: real.getRandomValues.bind(real),
+    } as unknown as Crypto;
+    Object.defineProperty(globalThis, 'crypto', { value: insecure, configurable: true });
+
+    try {
+      const ids = new Set(Array.from({ length: 200 }, () => newClientRequestId()));
+      expect([...ids][0]).toMatch(/^web-[0-9a-f]{32}$/);
+      // 13.8：幂等键含它，重复就意味着用户拿回上一次的结果
+      expect(ids.size).toBe(200);
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', { value: real, configurable: true });
+    }
+  });
+
+  it('长度在契约的 100 字符上限之内', () => {
+    expect(newClientRequestId().length).toBeLessThanOrEqual(100);
   });
 });
