@@ -56,6 +56,22 @@ pnpm mvp:build && pnpm mvp:up
 
 `pnpm mvp:down` 停栈。
 
+### 把页面发给别人看
+
+```bash
+pnpm preview        # 需要上面那套先跑着
+# 产物在 preview/，双击任一 .html，不需要跑任何服务
+```
+
+生成四个页面（采集页、政策页、完整计划信息图、单日信息图）：现场生成一份 fake
+计划、在容器里签渲染令牌取内部页面、把字体内联成 data URI、把资源改成相对路径。
+
+**不能替代 8080。** 快照里看不到任何需要后端的状态 —— 注册与登录表单、改密码、
+生成等待弹层、计划页。要试那些只能开浏览器点真的。
+
+`/legal` 的内容在**构建期**从 [docs/用户协议与隐私政策.md](docs/用户协议与隐私政策.md)
+读入，因此改完那份文档要 `pnpm mvp:build` 重建 web —— 光重启容器那一页还是旧的。
+
 ## 常用命令
 
 | 命令                                          | 作用                   |
@@ -68,6 +84,7 @@ pnpm mvp:build && pnpm mvp:up
 | `pnpm verify:linux-guardrails`                | 跨平台护栏反向测试     |
 | `pnpm infra:up` / `infra:down` / `infra:logs` | 本地基础设施           |
 | `pnpm mvp:up` / `mvp:down` / `mvp:build`      | 整栈 + 反代（见上）    |
+| `pnpm preview`                                | 离线页面快照（见上）   |
 | `pnpm db:migrate` / `db:status`               | 数据库迁移             |
 
 ## 仓库结构

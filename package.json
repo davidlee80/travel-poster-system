@@ -50,6 +50,8 @@
     "mvp:build": "docker compose -f infrastructure/docker-compose.yml -f deploy/mvp-apps.yml -f deploy/local-proxy.yml --env-file .env.deploy build",
     "mvp:logs": "docker compose -f infrastructure/docker-compose.yml -f deploy/mvp-apps.yml -f deploy/local-proxy.yml --env-file .env.deploy logs -f",
     "mvp:down": "docker compose -f infrastructure/docker-compose.yml -f deploy/mvp-apps.yml -f deploy/local-proxy.yml --env-file .env.deploy down",
+    "//preview": "生成可离线双击打开的前端页面快照（采集页 / 政策页 / 完整计划 / 单日信息图）。**需要 pnpm mvp:up 先跑起来**。交互式预览不用它 —— 直接开 http://localhost:8080 才能看到注册、改密码、生成弹层这些需要后端的状态。产物在 preview/，不入库",
+    "preview": "node tools/build-preview.mjs",
     "fixture:render": "docker compose -f deploy/render-fixture.compose.yml run --rm --build render",
     "fixture:render:low-shm": "docker compose -f deploy/render-fixture.compose.yml --profile low-shm run --rm --build render-low-shm",
     "fixture:down": "docker compose -f deploy/render-fixture.compose.yml down -v",

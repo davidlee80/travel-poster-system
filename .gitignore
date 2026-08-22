@@ -47,3 +47,7 @@ pnpm-debug.log*
 
 # TP-1-04：public/fonts 是 packages/fonts/assets 的构建期副本，不入库
 apps/web/public/fonts/
+
+# `pnpm preview` 的产物：一份可离线打开的页面快照（含 10 MB 的 data URI 字体）。
+# 它是当前代码 + 一份现场生成的 fake 计划的函数，随时可重生，没有理由入库。
+preview/

@@ -10,6 +10,9 @@ import { loadLegalDocument } from '@/lib/legal-document';
  * `force-static`：内容来自构建期读到的 `docs/用户协议与隐私政策.md`，
  * 每个用户看到的完全一样。声明成静态不只是优化 —— 运行期镜像里没有 `docs/`
  * （只有构建阶段拷了它），若这一页变成动态渲染，线上第一次访问就会 500。
+ *
+ * **代价：改完那份 markdown 要重建 web 镜像**（`pnpm mvp:build`），
+ * 光重启容器不会更新这一页。表现是「文档明明改了，页面还是旧的」。
  */
 export const dynamic = 'force-static';
 
