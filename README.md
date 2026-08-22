@@ -56,21 +56,45 @@ pnpm mvp:build && pnpm mvp:up
 
 `pnpm mvp:down` 停栈。
 
-### 把页面发给别人看
+### 生成可离线打开的页面快照
+
+把当前前端存成一组 HTML 发给别人，或者在不跑 Docker 的机器上翻一遍页面。
 
 ```bash
-pnpm preview        # 需要上面那套先跑着
+node tools/gen-local-env.mjs      # 首次：生成 .env.deploy
+pnpm mvp:build && pnpm mvp:up     # 整栈必须跑着 —— 它要现场生成一份计划
+pnpm preview
 # 产物在 preview/，双击任一 .html，不需要跑任何服务
 ```
 
-生成四个页面（采集页、政策页、完整计划信息图、单日信息图）：现场生成一份 fake
-计划、在容器里签渲染令牌取内部页面、把字体内联成 data URI、把资源改成相对路径。
+四个页面：`planner.html`（采集工作台）、`legal.html`（用户协议与隐私政策）、
+`full.html`（完整计划信息图）、`day1.html`（单日信息图）。
+
+选项用 `pnpm preview -- --help` 列全（注意那个裸 `--`，pnpm 要靠它把参数传下去）。
+最常用的是 `--plan-version <uuid>`：复用已有的计划版本、跳过生成，快一分多钟；
+改了前端反复重生快照时用它。
+
+`preview/` **不入库** —— 它是「当前代码 + 一份现场生成的计划」的函数，随时可重生，
+而其中 `fonts.css` 有 10 MB（字体内联成 data URI）。
+
+#### 三件事先知道比事后查快
 
 **不能替代 8080。** 快照里看不到任何需要后端的状态 —— 注册与登录表单、改密码、
-生成等待弹层、计划页。要试那些只能开浏览器点真的。
+生成等待弹层、计划页。要试那些只能开浏览器点真的（见上一节）。`planner.html`
+打开时右上角有一条红色「网络连接失败」，那是离线的预期表现而不是缺陷。
 
-`/legal` 的内容在**构建期**从 [docs/用户协议与隐私政策.md](docs/用户协议与隐私政策.md)
-读入，因此改完那份文档要 `pnpm mvp:build` 重建 web —— 光重启容器那一页还是旧的。
+**整栈没起时它会直接告诉你怎么办。** 探活打 `/api/v1/auth/session` 并要求
+拿到 401：连不上说明栈没跑，拿到 404 说明用的是 3000 而不是 8080（那个端口上
+没有 `/api` 反代），拿到 200 说明 `FEATURE_ANONYMOUS_ENABLED` 被打开了。
+
+**`/legal` 的内容在构建期**从 [docs/用户协议与隐私政策.md](docs/用户协议与隐私政策.md)
+读入，因此改完那份文档要 `pnpm mvp:build` 重建 web —— 光重启容器、或者只重跑
+`pnpm preview`，那一页还是旧的。
+
+流程本身（现场生成计划 → 在容器里签渲染令牌取内部页面 → 字体内联成 data URI →
+资源改相对路径）与每一步的理由写在 [tools/build-preview.mjs](tools/build-preview.mjs)
+的头注释里。`/render/**` 那两页必须在容器里取：它们对公网 404，且受 HMAC 保护，
+而签名密钥不出容器。
 
 ## 常用命令
 
@@ -84,7 +108,7 @@ pnpm preview        # 需要上面那套先跑着
 | `pnpm verify:linux-guardrails`                | 跨平台护栏反向测试     |
 | `pnpm infra:up` / `infra:down` / `infra:logs` | 本地基础设施           |
 | `pnpm mvp:up` / `mvp:down` / `mvp:build`      | 整栈 + 反代（见上）    |
-| `pnpm preview`                                | 离线页面快照（见上）   |
+| `pnpm preview`                                | 离线 HTML 页面快照     |
 | `pnpm db:migrate` / `db:status`               | 数据库迁移             |
 
 ## 仓库结构
