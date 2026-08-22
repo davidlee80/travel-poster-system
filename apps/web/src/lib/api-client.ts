@@ -218,8 +218,14 @@ export interface PlanListResponse {
 /**
  * 13.1 提交生成请求。
  *
- * 无身份时服务端会现场建匿名号（13.0 第 3.a 条），因此这个调用**永不因为
- * 未登录而失败** —— 前端不需要先确保有身份。
+ * **会因为未登录而失败**：P7（R-54）关闭匿名入口后，13.0 第 3.a 条
+ * 「生成端点永不因缺身份返回 401」的适用条件是 `FEATURE_ANONYMOUS_ENABLED=true`，
+ * 而它默认 false。无身份或会话失效时这里返回 401 `AUTH_IDENTITY_REQUIRED` /
+ * `AUTH_SESSION_INVALID`。
+ *
+ * 调用方拿到 401 必须**重新解析身份**（`SessionProvider.refresh()`），
+ * 否则界面继续显示「已登录」，而后端那句「请重新登录」在屏幕上找不到
+ * 可以登录的地方。参考实现见 `Planner` 的 `reauthOn401`。
  */
 export function generatePlan(body: unknown): Promise<ApiResult<GenerateResponse>> {
   return request<GenerateResponse>('/api/v1/travel-plans/generate', {

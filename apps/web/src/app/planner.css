@@ -1096,6 +1096,13 @@
   line-height: 1.6;
 }
 
+/* 提示里那句「去注册或登录」。加粗且用主色 —— 它是这段文字里唯一可点的东西 */
+.planner-right__auth-link {
+  color: var(--brand);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 /* ── 生成等待弹层 ─────────────────────────────────────────── */
 
 /*

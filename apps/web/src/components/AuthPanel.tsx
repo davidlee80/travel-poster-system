@@ -66,6 +66,14 @@ export function AuthPanel() {
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
+    /*
+     * 提交按钮的 `disabled` 拦得住鼠标，拦不住回车隐式提交（浏览器之间行为
+     * 不一致）。第二次注册会拿到「该邮箱已注册」并被自动切到登录页 ——
+     * 而口令框已经被第一次成功清空了，用户看到的是「注册失败，请登录」
+     * 加一个空口令框。
+     */
+    if (pending) return;
+
     setError(null);
     setPending(true);
 
@@ -127,6 +135,13 @@ export function AuthPanel() {
       <label className="auth-panel__field">
         <span>邮箱</span>
         <input
+          /*
+            采集界面右栏的「去注册或登录」用 `#auth-email` 指到这里 ——
+            那句提示原本是纯文字，而这个面板在 1250px 以下会排到页面最上方，
+            用户在第 7 步时它在四千像素之上。锚点用 href 而不是 JS：
+            片段导航本身就会把焦点落到可聚焦的目标上。
+          */
+          id="auth-email"
           type="email"
           required
           autoComplete="email"

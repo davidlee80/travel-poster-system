@@ -72,7 +72,7 @@ const READABLE_STATUSES = new Set([
 type Phase = GenerationPhase;
 
 export function Planner(): React.ReactElement {
-  const { status } = useSession();
+  const { status, refresh } = useSession();
   /*
    * 只有拿到身份才允许提交（P7 之后必须是注册用户）。
    *
@@ -80,6 +80,24 @@ export function Planner(): React.ReactElement {
    * 后者会让访客填完七步再被拒。
    */
   const signedIn = status.kind === 'ready';
+
+  /**
+   * 任何 401 都意味着服务端已经不认这个会话了 —— 重新解析一次身份。
+   *
+   * 不做这件事的表现是**界面卡死**：`SessionProvider` 只在挂载时与登出后取
+   * 身份，于是会话过期（Cookie 到期、Redis 重启、在另一台设备登出）之后
+   * 右上角仍然显示「已登录」、提交按钮仍然可点，而后端回的
+   * 「登录状态已失效，请重新登录。」在屏幕上**找不到可以登录的地方**。
+   * 用户照着提示做不到，唯一出路是自己想到刷新页面。
+   *
+   * 刷完之后 `status` 落到 `anonymous`，登录表单出现，提示与界面才一致。
+   */
+  const reauthOn401 = useCallback(
+    (httpStatus: number): void => {
+      if (httpStatus === 401) void refresh();
+    },
+    [refresh],
+  );
 
   const [state, dispatch] = useReducer(plannerReducer, INITIAL_PLANNER_STATE);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
@@ -118,6 +136,8 @@ export function Planner(): React.ReactElement {
     while (!cancelled.current && Date.now() < deadline) {
       const result = await getJobStatus(jobId);
       if (!result.ok) {
+        // 轮询途中会话失效也要重新解析 —— 生成要跑一分多钟，够 Cookie 过期
+        reauthOn401(result.status);
         setPhase({ kind: 'error', message: result.message, retryable: result.retryable });
         return;
       }
@@ -182,6 +202,7 @@ export function Planner(): React.ReactElement {
 
       const result = await generatePlan(body);
       if (!result.ok) {
+        reauthOn401(result.status);
         setPhase({ kind: 'error', message: result.message, retryable: result.retryable });
         return;
       }

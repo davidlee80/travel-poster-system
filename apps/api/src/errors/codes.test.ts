@@ -96,6 +96,18 @@ describe('错误码体系（13.7、13.9.6）', () => {
       AUTH_ERRORS.AUTH_SESSION_INVALID.message,
     );
   });
+
+  it('IDENTITY_REQUIRED 引导注册，而不是引导「访问首页取凭据」（P7）', () => {
+    /*
+     * `FEATURE_ANONYMOUS_ENABLED` 默认关闭后首页不再下发任何凭据。
+     * 一句「请先访问首页」会让用户反复做一件必然失败的事 ——
+     * 而他做的事看起来完全合理，因此不会怀疑提示本身。
+     *
+     * 重新打开匿名入口时这条断言会红，那正是提醒去把文案改回去。
+     */
+    expect(AUTH_ERRORS.AUTH_IDENTITY_REQUIRED.message).toContain('注册');
+    expect(AUTH_ERRORS.AUTH_IDENTITY_REQUIRED.message).not.toContain('首页');
+  });
 });
 
 describe('错误响应体（13.0）', () => {

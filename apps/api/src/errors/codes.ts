@@ -27,7 +27,15 @@ export const AUTH_ERRORS = {
   AUTH_IDENTITY_REQUIRED: {
     httpStatus: 401,
     retryable: false,
-    message: '请先访问首页以获取访问凭据。',
+    /*
+     * P7 之后这句必须引导**注册**，不能引导「访问首页取凭据」。
+     *
+     * 原文是「请先访问首页以获取访问凭据。」—— 那是匿名入口开着时的正确
+     * 指引（首页那一次 `/auth/session` 会现场建匿名号并下发 Cookie）。
+     * `FEATURE_ANONYMOUS_ENABLED` 默认关闭后首页不再发任何凭据，
+     * 用户照着这句做一定失败，而且会反复失败：他做的事看起来完全合理。
+     */
+    message: '请先注册或登录后再使用。',
   },
   AUTH_SESSION_INVALID: {
     httpStatus: 401,

@@ -171,7 +171,16 @@ export function ConditionSummary({
 
         {signedIn ? null : (
           <p className="planner-right__note" role="note">
-            生成旅行计划需要先注册或登录 —— 计划会保存在你的账号下，换设备也能打开。
+            生成旅行计划需要先注册或登录 —— 计划会保存在你的账号下，换设备也能打开。{' '}
+            {/*
+              这句原本是纯文字，用户读完不知道去哪儿点。身份面板在 1250px 以下
+              会排到页面最上方，而这里是第 7 步 —— 它在四千像素之上。
+              锚点指向邮箱输入框本身（`AuthPanel` 的 `#auth-email`）：
+              片段导航会把焦点落到可聚焦的目标上，因此不需要任何 JS。
+            */}
+            <a className="planner-right__auth-link" href="#auth-email">
+              去注册或登录
+            </a>
           </p>
         )}
       </div>
