@@ -40,8 +40,8 @@ function run(
   return actions.reduce(plannerReducer, state);
 }
 
-describe('七步与完成度权重', () => {
-  it('七步权重之和恰好 100', () => {
+describe('八步与完成度权重', () => {
+  it('八步权重之和恰好 100', () => {
     /*
      * 不是 100 的话进度条永远到不了（或超过）100%，而那个数字是用户唯一能
      * 看到的「还差多少」信号。
@@ -108,7 +108,7 @@ describe('七步与完成度权重', () => {
     }
   });
 
-  it('一次真实的完整填写能走到 100%，且七步全部变绿', () => {
+  it('一次真实的完整填写能走到 100%，且八步全部变绿', () => {
     /*
      * 这条断言此前**不存在** —— 既有用例只验「权重之和是 100」与「上限不超过
      * 100」，而那两条对「某个细项压根没有正向路径」完全无感。
@@ -144,13 +144,16 @@ describe('七步与完成度权重', () => {
       { type: 'setPaceIntensity', value: 4 },
       { type: 'setWalkingLimit', value: 5 },
       { type: 'setRouteShape', value: 'hub' },
+      { type: 'cycleCondition', code: 'schedule.no_late_night' },
       // 第 5 步
       { type: 'cycleCondition', code: 'transport.public_transit' },
       { type: 'cycleCondition', code: 'accommodation.hotel' },
       { type: 'cycleCondition', code: 'accommodation.elevator' },
       // 第 6 步
+      { type: 'cycleCondition', code: 'diet.vegetarian' },
+      // 第 7 步
       { type: 'cycleCondition', code: 'interest.food' },
-      // 第 7 步：写了真实的特殊需求，**不是**勾「我没有」
+      // 第 8 步：写了真实的特殊需求，**不是**勾「我没有」
       { type: 'setText', field: 'customText', value: '孩子对花生过敏，长辈腿脚不好。' },
     );
 
@@ -234,7 +237,7 @@ describe('三态流转', () => {
     expect(stances).toEqual(['PREFER', 'REQUIRE', 'EXCLUDE', undefined]);
   });
 
-  it('回到未选时把键删掉而不是留一个 undefined', () => {
+  it('摘要移除动作会删键，而不是留一个 undefined', () => {
     /*
      * 留着 `{'interest.food': undefined}` 的话，`Object.entries` 会数出一条，
      * 于是右栏摘要显示「1 项」而三个分组都是空的。
@@ -242,14 +245,12 @@ describe('三态流转', () => {
     const state = run(
       INITIAL_PLANNER_STATE,
       { type: 'cycleCondition', code: 'interest.food' },
-      { type: 'cycleCondition', code: 'interest.food' },
-      { type: 'cycleCondition', code: 'interest.food' },
-      { type: 'cycleCondition', code: 'interest.food' },
+      { type: 'clearCondition', code: 'interest.food' },
     );
     expect('interest.food' in state.conditions).toBe(false);
   });
 
-  it('兴趣标签一旦选中，第 6 步的 selection 细项达成', () => {
+  it('兴趣标签一旦选中，第 7 步的 selection 细项达成', () => {
     const state = plannerReducer(INITIAL_PLANNER_STATE, {
       type: 'cycleCondition',
       code: 'interest.city_walk',
@@ -280,14 +281,25 @@ describe('三态流转', () => {
     expect(stepScore(state, 'budget')).toBe(STEP_CRITERIA.budget.focus);
   });
 
+  it('无障碍与作息计入节奏路线，饮食计入独立饮食步骤', () => {
+    const pace = plannerReducer(INITIAL_PLANNER_STATE, {
+      type: 'cycleCondition',
+      code: 'accessibility.wheelchair',
+    });
+    const diet = plannerReducer(INITIAL_PLANNER_STATE, {
+      type: 'cycleCondition',
+      code: 'diet.halal',
+    });
+    expect(stepScore(pace, 'pace')).toBe(STEP_CRITERIA.pace.needs);
+    expect(stepScore(diet, 'diet')).toBe(STEP_CRITERIA.diet.selection);
+  });
+
   it('取消最后一个标签后，对应细项退回未达成', () => {
     // 只加不减的实现会让完成度只增不降，而那让它变成一个没有信息量的数字
     const state = run(
       INITIAL_PLANNER_STATE,
       { type: 'cycleCondition', code: 'interest.city_walk' }, // PREFER
-      { type: 'cycleCondition', code: 'interest.city_walk' }, // REQUIRE
-      { type: 'cycleCondition', code: 'interest.city_walk' }, // EXCLUDE
-      { type: 'cycleCondition', code: 'interest.city_walk' }, // 未选
+      { type: 'clearCondition', code: 'interest.city_walk' },
     );
     expect(stepScore(state, 'interests')).toBe(0);
   });
@@ -518,11 +530,8 @@ describe('第 2 步的标签组与儿童年龄共用同一个细项', () => {
       INITIAL_PLANNER_STATE,
       { type: 'adjustTraveler', kind: 'children', delta: 1 },
       { type: 'setChildAge', value: 6 },
-      // 点四次回到未选
       { type: 'cycleCondition', code: 'accommodation.family_room' },
-      { type: 'cycleCondition', code: 'accommodation.family_room' },
-      { type: 'cycleCondition', code: 'accommodation.family_room' },
-      { type: 'cycleCondition', code: 'accommodation.family_room' },
+      { type: 'clearCondition', code: 'accommodation.family_room' },
     );
     expect(state.conditions['accommodation.family_room']).toBeUndefined();
     expect(stepIsComplete(state, 'travelers')).toBe(true);
@@ -533,9 +542,7 @@ describe('第 2 步的标签组与儿童年龄共用同一个细项', () => {
     const state = run(
       INITIAL_PLANNER_STATE,
       { type: 'cycleCondition', code: 'interest.food' },
-      { type: 'cycleCondition', code: 'interest.food' },
-      { type: 'cycleCondition', code: 'interest.food' },
-      { type: 'cycleCondition', code: 'interest.food' },
+      { type: 'clearCondition', code: 'interest.food' },
     );
     expect(state.conditions['interest.food']).toBeUndefined();
     expect(stepIsComplete(state, 'interests')).toBe(false);
@@ -543,12 +550,12 @@ describe('第 2 步的标签组与儿童年龄共用同一个细项', () => {
   });
 });
 
-describe('第 7 步：特殊需求', () => {
-  it('写了文字就把整步算完（回归：曾经只给 4/13）', () => {
+describe('第 8 步：特殊需求', () => {
+  it('写了文字就把整步算完', () => {
     /*
      * 原型这一步是 `{ input: 4, confirmed: 9 }`，那 9 分靠「解析为旅行条件 →
      * 确认并添加」达成。那个按钮被删掉后权重留了下来，于是写了文字的用户
-     * 最高只能拿 4/13、第 7 步永远不变绿，而勾「我没有」反而满分 ——
+     * 最高只能拿部分分数、特殊需求步骤永远不变绿，而勾「我没有」反而满分 ——
      * 越认真的用户分越低，且没有任何办法补上。
      */
     const state = plannerReducer(INITIAL_PLANNER_STATE, {

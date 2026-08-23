@@ -13,7 +13,7 @@ import {
 } from '@/lib/planner-state';
 
 /**
- * 左栏：七步导航 + 完成度（原型的 `.left-panel`）。
+ * 左栏：八步导航 + 完成度（原型的 `.left-panel`）。
  *
  * 圆点有三态：无（未编辑）、蓝点（编辑过但未完成）、绿勾（完成）。
  * 三态而不是两态是因为「动过但没填完」与「压根没动」对用户是不同的信息 ——
@@ -106,7 +106,9 @@ export function StepNavigation({
         </div>
 
         <p className="planner-progress__hint">{progressHint(percent)}</p>
-        <p className="planner-progress__detail">已编辑 {editedCount}/7 步</p>
+        <p className="planner-progress__detail">
+          已编辑 {editedCount}/{STEP_IDS.length} 步
+        </p>
       </div>
     </aside>
   );

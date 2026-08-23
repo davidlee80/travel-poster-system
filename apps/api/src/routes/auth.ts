@@ -4,6 +4,7 @@ import { COOKIE_NAMES, type QuotaGuard } from '@tps/shared';
 import { buildErrorBody, errorDefinition, type ErrorCode } from '../errors/codes.js';
 import { recordIdentityEvent, recordIdentityType } from '../identity/metrics.js';
 import type { Identity, IdentityService } from '../identity/service.js';
+import type { PhoneVerificationService } from '../identity/phone-verification.js';
 import { applyCookies, parseCookies } from './identity-context.js';
 
 /**
@@ -14,15 +15,46 @@ import { applyCookies, parseCookies } from './identity-context.js';
  * （状态码、Cookie 头、错误体形态），业务分支由 service.test.ts 穷尽覆盖。
  */
 
-const RegisterBodySchema = z.object({
+const PhoneSchema = z
+  .string()
+  .trim()
+  .regex(/^(?:\+?86)?1[3-9]\d{9}$/, '手机号格式不正确')
+  .transform((value) => `+86${value.replace(/^\+?86/, '')}`);
+
+const PhoneRegisterBodySchema = z.object({
+  phone: PhoneSchema,
+  verification_code: z.string().regex(/^\d{6}$/),
+  password: z.string().min(1).nullable().optional(),
+  display_name: z.string().trim().max(100).nullable().optional(),
+});
+
+const LegacyRegisterBodySchema = z.object({
   email: z.string().trim().toLowerCase().pipe(z.email('邮箱格式不正确')),
   password: z.string().min(1),
   display_name: z.string().trim().max(100).nullable().optional(),
 });
 
-const LoginBodySchema = z.object({
+const RegisterBodySchema = z.union([PhoneRegisterBodySchema, LegacyRegisterBodySchema]);
+
+const LegacyLoginBodySchema = z.object({
   email: z.string().trim().toLowerCase().pipe(z.email('邮箱格式不正确')),
   password: z.string().min(1),
+});
+
+const PhoneLoginBodySchema = z.discriminatedUnion('login_type', [
+  z.object({
+    phone: PhoneSchema,
+    login_type: z.literal('CODE'),
+    verification_code: z.string().regex(/^\d{6}$/),
+  }),
+  z.object({ phone: PhoneSchema, login_type: z.literal('PASSWORD'), password: z.string().min(1) }),
+]);
+
+const LoginBodySchema = z.union([PhoneLoginBodySchema, LegacyLoginBodySchema]);
+
+const SendCodeBodySchema = z.object({
+  phone: PhoneSchema,
+  purpose: z.enum(['REGISTER', 'LOGIN']),
 });
 
 /**
@@ -42,6 +74,7 @@ export interface AuthRoutesDeps {
   readonly identity: IdentityService;
   readonly quota: QuotaGuard;
   readonly secureCookies: boolean;
+  readonly phoneVerification?: PhoneVerificationService;
 }
 
 function fail(
@@ -73,6 +106,8 @@ interface SessionResponse {
   readonly user_type: Identity['userType'];
   readonly user_id: string;
   readonly email: string | null;
+  readonly phone: string | null;
+  readonly has_password: boolean;
   readonly display_name: string | null;
   readonly quota: {
     readonly daily_remaining: number;
@@ -97,6 +132,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       // 仅供问题反馈，不作为任何鉴权凭据（13.9.1）
       user_id: id.userId,
       email: id.email,
+      phone: id.phone,
+      has_password: id.hasPassword,
       display_name: id.displayName,
       quota: {
         daily_remaining: remaining.dailyRemaining,
@@ -176,17 +213,48 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
     }
 
     const cookies = parseCookies(request.headers.cookie);
-    const result = await identity.register({
-      email: parsed.data.email,
-      password: parsed.data.password,
-      displayName: parsed.data.display_name ?? null,
-      anonCookie: cookies[COOKIE_NAMES.anonymous],
-    });
+    let result;
+    if ('phone' in parsed.data) {
+      if (deps.phoneVerification === undefined) {
+        return fail(request, reply, 'AUTH_SMS_PROVIDER_UNAVAILABLE');
+      }
+      const verified = await deps.phoneVerification.verify(
+        parsed.data.phone,
+        'REGISTER',
+        parsed.data.verification_code,
+      );
+      if (verified === 'too_many_attempts') {
+        return fail(request, reply, 'AUTH_VERIFICATION_CODE_RATE_LIMITED', {
+          field: 'verification_code',
+        });
+      }
+      if (verified !== 'valid') {
+        return fail(request, reply, 'AUTH_VERIFICATION_CODE_INVALID', {
+          field: 'verification_code',
+        });
+      }
+      result = await identity.registerPhone({
+        phone: parsed.data.phone,
+        password: parsed.data.password?.trim() || null,
+        displayName: parsed.data.display_name ?? null,
+        anonCookie: cookies[COOKIE_NAMES.anonymous],
+      });
+    } else {
+      result = await identity.register({
+        email: parsed.data.email,
+        password: parsed.data.password,
+        displayName: parsed.data.display_name ?? null,
+        anonCookie: cookies[COOKIE_NAMES.anonymous],
+      });
+    }
 
     switch (result.outcome) {
       case 'email_taken':
         recordIdentityEvent('register', 'rejected');
         return fail(request, reply, 'AUTH_EMAIL_ALREADY_REGISTERED', { field: 'email' });
+      case 'phone_taken':
+        recordIdentityEvent('register', 'rejected');
+        return fail(request, reply, 'AUTH_PHONE_ALREADY_REGISTERED', { field: 'phone' });
       case 'password_too_weak':
         recordIdentityEvent('register', 'rejected');
         return fail(request, reply, 'AUTH_PASSWORD_TOO_WEAK', { field: 'password' });
@@ -211,12 +279,45 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
     }
 
     const cookies = parseCookies(request.headers.cookie);
-    const result = await identity.login({
-      email: parsed.data.email,
-      password: parsed.data.password,
-      anonCookie: cookies[COOKIE_NAMES.anonymous],
-      ip: clientIp(request),
-    });
+    let result;
+    if ('phone' in parsed.data) {
+      let codeVerified = false;
+      if (parsed.data.login_type === 'CODE') {
+        if (deps.phoneVerification === undefined) {
+          return fail(request, reply, 'AUTH_SMS_PROVIDER_UNAVAILABLE');
+        }
+        const verified = await deps.phoneVerification.verify(
+          parsed.data.phone,
+          'LOGIN',
+          parsed.data.verification_code,
+        );
+        if (verified === 'too_many_attempts') {
+          return fail(request, reply, 'AUTH_VERIFICATION_CODE_RATE_LIMITED', {
+            field: 'verification_code',
+          });
+        }
+        if (verified !== 'valid') {
+          return fail(request, reply, 'AUTH_VERIFICATION_CODE_INVALID', {
+            field: 'verification_code',
+          });
+        }
+        codeVerified = true;
+      }
+      result = await identity.loginPhone({
+        phone: parsed.data.phone,
+        ...('password' in parsed.data ? { password: parsed.data.password } : {}),
+        codeVerified,
+        anonCookie: cookies[COOKIE_NAMES.anonymous],
+        ip: clientIp(request),
+      });
+    } else {
+      result = await identity.login({
+        email: parsed.data.email,
+        password: parsed.data.password,
+        anonCookie: cookies[COOKIE_NAMES.anonymous],
+        ip: clientIp(request),
+      });
+    }
 
     switch (result.outcome) {
       case 'invalid_credentials':
@@ -233,6 +334,34 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
         if (result.merged !== null) recordIdentityEvent('merge', 'succeeded');
         return reply.code(200).send(await sessionResponse(result.identity));
     }
+  });
+
+  app.post('/api/v1/auth/sms/send', async (request, reply) => {
+    const parsed = SendCodeBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return fail(request, reply, 'REQ_SCHEMA_INVALID', {
+        field: parsed.error.issues[0]?.path.join('.') ?? 'body',
+      });
+    }
+    if (deps.phoneVerification === undefined) {
+      return fail(request, reply, 'AUTH_SMS_PROVIDER_UNAVAILABLE');
+    }
+    const result = await deps.phoneVerification.send(parsed.data.phone, parsed.data.purpose);
+    if (result.outcome === 'rate_limited') {
+      return fail(request, reply, 'AUTH_VERIFICATION_CODE_RATE_LIMITED', {
+        ...(result.retryAfterSeconds === undefined
+          ? {}
+          : { retryAfterSeconds: result.retryAfterSeconds }),
+      });
+    }
+    if (result.outcome === 'provider_failed') {
+      return fail(request, reply, 'AUTH_SMS_PROVIDER_UNAVAILABLE');
+    }
+    return reply.code(200).send({
+      sent: true,
+      expires_in_seconds: 300,
+      ...(result.devCode === undefined ? {} : { dev_code: result.devCode }),
+    });
   });
 
   /** 13.9.3 登出 */

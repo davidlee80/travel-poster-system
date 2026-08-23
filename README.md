@@ -147,6 +147,8 @@ docs/                  设计稿与实施计划
 
 不写 `down`。破坏性变更走 expand-backfill-contract 三步，每步是独立的前向迁移；回滚靠部署上一版应用代码。已应用的迁移文件不可修改 —— 执行器记录校验和，文件被改时报错而非静默跳过。详见 [infrastructure/migrations/README.md](infrastructure/migrations/README.md)。
 
+规划器的标签、预算档位、选择框和复选项采用数据库发布版本管理，增删、排序与改文案见 [规划器配置中心](docs/规划器配置中心.md)。
+
 ### 指标标签有白名单，且由类型强制
 
 高基数标签打爆 Prometheus 是不可逆的生产事故（内存暴涨 → 抓取超时 → 监控盲区，恰好在最需要监控的时候）。因此 `user_id`、`email`、`plan_id`、`trace_id` 等**不能**作为指标标签，`user_type` 可以（只有两个取值）。

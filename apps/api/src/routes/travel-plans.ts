@@ -12,6 +12,7 @@ import {
 import {
   UniqueViolationError,
   type ExistingGeneration,
+  type PlannerConfigRepository,
   type PresentationsRepository,
   type TravelPlansRepository,
 } from '@tps/db';
@@ -78,6 +79,8 @@ export interface TravelPlanRoutesDeps extends IdentityContextDeps {
   readonly featureFlags?: FeatureFlags;
   /** 注入以便测试可控时间 */
   readonly now: () => Date;
+  /** 提供时，条件机器码必须存在于当前发布配置；测试缺省仍用内置字典。 */
+  readonly plannerConfig?: PlannerConfigRepository;
 }
 
 function fail(
@@ -188,7 +191,20 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
       });
     }
 
-    const prepared = prepareTravelRequest(parsed.data, { now: deps.now() });
+    let allowedConditionCodes: ReadonlySet<string> | undefined;
+    if (deps.plannerConfig !== undefined) {
+      const plannerConfig = await deps.plannerConfig.getPublished();
+      if (plannerConfig === null) return fail(request, reply, 'SYS_DEPENDENCY_UNAVAILABLE');
+      allowedConditionCodes = new Set(
+        Object.entries(plannerConfig.fields)
+          .filter(([fieldKey]) => fieldKey.endsWith('.tags'))
+          .flatMap(([, options]) => options.map((option) => option.key)),
+      );
+    }
+    const prepared = prepareTravelRequest(parsed.data, {
+      now: deps.now(),
+      ...(allowedConditionCodes === undefined ? {} : { allowedConditionCodes }),
+    });
     if (!prepared.ok) {
       /*
        * 3.1.2 的冲突检查在**同步**路径上执行，失败直接 4xx，不入队、

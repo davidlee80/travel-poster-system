@@ -1,12 +1,12 @@
-import { AuthPanel } from '@/components/AuthPanel';
 import { Planner } from '@/components/planner/Planner';
 import { SessionProvider } from '@/components/SessionProvider';
+import { PlannerConfigProvider } from '@/components/planner/PlannerConfigProvider';
 
 /**
  * 首页：需求采集工作台（TP-8-07）。
  *
  * P8 之前这里是一张单列长表单（`PlanRequestForm`）。现在换成原型的三栏
- * 七步工作台 —— 46 个条件标签散在一张长表单里，用户翻到底时已经不记得
+ * 八步工作台 —— 46 个条件标签散在一张长表单里，用户翻到底时已经不记得
  * 上面勾了什么，而右栏摘要正是为此存在。
  *
  * `AnonymousNotice` 不再挂在这里：P7 关闭匿名入口后未注册请求一律 401，
@@ -21,14 +21,9 @@ import { SessionProvider } from '@/components/SessionProvider';
 export default function HomePage() {
   return (
     <SessionProvider>
-      <Planner />
-      {/*
-        身份面板浮在右上角。它不进 `.planner` 的三栏布局：那三栏在 1250px
-        以下会重排（右栏变抽屉），而登录入口在任何宽度下都必须在原地。
-      */}
-      <div className="home-auth">
-        <AuthPanel />
-      </div>
+      <PlannerConfigProvider>
+        <Planner />
+      </PlannerConfigProvider>
     </SessionProvider>
   );
 }

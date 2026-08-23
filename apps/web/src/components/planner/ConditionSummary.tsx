@@ -11,6 +11,7 @@ import {
   type SubmitBlocker,
 } from '@/lib/planner-state';
 import type { ConditionStance } from '@/lib/travel-request-form';
+import { usePlannerConditionLabels } from './PlannerConfigProvider';
 
 /**
  * 右栏：已选条件摘要 + 冲突提示 + 提交（原型的 `.right-panel`）。
@@ -82,8 +83,9 @@ function conflictOf(state: PlannerState): string | null {
 
 export interface ConditionSummaryProps {
   readonly state: PlannerState;
-  readonly onCycle: (code: ConditionCode) => void;
+  readonly onRemove: (code: ConditionCode) => void;
   readonly onSubmit: () => void;
+  readonly onReset: () => void;
   /** 为什么不能提交；null 表示可以。推导在 `planner-state.ts` 的 `submitBlocker` */
   readonly blocker: SubmitBlocker | null;
   /** `blocker === 'MISSING_FIELDS'` 时缺的是哪几项，要就地列出来 */
@@ -95,13 +97,15 @@ export interface ConditionSummaryProps {
 
 export function ConditionSummary({
   state,
-  onCycle,
+  onRemove,
   onSubmit,
+  onReset,
   blocker,
   missing,
   onJumpToMissing,
   open,
 }: ConditionSummaryProps): React.ReactElement {
+  const configuredLabels = usePlannerConditionLabels();
   const entries = Object.entries(state.conditions) as readonly [ConditionCode, ConditionStance][];
   const total = budgetTotal(state);
   const conflict = conflictOf(state);
@@ -126,20 +130,23 @@ export function ConditionSummary({
               <p className="planner-condition-empty">{group.empty}</p>
             ) : (
               <div className="planner-condition-list">
-                {items.map(([code]) => (
-                  <div key={code} className={`planner-condition ${group.modifier}`}>
-                    <span className="planner-condition__dot" />
-                    <span className="planner-condition__text">{CONDITION_LABEL[code]}</span>
-                    <button
-                      type="button"
-                      className="planner-condition__remove"
-                      title={`移除「${CONDITION_LABEL[code]}」`}
-                      onClick={() => onCycle(code)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
+                {items.map(([code]) => {
+                  const label = configuredLabels[code] ?? CONDITION_LABEL[code] ?? code;
+                  return (
+                    <div key={code} className={`planner-condition ${group.modifier}`}>
+                      <span className="planner-condition__dot" />
+                      <span className="planner-condition__text">{label}</span>
+                      <button
+                        type="button"
+                        className="planner-condition__remove"
+                        title={`移除「${label}」`}
+                        onClick={() => onRemove(code)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </section>
@@ -198,16 +205,21 @@ export function ConditionSummary({
           {blocker === 'BUSY' ? '生成中…' : '生成旅行方案'}
         </button>
 
+        <button
+          type="button"
+          className="planner-button planner-button--secondary planner-button--large"
+          onClick={onReset}
+        >
+          重新开始
+        </button>
+
         {blocker === 'NOT_SIGNED_IN' ? (
           <p className="planner-right__note" role="note">
             生成旅行计划需要先注册或登录 —— 计划会保存在你的账号下，换设备也能打开。{' '}
             {/*
-              这句原本是纯文字，用户读完不知道去哪儿点。身份面板在 1250px 以下
-              会排到页面最上方，而这里是第 7 步 —— 它在四千像素之上。
-              锚点指向邮箱输入框本身（`AuthPanel` 的 `#auth-email`）：
-              片段导航会把焦点落到可聚焦的目标上，因此不需要任何 JS。
+              右上角用户登录菜单会监听这个锚点并展开登录表单。
             */}
-            <a className="planner-right__auth-link" href="#auth-email">
+            <a className="planner-right__auth-link" href="#auth-phone">
               去注册或登录
             </a>
           </p>

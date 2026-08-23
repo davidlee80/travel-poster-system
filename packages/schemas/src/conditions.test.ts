@@ -107,9 +107,16 @@ describe('TravelConditionSchema', () => {
     ).toBe(true);
   });
 
-  it('拒绝字典外的 code', () => {
+  it('接受配置中心可发布的合法域机器码', () => {
     expect(
       TravelConditionSchema.safeParse({ code: 'diet.kosher', mode: 'MUST', value: true }).success,
+    ).toBe(true);
+  });
+
+  it('拒绝未知域或不合法机器码', () => {
+    expect(
+      TravelConditionSchema.safeParse({ code: 'unknown.kosher', mode: 'MUST', value: true })
+        .success,
     ).toBe(false);
   });
 

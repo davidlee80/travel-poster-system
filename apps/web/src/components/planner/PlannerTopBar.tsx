@@ -10,16 +10,11 @@
  */
 
 export interface PlannerTopBarProps {
-  readonly onReset: () => void;
   readonly onToggleMenu: () => void;
   readonly children?: React.ReactNode;
 }
 
-export function PlannerTopBar({
-  onReset,
-  onToggleMenu,
-  children,
-}: PlannerTopBarProps): React.ReactElement {
+export function PlannerTopBar({ onToggleMenu, children }: PlannerTopBarProps): React.ReactElement {
   return (
     <header className="planner-topbar">
       <div className="planner-brand">
@@ -38,12 +33,7 @@ export function PlannerTopBar({
         </div>
       </div>
 
-      <div className="planner-topbar__actions">
-        {children}
-        <button type="button" className="planner-button planner-button--light" onClick={onReset}>
-          重新开始
-        </button>
-      </div>
+      <div className="planner-topbar__actions">{children}</div>
     </header>
   );
 }

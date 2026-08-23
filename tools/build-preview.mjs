@@ -49,6 +49,7 @@ function parseArgs(argv) {
     container: 'tps-render-worker',
     planVersion: null,
     keepRaw: false,
+    frontendOnly: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -56,6 +57,7 @@ function parseArgs(argv) {
     // `pnpm preview -- --out x` 会把这个裸 `--` 原样传进来
     if (arg === '--') continue;
     else if (arg === '--keep-raw') options.keepRaw = true;
+    else if (arg === '--frontend-only') options.frontendOnly = true;
     else if (arg === '--out') options.out = argv[++i];
     else if (arg === '--base') options.base = argv[++i];
     else if (arg === '--container') options.container = argv[++i];
@@ -70,6 +72,7 @@ function parseArgs(argv) {
           '  --plan-version UUID   复用已有的计划版本，跳过生成',
           '  --container NAME      签令牌用的容器（默认 tps-render-worker）',
           '  --keep-raw            保留本地化之前的原始 HTML',
+          '  --frontend-only       只更新采集页与政策页，不访问 API 或 Docker',
           '',
         ].join('\n'),
       );
@@ -520,7 +523,7 @@ async function writeReadme(planVersionId) {
 
 | 文件 | 是什么 |
 | --- | --- |
-| \`planner.html\` | 首页：需求采集工作台（三栏七步） |
+| \`planner.html\` | 首页：需求采集工作台（三栏八步） |
 | \`legal.html\` | 用户协议与隐私政策 |
 | \`full.html\` | 完整计划信息图（长图版） |
 | \`day1.html\` | 单日信息图（第 1 天） |
@@ -540,9 +543,9 @@ async function writeReadme(planVersionId) {
 插画或素材库照片。**版式、比例、圆角、遮罩层都是真的** —— 只有像素内容是占位。
 路线图 SVG 是程序生成的，与线上完全一致。
 
-**2. \`planner.html\` 右上角有一条红色「网络连接失败」。** 那是页面加载后去调
-\`/api/v1/auth/session\` 失败的提示 —— 离线打开时没有后端。表单可以点、可以填
-（JS 一起带下来了），但「生成旅行方案」按不动（未登录时它本来就是禁用的）。
+**2. \`planner.html\` 右上角的「用户登录」无法完成登录。** 离线打开时没有后端，
+展开菜单后会显示会话请求失败。其余表单可以点、可以填（JS 一起带下来了），但
+「生成旅行方案」按不动（未登录时它本来就是禁用的）。
 
 **3. 控制台里有几条字体请求失败。** 那是 \`<link rel="preload" as="font">\` 带
 \`crossorigin\`，在 \`file://\` 下必然被 CORS 拒掉。**字体本身没问题** ——
@@ -568,14 +571,16 @@ async function writeReadme(planVersionId) {
 
 // ── 主流程 ──────────────────────────────────────────────────
 
-await checkStack();
-
-const planVersionId = options.planVersion ?? (await generatePlan());
-
-say('\n取渲染页（容器内签令牌）');
-fetchRenderPages(planVersionId);
 await mkdir(join(OUT, 'raw'), { recursive: true });
-copyRenderPages();
+
+let planVersionId = options.planVersion;
+if (!options.frontendOnly) {
+  await checkStack();
+  planVersionId = options.planVersion ?? (await generatePlan());
+  say('\n取渲染页（容器内签令牌）');
+  fetchRenderPages(planVersionId);
+  copyRenderPages();
+}
 
 say('\n取采集页与政策页');
 for (const [name, path] of [
@@ -589,13 +594,18 @@ for (const [name, path] of [
 }
 
 say('\n离线化');
-for (const page of ['planner.html', 'legal.html', 'full.html', 'day1.html']) {
+const pages = options.frontendOnly
+  ? ['planner.html', 'legal.html']
+  : ['planner.html', 'legal.html', 'full.html', 'day1.html'];
+for (const page of pages) {
   await localize(page);
 }
 
-await writeReadme(planVersionId);
+if (!options.frontendOnly) await writeReadme(planVersionId);
 
 if (!options.keepRaw) await rm(join(OUT, 'raw'), { recursive: true, force: true });
 
 say(`\n✓ 共 ${fetched.size} 个资源 → ${OUT}/`);
-say(`  双击 ${join(OUT, 'planner.html')} 开始看；交互式预览请用 http://localhost:8080`);
+say(
+  `  双击 ${join(OUT, 'planner.html')} 开始看；交互式预览请用 ${options.frontendOnly ? options.base : 'http://localhost:8080'}`,
+);

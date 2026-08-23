@@ -34,6 +34,7 @@ export type PrepareRequestResult =
 export interface PrepareRequestOptions {
   /** 当前时刻。显式传入让 N-01 的边界日可测（见 conflicts.ts） */
   readonly now: Date;
+  readonly allowedConditionCodes?: ReadonlySet<string>;
 }
 
 export function prepareTravelRequest(
@@ -62,6 +63,9 @@ export function prepareTravelRequest(
 
   const violations = checkRequestConflicts(ui, normalized, {
     todayInRequestTimezone: todayInTimezone(ui.timezone, options.now),
+    ...(options.allowedConditionCodes === undefined
+      ? {}
+      : { allowedConditionCodes: options.allowedConditionCodes }),
   });
 
   if (violations.length > 0) {

@@ -16,6 +16,7 @@ import {
   createExportsRepository,
   createPool,
   createPresentationsRepository,
+  createPlannerConfigRepository,
   createTravelPlansRepository,
   createUsersRepository,
   loadDbConfig,
@@ -30,6 +31,11 @@ import {
 } from '@tps/queue';
 import { S3ExportStorage, loadExportsStorageConfig } from '@tps/storage';
 import { IdentityService } from './identity/service.js';
+import {
+  AliyunSmsSender,
+  LocalSmsSender,
+  PhoneVerificationService,
+} from './identity/phone-verification.js';
 import { RedisSessionStore } from './identity/redis-session-store.js';
 import { buildServer } from './server.js';
 
@@ -135,6 +141,22 @@ async function main(): Promise<void> {
     anonymousEnabled: featureFlags.anonymousEnabled,
   });
 
+  const smsMode = optionalString('SMS_MODE', 'local').toLowerCase();
+  const smsSender =
+    smsMode === 'aliyun'
+      ? new AliyunSmsSender({
+          accessKeyId: requireString('ALIBABA_CLOUD_ACCESS_KEY_ID'),
+          accessKeySecret: requireString('ALIBABA_CLOUD_ACCESS_KEY_SECRET'),
+          signName: requireString('ALIYUN_SMS_SIGN_NAME'),
+          templateCode: requireString('ALIYUN_SMS_TEMPLATE_CODE'),
+        })
+      : new LocalSmsSender();
+  const phoneVerification = new PhoneVerificationService(redis, smsSender, {
+    pepper: optionalString('SMS_VERIFICATION_PEPPER', 'local-development-only'),
+    exposeDevCode: smsMode === 'local',
+  });
+  const plannerConfig = createPlannerConfigRepository(pool);
+
   /*
    * 内部端点的共享密钥。未配置则不注册那些路由 ——
    * 少一个默认密钥就少一个「忘了改默认值」的事故。
@@ -149,6 +171,7 @@ async function main(): Promise<void> {
     auth: {
       identity,
       quota,
+      phoneVerification,
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
     },
     travelPlans: {
@@ -161,7 +184,9 @@ async function main(): Promise<void> {
       featureFlags,
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
       now: () => new Date(),
+      plannerConfig,
     },
+    plannerConfig: { config: plannerConfig },
     /*
      * 13.5/13.6 的导出端点。
      *

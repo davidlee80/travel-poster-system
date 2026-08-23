@@ -1,7 +1,13 @@
 'use client';
 
 import { CONDITION_LABEL } from '@tps/presentation';
-import { EXISTING_BOOKING_VALUES, type ConditionCode } from '@tps/schemas';
+import {
+  EXISTING_BOOKING_VALUES,
+  type BudgetIncludedItem,
+  type BudgetTier,
+  type ConditionCode,
+  type ExistingBooking,
+} from '@tps/schemas';
 
 import {
   BUDGET_DAILY_CEILING,
@@ -9,12 +15,13 @@ import {
   BUDGET_FOCUS_CODES,
   BUDGET_ITEM_LABEL,
   BUDGET_TIER_PRESETS,
-  CUSTOM_TAG_CODES,
+  DIET_TAG_CODES,
   EXISTING_BOOKING_LABEL,
   INTEREST_CODES,
   LODGING_REQUIREMENT_CODES,
   LODGING_TYPE_CODES,
   PACE_INTENSITY_LABEL,
+  PACE_NEED_CODES,
   ROUTE_SHAPES,
   SENIOR_MOBILITY_LABEL,
   SENIOR_MOBILITY_VALUES,
@@ -29,9 +36,10 @@ import {
   type StepId,
 } from '@/lib/planner-state';
 import { TagLegend, TagTriState } from './TagTriState';
+import { usePlannerOptions } from './PlannerConfigProvider';
 
 /**
- * 七个 section（原型 `.main-panel` 里的七张卡片）。
+ * 八个 section（`.main-panel` 里的八张卡片）。
  *
  * 全部只读 props + 转发 dispatch，不持有状态 —— 完成度要在左栏与右栏同时用，
  * 状态下沉到 section 里就得靠 context 或重复计算。
@@ -45,6 +53,10 @@ import { TagLegend, TagTriState } from './TagTriState';
  */
 
 type Dispatch = (action: PlannerAction) => void;
+
+function metadataString(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback;
+}
 
 interface SectionProps {
   readonly state: PlannerState;
@@ -92,28 +104,38 @@ function V2Badge(): React.ReactElement {
 
 /** 一组三态标签 */
 function TagRow({
+  fieldKey,
   codes,
   state,
   dispatch,
   filter,
 }: {
+  readonly fieldKey: string;
   readonly codes: readonly ConditionCode[];
   readonly state: PlannerState;
   readonly dispatch: Dispatch;
   /** 兴趣搜索用：不匹配的隐藏而不是移除，避免布局跳动 */
-  readonly filter?: (code: ConditionCode) => boolean;
+  readonly filter?: (code: ConditionCode, label: string) => boolean;
 }): React.ReactElement {
+  const options = usePlannerOptions(
+    fieldKey,
+    codes.map((code) => ({ key: code, label: CONDITION_LABEL[code], metadata: {} })),
+  );
   return (
     <div className="planner-tags">
-      {codes.map((code) => (
-        <TagTriState
-          key={code}
-          code={code}
-          stance={state.conditions[code]}
-          hidden={filter === undefined ? false : !filter(code)}
-          onCycle={(target) => dispatch({ type: 'cycleCondition', code: target })}
-        />
-      ))}
+      {options.map((option) => {
+        const code = option.key as ConditionCode;
+        return (
+          <TagTriState
+            key={code}
+            code={code}
+            label={option.label}
+            stance={state.conditions[code]}
+            hidden={filter === undefined ? false : !filter(code, option.label)}
+            onCycle={(target) => dispatch({ type: 'cycleCondition', code: target })}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -121,6 +143,14 @@ function TagRow({
 // ── 第 1 步 ─────────────────────────────────────────────────
 
 export function BasicSection({ state, dispatch, registerRef }: SectionProps): React.ReactElement {
+  const existingBookingOptions = usePlannerOptions(
+    'booking.existing',
+    EXISTING_BOOKING_VALUES.map((key) => ({
+      key,
+      label: EXISTING_BOOKING_LABEL[key],
+      metadata: {},
+    })),
+  );
   return (
     <SectionShell
       id="basic"
@@ -222,16 +252,19 @@ export function BasicSection({ state, dispatch, registerRef }: SectionProps): Re
         <div className="planner-field planner-field--full">
           <span className="planner-label">已有订单</span>
           <div className="planner-checks">
-            {EXISTING_BOOKING_VALUES.map((value) => (
-              <label key={value} className="planner-check">
-                <input
-                  type="checkbox"
-                  checked={state.existingBookings.includes(value)}
-                  onChange={() => dispatch({ type: 'toggleExistingBooking', value })}
-                />
-                {EXISTING_BOOKING_LABEL[value]}
-              </label>
-            ))}
+            {existingBookingOptions.map((option) => {
+              const value = option.key as ExistingBooking;
+              return (
+                <label key={value} className="planner-check">
+                  <input
+                    type="checkbox"
+                    checked={state.existingBookings.includes(value)}
+                    onChange={() => dispatch({ type: 'toggleExistingBooking', value })}
+                  />
+                  {option.label}
+                </label>
+              );
+            })}
           </div>
           <p className="planner-hint">
             已订酒店会让住宿位置固定、每日路线围绕它安排；已订往返交通会钉住首末日的时间窗。
@@ -255,6 +288,10 @@ export function TravelersSection({
   dispatch,
   registerRef,
 }: SectionProps): React.ReactElement {
+  const seniorMobilityOptions = usePlannerOptions(
+    'traveler.senior_mobility',
+    SENIOR_MOBILITY_VALUES.map((key) => ({ key, label: SENIOR_MOBILITY_LABEL[key], metadata: {} })),
+  );
   const counts = {
     adults: state.adults,
     children: state.childAges.length,
@@ -339,11 +376,14 @@ export function TravelersSection({
                     })
                   }
                 >
-                  {SENIOR_MOBILITY_VALUES.map((value) => (
-                    <option key={value} value={value}>
-                      {SENIOR_MOBILITY_LABEL[value]}
-                    </option>
-                  ))}
+                  {seniorMobilityOptions.map((option) => {
+                    const value = option.key as (typeof SENIOR_MOBILITY_VALUES)[number];
+                    return (
+                      <option key={value} value={value}>
+                        {option.label}
+                      </option>
+                    );
+                  })}
                 </select>
                 {/*
                   「需轮椅」「减少步行台阶」两档会落成 accessibility 硬约束码，
@@ -359,7 +399,12 @@ export function TravelersSection({
       <div className="planner-subsection">
         <h3 className="planner-subsection__title">同行相关的偏好</h3>
         <TagLegend />
-        <TagRow codes={TRAVELER_TAG_CODES} state={state} dispatch={dispatch} />
+        <TagRow
+          fieldKey="traveler.tags"
+          codes={TRAVELER_TAG_CODES}
+          state={state}
+          dispatch={dispatch}
+        />
       </div>
     </SectionShell>
   );
@@ -368,12 +413,37 @@ export function TravelersSection({
 // ── 第 3 步 ─────────────────────────────────────────────────
 
 export function BudgetSection({ state, dispatch, registerRef }: SectionProps): React.ReactElement {
+  const tierOptions = usePlannerOptions('budget.tiers', [
+    ...BUDGET_TIER_PRESETS.map((preset) => ({
+      key: preset.tier,
+      label: preset.name,
+      metadata: {
+        icon: preset.icon,
+        description: preset.description,
+        min: preset.min,
+        max: preset.max,
+      },
+    })),
+    {
+      key: 'CUSTOM',
+      label: '自定义预算',
+      metadata: { icon: '⚙️', description: '适合有明确金额限制' },
+    },
+  ]);
+  const includedItemOptions = usePlannerOptions(
+    'budget.included_items',
+    (Object.keys(BUDGET_ITEM_LABEL) as BudgetIncludedItem[]).map((key) => ({
+      key,
+      label: BUDGET_ITEM_LABEL[key],
+      metadata: {},
+    })),
+  );
   const total = budgetTotal(state);
   const money = (value: number): string => `¥${value.toLocaleString('zh-CN')}`;
   const tierName =
     state.budgetTier === 'CUSTOM'
       ? '自定义预算'
-      : (BUDGET_TIER_PRESETS.find((item) => item.tier === state.budgetTier)?.name ?? '未选择档位');
+      : (tierOptions.find((item) => item.key === state.budgetTier)?.label ?? '未选择档位');
 
   return (
     <SectionShell
@@ -384,33 +454,34 @@ export function BudgetSection({ state, dispatch, registerRef }: SectionProps): R
       registerRef={registerRef}
     >
       <div className="planner-tiers">
-        {BUDGET_TIER_PRESETS.map((preset) => (
-          <button
-            key={preset.tier}
-            type="button"
-            className={`planner-tier${state.budgetTier === preset.tier ? ' is-active' : ''}`}
-            onClick={() => dispatch({ type: 'selectBudgetTier', tier: preset.tier })}
-          >
-            <span className="planner-tier__icon">{preset.icon}</span>
-            <span className="planner-tier__name">{preset.name}</span>
-            <span className="planner-tier__price">
-              ¥{preset.min.toLocaleString('zh-CN')}～{preset.max.toLocaleString('zh-CN')}
-            </span>
-            <span className="planner-tier__unit">人均／天</span>
-            <span className="planner-tier__desc">{preset.description}</span>
-          </button>
-        ))}
-        <button
-          type="button"
-          className={`planner-tier planner-tier--custom${state.budgetTier === 'CUSTOM' ? ' is-active' : ''}`}
-          onClick={() => dispatch({ type: 'selectBudgetTier', tier: 'CUSTOM' })}
-        >
-          <span className="planner-tier__icon">⚙️</span>
-          <span className="planner-tier__name">自定义预算</span>
-          <span className="planner-tier__price">自由设置</span>
-          <span className="planner-tier__unit">最低与最高</span>
-          <span className="planner-tier__desc">适合有明确金额限制</span>
-        </button>
+        {tierOptions.map((option) => {
+          const tier = option.key as BudgetTier;
+          const min = Number(option.metadata['min'] ?? 0);
+          const max = Number(option.metadata['max'] ?? 0);
+          const custom = tier === 'CUSTOM';
+          return (
+            <button
+              key={tier}
+              type="button"
+              className={`planner-tier${custom ? ' planner-tier--custom' : ''}${state.budgetTier === tier ? ' is-active' : ''}`}
+              onClick={() => dispatch({ type: 'selectBudgetTier', tier })}
+            >
+              <span className="planner-tier__icon">
+                {metadataString(option.metadata['icon'], '✦')}
+              </span>
+              <span className="planner-tier__name">{option.label}</span>
+              <span className="planner-tier__price">
+                {custom
+                  ? '自由设置'
+                  : `¥${min.toLocaleString('zh-CN')}～${max.toLocaleString('zh-CN')}`}
+              </span>
+              <span className="planner-tier__unit">{custom ? '最低与最高' : '人均／天'}</span>
+              <span className="planner-tier__desc">
+                {metadataString(option.metadata['description'], '')}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="planner-budget-summary">
@@ -505,16 +576,19 @@ export function BudgetSection({ state, dispatch, registerRef }: SectionProps): R
       <div className="planner-subsection">
         <h3 className="planner-subsection__title">预算包含哪些项目？</h3>
         <div className="planner-checks">
-          {(Object.keys(BUDGET_ITEM_LABEL) as (keyof typeof BUDGET_ITEM_LABEL)[]).map((item) => (
-            <label key={item} className="planner-check">
-              <input
-                type="checkbox"
-                checked={state.includedItems.includes(item)}
-                onChange={() => dispatch({ type: 'toggleIncludedItem', item })}
-              />
-              {BUDGET_ITEM_LABEL[item]}
-            </label>
-          ))}
+          {includedItemOptions.map((option) => {
+            const item = option.key as BudgetIncludedItem;
+            return (
+              <label key={item} className="planner-check">
+                <input
+                  type="checkbox"
+                  checked={state.includedItems.includes(item)}
+                  onChange={() => dispatch({ type: 'toggleIncludedItem', item })}
+                />
+                {option.label}
+              </label>
+            );
+          })}
         </div>
         <p className="planner-hint">至少保留一项 —— 全不选会让预算区间失去含义。</p>
       </div>
@@ -527,7 +601,12 @@ export function BudgetSection({ state, dispatch, registerRef }: SectionProps): R
           点「购物」会给第 6 步记分。购物预算在上面的「预算包含哪些项目」里已经
           有复选框，兴趣标签留在第 6 步。
         */}
-        <TagRow codes={BUDGET_FOCUS_CODES} state={state} dispatch={dispatch} />
+        <TagRow
+          fieldKey="budget.focus_tags"
+          codes={BUDGET_FOCUS_CODES}
+          state={state}
+          dispatch={dispatch}
+        />
       </div>
     </SectionShell>
   );
@@ -539,6 +618,37 @@ const WALKING_OPTIONS = [2, 3, 5, 8] as const;
 const ATTRACTION_OPTIONS = ['1', '2~3', '4~5', '尽可能多'] as const;
 
 export function PaceSection({ state, dispatch, registerRef }: SectionProps): React.ReactElement {
+  const intensityOptions = usePlannerOptions(
+    'pace.intensity',
+    ([1, 2, 3, 4, 5] as const).map((key) => ({
+      key: String(key),
+      label: PACE_INTENSITY_LABEL[key],
+      metadata: {},
+    })),
+  );
+  const attractionOptions = usePlannerOptions(
+    'pace.attractions_per_day',
+    ATTRACTION_OPTIONS.map((key) => ({
+      key,
+      label: key === '尽可能多' ? key : `${key} 个`,
+      metadata: {},
+    })),
+  );
+  const walkingOptions = usePlannerOptions(
+    'pace.walking_limit_km',
+    WALKING_OPTIONS.map((key) => ({ key: String(key), label: `${key} 公里以内`, metadata: {} })),
+  );
+  const routeOptions = usePlannerOptions(
+    'pace.route_shape',
+    ROUTE_SHAPES.map((shape) => ({
+      key: shape.id,
+      label: shape.name,
+      metadata: { glyph: shape.glyph },
+    })),
+  );
+  const currentIntensity =
+    intensityOptions.find((option) => option.key === String(state.paceIntensity))?.label ??
+    PACE_INTENSITY_LABEL[state.paceIntensity];
   return (
     <SectionShell
       id="pace"
@@ -550,7 +660,7 @@ export function PaceSection({ state, dispatch, registerRef }: SectionProps): Rea
       <div className="planner-pace">
         <div className="planner-pace__head">
           <span>轻松躺平</span>
-          <strong>{PACE_INTENSITY_LABEL[state.paceIntensity]}</strong>
+          <strong>{currentIntensity}</strong>
           <span>紧凑打卡</span>
         </div>
         <input
@@ -569,8 +679,8 @@ export function PaceSection({ state, dispatch, registerRef }: SectionProps): Rea
           }
         />
         <div className="planner-pace__scale">
-          {([1, 2, 3, 4, 5] as const).map((level) => (
-            <span key={level}>{PACE_INTENSITY_LABEL[level]}</span>
+          {intensityOptions.map((option) => (
+            <span key={option.key}>{option.label}</span>
           ))}
         </div>
       </div>
@@ -588,9 +698,9 @@ export function PaceSection({ state, dispatch, registerRef }: SectionProps): Rea
               dispatch({ type: 'setText', field: 'attractionsPerDay', value: event.target.value })
             }
           >
-            {ATTRACTION_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option === '尽可能多' ? option : `${option} 个`}
+            {attractionOptions.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
               </option>
             ))}
           </select>
@@ -608,9 +718,9 @@ export function PaceSection({ state, dispatch, registerRef }: SectionProps): Rea
               dispatch({ type: 'setWalkingLimit', value: Number(event.target.value) })
             }
           >
-            {WALKING_OPTIONS.map((km) => (
-              <option key={km} value={km}>
-                {km} 公里以内
+            {walkingOptions.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
               </option>
             ))}
           </select>
@@ -635,15 +745,17 @@ export function PaceSection({ state, dispatch, registerRef }: SectionProps): Rea
       <div className="planner-subsection">
         <h3 className="planner-subsection__title">路线结构</h3>
         <div className="planner-routes">
-          {ROUTE_SHAPES.map((shape) => (
+          {routeOptions.map((option) => (
             <button
-              key={shape.id}
+              key={option.key}
               type="button"
-              className={`planner-route-card${state.routeShape === shape.id ? ' is-active' : ''}`}
-              onClick={() => dispatch({ type: 'setRouteShape', value: shape.id })}
+              className={`planner-route-card${state.routeShape === option.key ? ' is-active' : ''}`}
+              onClick={() => dispatch({ type: 'setRouteShape', value: option.key })}
             >
-              <span className="planner-route-card__glyph">{shape.glyph}</span>
-              {shape.name}
+              <span className="planner-route-card__glyph">
+                {metadataString(option.metadata['glyph'], '•')}
+              </span>
+              {option.label}
             </button>
           ))}
         </div>
@@ -653,6 +765,20 @@ export function PaceSection({ state, dispatch, registerRef }: SectionProps): Rea
           但行程还是中心辐射」会被当成 bug。
         */}
         <p className="planner-hint">路线结构作为文字说明提交，模型会参考但不作为硬约束。</p>
+      </div>
+
+      <div className="planner-subsection">
+        <div className="planner-subsection__head">
+          <strong>无障碍与作息</strong>
+          <span>可多选，连续点击切换要求等级</span>
+        </div>
+        <TagLegend />
+        <TagRow
+          fieldKey="pace.need_tags"
+          codes={PACE_NEED_CODES}
+          state={state}
+          dispatch={dispatch}
+        />
       </div>
     </SectionShell>
   );
@@ -680,7 +806,12 @@ export function TransportSection({
           <strong>交通方式</strong>
           <span>可多选</span>
         </div>
-        <TagRow codes={TRANSPORT_CODES} state={state} dispatch={dispatch} />
+        <TagRow
+          fieldKey="transport.mode_tags"
+          codes={TRANSPORT_CODES}
+          state={state}
+          dispatch={dispatch}
+        />
       </div>
 
       <div className="planner-subsection">
@@ -688,7 +819,12 @@ export function TransportSection({
           <strong>住宿类型</strong>
           <span>可多选</span>
         </div>
-        <TagRow codes={LODGING_TYPE_CODES} state={state} dispatch={dispatch} />
+        <TagRow
+          fieldKey="transport.lodging_type_tags"
+          codes={LODGING_TYPE_CODES}
+          state={state}
+          dispatch={dispatch}
+        />
       </div>
 
       <div className="planner-subsection">
@@ -696,7 +832,12 @@ export function TransportSection({
           <strong>住宿具体要求</strong>
           <span>可多选</span>
         </div>
-        <TagRow codes={LODGING_REQUIREMENT_CODES} state={state} dispatch={dispatch} />
+        <TagRow
+          fieldKey="transport.lodging_requirement_tags"
+          codes={LODGING_REQUIREMENT_CODES}
+          state={state}
+          dispatch={dispatch}
+        />
         <p className="planner-hint">
           「合住多人间」设为「不要」即表示需要独立房间 —— 三态里的红色就是明确排除。
         </p>
@@ -706,6 +847,32 @@ export function TransportSection({
 }
 
 // ── 第 6 步 ─────────────────────────────────────────────────
+
+export function DietSection({ state, dispatch, registerRef }: SectionProps): React.ReactElement {
+  return (
+    <SectionShell
+      id="diet"
+      step={6}
+      title="饮食偏好与禁忌"
+      description="告诉我们偏好的饮食方式，以及必须满足或明确避开的餐饮条件。"
+      registerRef={registerRef}
+    >
+      <TagLegend />
+      <div className="planner-subsection">
+        <div className="planner-subsection__head">
+          <strong>饮食要求</strong>
+          <span>可多选</span>
+        </div>
+        <TagRow fieldKey="diet.tags" codes={DIET_TAG_CODES} state={state} dispatch={dispatch} />
+        <p className="planner-hint">
+          过敏、清真等刚性要求请点到绿色“必须”；明确不接受的选项请点到红色“不要”。
+        </p>
+      </div>
+    </SectionShell>
+  );
+}
+
+// ── 第 7 步 ─────────────────────────────────────────────────
 
 export function InterestsSection({
   state,
@@ -717,7 +884,7 @@ export function InterestsSection({
   return (
     <SectionShell
       id="interests"
-      step={6}
+      step={7}
       title="兴趣主题与活动"
       description="建议选择 2～4 项核心兴趣。"
       registerRef={registerRef}
@@ -734,19 +901,18 @@ export function InterestsSection({
       <div className="planner-subsection">
         <TagLegend />
         <TagRow
+          fieldKey="interest.tags"
           codes={INTEREST_CODES}
           state={state}
           dispatch={dispatch}
-          filter={(code) =>
-            query.length === 0 || CONDITION_LABEL[code].toLowerCase().includes(query)
-          }
+          filter={(_code, label) => query.length === 0 || label.toLowerCase().includes(query)}
         />
       </div>
     </SectionShell>
   );
 }
 
-// ── 第 7 步 ─────────────────────────────────────────────────
+// ── 第 8 步 ─────────────────────────────────────────────────
 
 /** 5.1：500 字后截断并记入 assumptions。界面上先提示，别等到结果里才说 */
 const CUSTOM_TEXT_SOFT_LIMIT = 500;
@@ -758,9 +924,9 @@ export function CustomSection({ state, dispatch, registerRef }: SectionProps): R
   return (
     <SectionShell
       id="custom"
-      step={7}
+      step={8}
       title="补充特殊需求"
-      description="饮食禁忌、健康状况、必去或必须避开的地点都可以写在这里。"
+      description="健康状况、必去或必须避开的地点，以及其他未覆盖的要求都可以写在这里。"
       registerRef={registerRef}
     >
       <textarea
@@ -768,7 +934,7 @@ export function CustomSection({ state, dispatch, registerRef }: SectionProps): R
         value={state.customText}
         rows={5}
         maxLength={5_000}
-        placeholder="例如：长辈腿脚不好，孩子对花生过敏，不要红眼航班。"
+        placeholder="例如：希望安排纪念日惊喜，必须去某个展览，避开红眼航班。"
         onChange={(event) =>
           dispatch({ type: 'setText', field: 'customText', value: event.target.value })
         }
@@ -797,21 +963,6 @@ export function CustomSection({ state, dispatch, registerRef }: SectionProps): R
         这段文字会原样交给模型阅读。若其中的诉求在上面的标签里有对应项， 建议一并勾选 ——
         标签是结构化条件，会被逐条校验；文字只作为参考。
       </p>
-
-      <div className="planner-subsection">
-        <h3 className="planner-subsection__title">饮食、无障碍与作息</h3>
-        <p className="planner-hint">
-          这些是硬约束：勾选后生成时不可违反。原型里没有它们的入口，
-          而海鲜过敏、清真这类诉求只写在文字里不会被校验。
-        </p>
-        {/*
-          「儿童安全座椅」与「每日午休」不在这里 —— 它们的入口在第 2 步
-          「同行相关的偏好」，那里才是用户会想到它们的位置。一个 code 有两个
-          入口的话，在其中一个点它会让另一步变绿（见 `TAG_GROUPS`）。
-        */}
-        <TagLegend />
-        <TagRow codes={CUSTOM_TAG_CODES} state={state} dispatch={dispatch} />
-      </div>
     </SectionShell>
   );
 }

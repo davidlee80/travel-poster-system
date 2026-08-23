@@ -5,6 +5,7 @@ import { useCallback, useMemo, useReducer, useRef, useState } from 'react';
 
 import { generatePlan, getJobStatus } from '@/lib/api-client';
 import type { GenerationPhase } from '@/lib/generation-dialog';
+import { AuthPanel } from '../AuthPanel';
 import {
   INITIAL_PLANNER_STATE,
   buildPlannerRequest,
@@ -26,6 +27,7 @@ import {
   BasicSection,
   BudgetSection,
   CustomSection,
+  DietSection,
   InterestsSection,
   PaceSection,
   TransportSection,
@@ -35,7 +37,7 @@ import {
 /**
  * 需求采集工作台（TP-8-07）。
  *
- * 三栏：左侧七步导航 + 完成度、中间七张卡片、右侧已选条件摘要与提交。
+ * 三栏：左侧八步导航 + 完成度、中间八张卡片、右侧已选条件摘要与提交。
  * 状态全部在这里，向下传 props —— 完成度要在左右两栏同时用，
  * 下沉到 section 里就得靠 context 或重复计算。
  *
@@ -78,7 +80,7 @@ export function Planner(): React.ReactElement {
    * 只有拿到身份才允许提交（P7 之后必须是注册用户）。
    *
    * `loading` 也算未就绪：首屏禁用比「先允许点、再发现不行」好 ——
-   * 后者会让访客填完七步再被拒。
+   * 后者会让访客填完八步再被拒。
    */
   const signedIn = status.kind === 'ready';
 
@@ -126,8 +128,8 @@ export function Planner(): React.ReactElement {
     sections.current.get(step)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
-  const cycle = useCallback(
-    (code: ConditionCode) => dispatch({ type: 'cycleCondition', code }),
+  const clear = useCallback(
+    (code: ConditionCode) => dispatch({ type: 'clearCondition', code }),
     [],
   );
 
@@ -253,13 +255,9 @@ export function Planner(): React.ReactElement {
 
   return (
     <div className="planner">
-      <PlannerTopBar
-        onReset={() => {
-          dispatch({ type: 'reset' });
-          setPhase({ kind: 'idle' });
-        }}
-        onToggleMenu={() => setMenuOpen((open) => !open)}
-      />
+      <PlannerTopBar onToggleMenu={() => setMenuOpen((open) => !open)}>
+        <AuthPanel />
+      </PlannerTopBar>
 
       <div className="planner-workspace">
         <StepNavigation state={state} activeStep={activeStep} onJump={jump} open={menuOpen} />
@@ -270,6 +268,7 @@ export function Planner(): React.ReactElement {
           <BudgetSection state={state} dispatch={dispatch} registerRef={registerRef} />
           <PaceSection state={state} dispatch={dispatch} registerRef={registerRef} />
           <TransportSection state={state} dispatch={dispatch} registerRef={registerRef} />
+          <DietSection state={state} dispatch={dispatch} registerRef={registerRef} />
           <InterestsSection state={state} dispatch={dispatch} registerRef={registerRef} />
           <CustomSection state={state} dispatch={dispatch} registerRef={registerRef} />
 
@@ -282,8 +281,12 @@ export function Planner(): React.ReactElement {
 
         <ConditionSummary
           state={state}
-          onCycle={cycle}
+          onRemove={clear}
           onSubmit={() => void submit()}
+          onReset={() => {
+            dispatch({ type: 'reset' });
+            setPhase({ kind: 'idle' });
+          }}
           blocker={blocker}
           missing={missing}
           onJumpToMissing={() => jump('basic')}

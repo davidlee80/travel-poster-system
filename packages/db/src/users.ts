@@ -19,6 +19,9 @@ export interface UserRow {
   readonly id: string;
   readonly user_type: UserType;
   readonly email: string | null;
+  /** 0002 时代的测试夹具可能不带这两列；真实 SQL 行始终返回 null 或值。 */
+  readonly phone_e164?: string | null;
+  readonly phone_verified_at?: Date | null;
   readonly password_hash: string | null;
   readonly display_name: string | null;
   readonly anon_expires_at: Date | null;
@@ -56,6 +59,18 @@ export interface UpgradeAnonymousInput {
   readonly monthlyQuota: number;
 }
 
+export interface CreatePhoneRegisteredInput {
+  readonly phoneE164: string;
+  readonly passwordHash: string | null;
+  readonly displayName: string | null;
+  readonly dailyQuota: number;
+  readonly monthlyQuota: number;
+}
+
+export interface UpgradeAnonymousPhoneInput extends CreatePhoneRegisteredInput {
+  readonly anonymousUserId: string;
+}
+
 /** 归并结果：各表改挂的行数，供审计与幂等性验证 */
 export interface MergeCounts {
   readonly travelRequests: number;
@@ -70,9 +85,12 @@ export interface UsersRepository {
   findById(id: string): Promise<UserRow | null>;
   /** 按邮箱查找。只返回 ACTIVE 的注册用户。 */
   findActiveByEmail(email: string): Promise<UserRow | null>;
+  /** 按已验证手机号查找。只返回 ACTIVE 的注册用户。 */
+  findActiveByPhone(phoneE164: string): Promise<UserRow | null>;
 
   createAnonymous(input: CreateAnonymousInput): Promise<UserRow>;
   createRegistered(input: CreateRegisteredInput): Promise<UserRow>;
+  createPhoneRegistered(input: CreatePhoneRegisteredInput): Promise<UserRow>;
 
   /**
    * 匿名原地升级为注册（13.9.2）。
@@ -81,6 +99,7 @@ export interface UsersRepository {
    * 调用方应返回 `AUTH_ANONYMOUS_ALREADY_UPGRADED` 让客户端改走登录。
    */
   upgradeAnonymous(input: UpgradeAnonymousInput): Promise<UserRow | null>;
+  upgradeAnonymousPhone(input: UpgradeAnonymousPhoneInput): Promise<UserRow | null>;
 
   /**
    * 改口令（13.9.2 的账号级操作）。
@@ -114,7 +133,7 @@ function isUniqueViolation(err: unknown): err is { code: string; constraint?: st
 }
 
 const USER_COLUMNS = `
-  id, user_type, email, password_hash, display_name,
+  id, user_type, email, phone_e164, phone_verified_at, password_hash, display_name,
   anon_expires_at, status, merged_into,
   daily_plan_quota, monthly_plan_quota,
   upgraded_at, last_seen_at, created_at
@@ -149,6 +168,15 @@ export function createUsersRepository(pool: Pool): UsersRepository {
         `SELECT ${USER_COLUMNS} FROM users
          WHERE email = $1 AND user_type = 'REGISTERED' AND status = 'ACTIVE'`,
         [email],
+      );
+    },
+
+    async findActiveByPhone(phoneE164) {
+      return one(
+        `SELECT ${USER_COLUMNS} FROM users
+         WHERE phone_e164 = $1 AND phone_verified_at IS NOT NULL
+           AND user_type = 'REGISTERED' AND status = 'ACTIVE'`,
+        [phoneE164],
       );
     },
 
@@ -191,6 +219,32 @@ export function createUsersRepository(pool: Pool): UsersRepository {
       }
     },
 
+    async createPhoneRegistered(input) {
+      try {
+        const row = await one(
+          `INSERT INTO users
+             (user_type, phone_e164, phone_verified_at, password_hash, display_name,
+              daily_plan_quota, monthly_plan_quota)
+           VALUES ('REGISTERED', $1, NOW(), $2, $3, $4, $5)
+           RETURNING ${USER_COLUMNS}`,
+          [
+            input.phoneE164,
+            input.passwordHash,
+            input.displayName,
+            input.dailyQuota,
+            input.monthlyQuota,
+          ],
+        );
+        if (!row) throw new Error('创建手机注册用户未返回行');
+        return row;
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          throw new UniqueViolationError(err.constraint ?? 'users_phone_e164_uk');
+        }
+        throw err;
+      }
+    },
+
     async upgradeAnonymous(input) {
       try {
         // `AND user_type = 'ANONYMOUS'` 是并发保护：两个请求同时升级同一匿名行时，
@@ -220,6 +274,39 @@ export function createUsersRepository(pool: Pool): UsersRepository {
       } catch (err) {
         if (isUniqueViolation(err)) {
           throw new UniqueViolationError(err.constraint ?? 'users_email_uk');
+        }
+        throw err;
+      }
+    },
+
+    async upgradeAnonymousPhone(input) {
+      try {
+        return await one(
+          `UPDATE users SET
+             user_type = 'REGISTERED',
+             phone_e164 = $2,
+             phone_verified_at = NOW(),
+             password_hash = $3,
+             display_name = $4,
+             daily_plan_quota = $5,
+             monthly_plan_quota = $6,
+             anon_token_hash = NULL,
+             anon_expires_at = NULL,
+             upgraded_at = NOW()
+           WHERE id = $1 AND user_type = 'ANONYMOUS' AND status = 'ACTIVE'
+           RETURNING ${USER_COLUMNS}`,
+          [
+            input.anonymousUserId,
+            input.phoneE164,
+            input.passwordHash,
+            input.displayName,
+            input.dailyQuota,
+            input.monthlyQuota,
+          ],
+        );
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          throw new UniqueViolationError(err.constraint ?? 'users_phone_e164_uk');
         }
         throw err;
       }

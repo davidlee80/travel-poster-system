@@ -1,230 +1,382 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import { login, register } from '@/lib/api-client';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+
+import { login, register, sendVerificationCode } from '@/lib/api-client';
 import { PasswordChangeForm } from './PasswordChangeForm';
 import { useSession } from './SessionProvider';
 
-/**
- * 注册 / 登录 / 登出界面（TP-1-40，设计稿 13.9）。
- *
- * ## 两处与后端契约对齐的细节
- *
- * 1. **注册按钮对匿名用户显示为「保存我的计划」**而不是「注册」。
- *    匿名用户此刻已有计划，注册的实际收益是「让它们长期保存」——
- *    用「注册」会让人以为要从头再来。
- *
- * 2. **错误提示直接用后端的 `message`**，不在前端另写一套文案。
- *    后端的错误码表（13.7）已经保证了提示不含内部细节，
- *    前端再翻译一遍只会产生两套不一致的说法。
- */
-
 type Mode = 'register' | 'login';
+type LoginMethod = 'CODE' | 'PASSWORD';
 
-export function AuthPanel() {
+export function AuthPanel(): React.ReactElement {
   const { status, setSession, logout } = useSession();
-
-  const [mode, setMode] = useState<Mode>('register');
-  const [email, setEmail] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<Mode>('login');
+  const [loginMethod, setLoginMethod] = useState<LoginMethod>('CODE');
+  const [phone, setPhone] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<{ message: string; field?: string } | null>(null);
   const [pending, setPending] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [devHint, setDevHint] = useState<string | null>(null);
   const [changingPassword, setChangingPassword] = useState(false);
 
-  if (status.kind === 'loading') {
-    return <div className="auth-panel auth-panel--loading">正在加载…</div>;
-  }
+  useEffect(() => {
+    const closeFromOutside = (event: PointerEvent): void => {
+      if (rootRef.current?.contains(event.target as Node) === false) setOpen(false);
+    };
+    const closeFromEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', closeFromOutside);
+    document.addEventListener('keydown', closeFromEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeFromOutside);
+      document.removeEventListener('keydown', closeFromEscape);
+    };
+  }, []);
 
-  if (status.kind === 'error') {
-    // 与「未登录」严格区分：把服务故障显示成未登录会让用户去点登录然后再次失败
-    return (
-      <div className="auth-panel auth-panel--error" role="alert">
-        {status.message}
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = window.setInterval(() => setCountdown((value) => Math.max(0, value - 1)), 1_000);
+    return () => window.clearInterval(timer);
+  }, [countdown]);
 
-  /*
-   * P7：`anonymous` 态（服务端拒绝了未注册请求）与「匿名身份」在这里的
-   * 呈现完全相同 —— 都是「显示注册/登录表单」。因此只在需要读身份字段时
-   * 才区分两者，其余分支共用。
-   */
+  useEffect(() => {
+    const openFromHash = (): void => {
+      if (window.location.hash !== '#auth-phone') return;
+      setOpen(true);
+      window.requestAnimationFrame(() => document.getElementById('auth-phone')?.focus());
+    };
+    window.addEventListener('hashchange', openFromHash);
+    openFromHash();
+    return () => window.removeEventListener('hashchange', openFromHash);
+  }, [status.kind]);
+
   const session = status.kind === 'ready' ? status.session : null;
+  const registered = session !== null && session.user_type === 'REGISTERED';
+  const maskedPhone = session?.phone?.replace(/^(\+86)?(\d{3})\d{4}(\d{4})$/, '$1 $2****$3');
+  const userName = registered
+    ? (session.display_name ?? maskedPhone ?? session.email ?? '旅行者')
+    : '用户登录';
+  const avatarText = userName.trim().slice(0, 1).toUpperCase() || 'U';
+  const needsCode = mode === 'register' || loginMethod === 'CODE';
 
-  if (session !== null && session.user_type === 'REGISTERED') {
-    return (
-      <div className="auth-panel">
-        <div className="auth-panel__who">
-          <span className="auth-panel__name">{session.display_name ?? session.email}</span>
-          <span className="auth-panel__quota">本月剩余 {session.quota.monthly_remaining} 次</span>
-        </div>
-
-        <div className="auth-panel__row">
-          <button
-            type="button"
-            className="auth-panel__link"
-            aria-expanded={changingPassword}
-            onClick={() => setChangingPassword((open) => !open)}
-          >
-            修改密码
-          </button>
-          <button type="button" className="auth-panel__link" onClick={() => void logout()}>
-            退出登录
-          </button>
-        </div>
-
-        {changingPassword && <PasswordChangeForm onDone={() => setChangingPassword(false)} />}
-      </div>
-    );
-  }
-
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault();
-    /*
-     * 提交按钮的 `disabled` 拦得住鼠标，拦不住回车隐式提交（浏览器之间行为
-     * 不一致）。第二次注册会拿到「该邮箱已注册」并被自动切到登录页 ——
-     * 而口令框已经被第一次成功清空了，用户看到的是「注册失败，请登录」
-     * 加一个空口令框。
-     */
-    if (pending) return;
-
-    setError(null);
-    setPending(true);
-
-    const result =
-      mode === 'register'
-        ? await register({
-            email,
-            password,
-            ...(displayName.trim().length > 0 ? { displayName: displayName.trim() } : {}),
-          })
-        : await login({ email, password });
-
-    setPending(false);
-
-    if (result.ok) {
-      setSession(result.data);
-      setPassword('');
+  const sendCode = async (): Promise<void> => {
+    if (sendingCode || countdown > 0) return;
+    if (!/^(?:\+?86)?1[3-9]\d{9}$/.test(phone.trim())) {
+      setError({ message: '请输入正确的中国大陆手机号。', field: 'phone' });
       return;
     }
-
-    // 直接用后端文案（13.7 已保证不含内部细节）
-    setError({ message: result.message, ...(result.field ? { field: result.field } : {}) });
-
-    // 邮箱已注册时自动切到登录 —— 这是用户下一步唯一想做的事
-    if (result.code === 'AUTH_EMAIL_ALREADY_REGISTERED') {
-      setMode('login');
+    setError(null);
+    setSendingCode(true);
+    const result = await sendVerificationCode({
+      phone: phone.trim(),
+      purpose: mode === 'register' ? 'REGISTER' : 'LOGIN',
+    });
+    setSendingCode(false);
+    if (!result.ok) {
+      setError({ message: result.message, ...(result.field ? { field: result.field } : {}) });
+      return;
+    }
+    setCountdown(60);
+    if (result.data.dev_code !== undefined) {
+      setVerificationCode(result.data.dev_code);
+      setDevHint(`本地测试验证码已自动填入：${result.data.dev_code}`);
+    } else {
+      setDevHint('验证码已发送，5 分钟内有效。');
     }
   };
 
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    if (pending) return;
+    setError(null);
+    setPending(true);
+    const result =
+      mode === 'register'
+        ? await register({
+            phone: phone.trim(),
+            verificationCode,
+            ...(password.length > 0 ? { password } : {}),
+            ...(displayName.trim().length > 0 ? { displayName: displayName.trim() } : {}),
+          })
+        : await login({
+            phone: phone.trim(),
+            method: loginMethod,
+            credential: loginMethod === 'CODE' ? verificationCode : password,
+          });
+    setPending(false);
+    if (result.ok) {
+      setSession(result.data);
+      setPassword('');
+      setVerificationCode('');
+      setDevHint(null);
+      setOpen(false);
+      return;
+    }
+    setError({ message: result.message, ...(result.field ? { field: result.field } : {}) });
+    if (result.code === 'AUTH_PHONE_ALREADY_REGISTERED') setMode('login');
+  };
+
   return (
-    <form className="auth-panel auth-panel--form" onSubmit={(e) => void submit(e)}>
-      <div className="auth-panel__tabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'register'}
-          className={mode === 'register' ? 'auth-panel__tab is-active' : 'auth-panel__tab'}
-          onClick={() => {
-            setMode('register');
-            setError(null);
-          }}
-        >
-          保存我的计划
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'login'}
-          className={mode === 'login' ? 'auth-panel__tab is-active' : 'auth-panel__tab'}
-          onClick={() => {
-            setMode('login');
-            setError(null);
-          }}
-        >
-          已有账号
-        </button>
-      </div>
-
-      <label className="auth-panel__field">
-        <span>邮箱</span>
-        <input
-          /*
-            采集界面右栏的「去注册或登录」用 `#auth-email` 指到这里 ——
-            那句提示原本是纯文字，而这个面板在 1250px 以下会排到页面最上方，
-            用户在第 7 步时它在四千像素之上。锚点用 href 而不是 JS：
-            片段导航本身就会把焦点落到可聚焦的目标上。
-          */
-          id="auth-email"
-          type="email"
-          required
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          aria-invalid={error?.field === 'email'}
-        />
-      </label>
-
-      <label className="auth-panel__field">
-        <span>密码</span>
-        <input
-          type="password"
-          required
-          minLength={10}
-          autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          aria-invalid={error?.field === 'password'}
-        />
-        {mode === 'register' && (
-          <small className="auth-panel__hint">至少 10 个字符，不必包含特殊符号</small>
-        )}
-      </label>
-
-      {mode === 'register' && (
-        <label className="auth-panel__field">
-          <span>
-            昵称 <em>（可选）</em>
-          </span>
-          <input
-            type="text"
-            maxLength={100}
-            autoComplete="nickname"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-          />
-        </label>
-      )}
-
-      {error !== null && (
-        <p className="auth-panel__error" role="alert">
-          {error.message}
-        </p>
-      )}
-
-      <button type="submit" className="auth-panel__submit" disabled={pending}>
-        {pending ? '处理中…' : mode === 'register' ? '注册并保存计划' : '登录'}
+    <div className="planner-user" ref={rootRef}>
+      <button
+        id="user-menu"
+        type="button"
+        className="planner-user__trigger"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="planner-user__avatar" aria-hidden="true">
+          {registered ? avatarText : '人'}
+        </span>
+        <span className="planner-user__meta">
+          <strong>{userName}</strong>
+          <small>{registered ? '查看账号与额度' : '登录后保存旅行计划'}</small>
+        </span>
+        <span className="planner-user__chevron" aria-hidden="true">
+          ⌄
+        </span>
       </button>
 
-      {mode === 'register' && (
-        <p className="auth-panel__legal">
-          注册即表示你已阅读并同意
-          {/*
-            target="_blank" 是刻意的：注册表单已经填了邮箱与口令，同标签页跳走
-            回来时输入全没了 —— 用户于是学会「不点它」，而这条链接的全部意义
-            就是让他能点。
-          */}
-          <a href="/legal" target="_blank" rel="noopener noreferrer">
-            《用户协议与隐私政策》
-          </a>
-          。
-        </p>
-      )}
+      {open ? (
+        <div className="planner-user__popover" role="dialog" aria-label="用户登录">
+          {status.kind === 'loading' ? (
+            <p className="planner-user__status">正在加载登录状态…</p>
+          ) : status.kind === 'error' ? (
+            <p className="auth-panel__error" role="alert">
+              {status.message}
+            </p>
+          ) : registered ? (
+            <div className="planner-user__account">
+              <div className="planner-user__profile">
+                <span
+                  className="planner-user__avatar planner-user__avatar--large"
+                  aria-hidden="true"
+                >
+                  {avatarText}
+                </span>
+                <div>
+                  <strong>{userName}</strong>
+                  <span>{maskedPhone ?? session.email}</span>
+                </div>
+              </div>
+              <div className="planner-user__quota">
+                <div>
+                  <strong>{session.quota.daily_remaining}</strong>
+                  <span>今日剩余</span>
+                </div>
+                <div>
+                  <strong>{session.quota.monthly_remaining}</strong>
+                  <span>本月剩余</span>
+                </div>
+              </div>
+              <div className="planner-user__actions">
+                {session.has_password ? (
+                  <button
+                    type="button"
+                    className="auth-panel__link"
+                    aria-expanded={changingPassword}
+                    onClick={() => setChangingPassword((value) => !value)}
+                  >
+                    {changingPassword ? '收起密码设置' : '修改密码'}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="auth-panel__link auth-panel__link--danger"
+                  onClick={() => {
+                    setOpen(false);
+                    void logout();
+                  }}
+                >
+                  退出登录
+                </button>
+              </div>
+              {changingPassword ? (
+                <PasswordChangeForm onDone={() => setChangingPassword(false)} />
+              ) : null}
+            </div>
+          ) : (
+            <form className="auth-panel auth-panel--form" onSubmit={(event) => void submit(event)}>
+              <div className="planner-user__form-head">
+                <strong>{mode === 'login' ? '手机号登录' : '手机号快速注册'}</strong>
+                <span>保存计划，并可在其他设备继续查看</span>
+              </div>
+              <div className="auth-panel__tabs" role="tablist">
+                {(['login', 'register'] as const).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === item}
+                    className={mode === item ? 'auth-panel__tab is-active' : 'auth-panel__tab'}
+                    onClick={() => {
+                      setMode(item);
+                      setError(null);
+                      setDevHint(null);
+                    }}
+                  >
+                    {item === 'login' ? '登录账号' : '快速注册'}
+                  </button>
+                ))}
+              </div>
 
-      {mode === 'register' && (
-        <p className="auth-panel__note">注册后当前访客身份下已生成的计划会自动保留。</p>
-      )}
-    </form>
+              {mode === 'login' ? (
+                <div
+                  className="auth-panel__tabs auth-panel__tabs--secondary"
+                  role="tablist"
+                  aria-label="登录方式"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={loginMethod === 'CODE'}
+                    className={
+                      loginMethod === 'CODE' ? 'auth-panel__tab is-active' : 'auth-panel__tab'
+                    }
+                    onClick={() => {
+                      setLoginMethod('CODE');
+                      setError(null);
+                    }}
+                  >
+                    验证码登录
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={loginMethod === 'PASSWORD'}
+                    className={
+                      loginMethod === 'PASSWORD' ? 'auth-panel__tab is-active' : 'auth-panel__tab'
+                    }
+                    onClick={() => {
+                      setLoginMethod('PASSWORD');
+                      setError(null);
+                    }}
+                  >
+                    密码登录
+                  </button>
+                </div>
+              ) : null}
+
+              <label className="auth-panel__field">
+                <span>手机号</span>
+                <input
+                  id="auth-phone"
+                  type="tel"
+                  required
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  placeholder="请输入 11 位手机号"
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  aria-invalid={error?.field === 'phone'}
+                />
+              </label>
+
+              {needsCode ? (
+                <div className="auth-panel__field">
+                  <span>短信验证码</span>
+                  <div className="auth-panel__code-row">
+                    <input
+                      type="text"
+                      required
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      placeholder="6 位验证码"
+                      value={verificationCode}
+                      onChange={(event) =>
+                        setVerificationCode(event.target.value.replace(/\D/g, ''))
+                      }
+                      aria-invalid={error?.field === 'verification_code'}
+                    />
+                    <button
+                      type="button"
+                      className="auth-panel__send-code"
+                      disabled={sendingCode || countdown > 0}
+                      onClick={() => void sendCode()}
+                    >
+                      {sendingCode ? '发送中…' : countdown > 0 ? `${countdown}s` : '获取验证码'}
+                    </button>
+                  </div>
+                  {devHint !== null ? <small className="auth-panel__hint">{devHint}</small> : null}
+                </div>
+              ) : (
+                <label className="auth-panel__field">
+                  <span>密码</span>
+                  <input
+                    type="password"
+                    required
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    aria-invalid={error?.field === 'password'}
+                  />
+                </label>
+              )}
+
+              {mode === 'register' ? (
+                <>
+                  <label className="auth-panel__field">
+                    <span>
+                      设置登录密码 <em>（可选）</em>
+                    </span>
+                    <input
+                      type="password"
+                      minLength={password.length > 0 ? 10 : undefined}
+                      autoComplete="new-password"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      aria-invalid={error?.field === 'password'}
+                    />
+                    <small className="auth-panel__hint">
+                      不填写也可注册，以后可继续使用短信验证码登录
+                    </small>
+                  </label>
+                  <label className="auth-panel__field">
+                    <span>
+                      昵称 <em>（可选）</em>
+                    </span>
+                    <input
+                      type="text"
+                      maxLength={100}
+                      autoComplete="nickname"
+                      value={displayName}
+                      onChange={(event) => setDisplayName(event.target.value)}
+                    />
+                  </label>
+                </>
+              ) : null}
+
+              {error !== null ? (
+                <p className="auth-panel__error" role="alert">
+                  {error.message}
+                </p>
+              ) : null}
+              <button type="submit" className="auth-panel__submit" disabled={pending}>
+                {pending ? '处理中…' : mode === 'register' ? '注册并保存计划' : '登录'}
+              </button>
+              {mode === 'register' ? (
+                <p className="auth-panel__legal">
+                  注册即表示你已阅读并同意
+                  <a href="/legal" target="_blank" rel="noopener noreferrer">
+                    《用户协议与隐私政策》
+                  </a>
+                  。
+                </p>
+              ) : null}
+            </form>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }

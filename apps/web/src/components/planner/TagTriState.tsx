@@ -20,7 +20,7 @@ const STANCE_CLASS: Record<ConditionStance, string> = {
   EXCLUDE: 'planner-tag--exclude',
 };
 
-/** 无障碍标签用的态名。视觉上靠颜色区分，读屏靠这个 */
+/** 三态名称仅用于读屏与悬停说明；按钮本身只用颜色表达。 */
 const STANCE_TITLE: Record<ConditionStance, string> = {
   PREFER: '偏好',
   REQUIRE: '必须',
@@ -52,6 +52,7 @@ export function TagTriState({
     <button
       type="button"
       className={className}
+      data-stance={stance ?? 'NONE'}
       /*
        * `aria-pressed` 只能表达两态，因此附加 `title` 说明当前是哪一态。
        * 三色对读屏用户不可见，而「必须」与「不要」的区别是实质性的。

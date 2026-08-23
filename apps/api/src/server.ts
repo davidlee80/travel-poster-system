@@ -14,6 +14,10 @@ import {
 } from './routes/internal-presentations.js';
 import { registerExportRoutes, type ExportRoutesDeps } from './routes/exports.js';
 import { registerTravelPlanRoutes, type TravelPlanRoutesDeps } from './routes/travel-plans.js';
+import {
+  registerPlannerConfigRoutes,
+  type PlannerConfigRoutesDeps,
+} from './routes/planner-config.js';
 
 /**
  * API 服务（P0 骨架）。
@@ -56,6 +60,7 @@ export interface ServerDeps {
    * 但装配条件不同 —— 只跑渲染的部署不需要素材端点。
    */
   readonly internalPresentations?: InternalPresentationRoutesDeps;
+  readonly plannerConfig?: PlannerConfigRoutesDeps;
 }
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -69,6 +74,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     exports: exportRoutes,
     internalAssets,
     internalPresentations,
+    plannerConfig,
   } = deps;
 
   /*
@@ -232,6 +238,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   }
   if (internalPresentations !== undefined) {
     registerInternalPresentationRoutes(app, internalPresentations);
+  }
+  if (plannerConfig !== undefined) {
+    registerPlannerConfigRoutes(app, plannerConfig);
   }
 
   return app;

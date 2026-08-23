@@ -12,7 +12,7 @@ import {
   TemplateIdSchema,
   type BudgetIncludedItem,
 } from './enums.js';
-import { CONDITION_CODE_COUNT, TravelConditionSchema } from './conditions.js';
+import { TravelConditionSchema } from './conditions.js';
 import { DateStringSchema, NonEmptyStringSchema, TimeStringSchema } from './primitives.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
@@ -264,7 +264,8 @@ export const TravelRequestUISchema = z.object({
    * 这里**不**去重：重复 code 的处理属于 N-08 的职责，它能给出带 field
    * 的精确错误，而 schema 层只能给 REQ_SCHEMA_INVALID。
    */
-  conditions: z.array(TravelConditionSchema).max(CONDITION_CODE_COUNT).default([]),
+  // 配置中心可发布新标签；200 是单次请求的防滥用上限，不再等于内置字典数量。
+  conditions: z.array(TravelConditionSchema).max(200).default([]),
   custom_requirements: CustomRequirementsSchema.prefault({}),
   output_preferences: OutputPreferencesSchema.prefault({}),
 });

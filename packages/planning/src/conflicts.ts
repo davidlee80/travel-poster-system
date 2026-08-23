@@ -66,6 +66,8 @@ export interface ConflictCheckContext {
    * 边界日」—— 用户在 UTC+14 选今天出发，服务器在 UTC 上看来还是昨天。
    */
   readonly todayInRequestTimezone: string;
+  /** 缺省使用内置字典；API 传入数据库当前发布版本的标签机器码。 */
+  readonly allowedConditionCodes?: ReadonlySet<string>;
 }
 
 /**
@@ -216,7 +218,8 @@ export function checkRequestConflicts(
      * 不加宽的话连错误消息里都插不进这个值。
      */
     const code: string = condition.code;
-    if (!isKnownConditionCode(code)) {
+    const known = context.allowedConditionCodes?.has(code) ?? isKnownConditionCode(code);
+    if (!known) {
       add(
         'N-08',
         'REQ_CONDITION_CODE_UNKNOWN',

@@ -18,7 +18,7 @@ import {
 } from './travel-request-form';
 
 /**
- * 采集界面的状态层（TP-8-07，原型的七步工作台）。
+ * 采集界面的状态层（TP-8-07，八步工作台）。
  *
  * ## 为什么状态与完成度都是纯函数
  *
@@ -36,7 +36,7 @@ import {
  * 与完成度记账。
  */
 
-// ── 七步 ────────────────────────────────────────────────────
+// ── 八步 ────────────────────────────────────────────────────
 
 export const STEP_IDS = [
   'basic',
@@ -44,6 +44,7 @@ export const STEP_IDS = [
   'budget',
   'pace',
   'transport',
+  'diet',
   'interests',
   'custom',
 ] as const;
@@ -55,22 +56,24 @@ export const STEP_LABEL: Record<StepId, string> = {
   budget: '旅行预算',
   pace: '节奏路线',
   transport: '交通住宿',
+  diet: '饮食偏好',
   interests: '兴趣活动',
   custom: '特殊需求',
 };
 
 /**
- * 每步在完成度里的权重，取自原型。**七项之和必须是 100**
+ * 每步在完成度里的权重。**八项之和必须是 100**
  * —— 否则进度条永远到不了（或超过）100%。由测试断言。
  */
 export const STEP_WEIGHTS: Record<StepId, number> = {
   basic: 15,
   travelers: 15,
   budget: 20,
-  pace: 12,
+  pace: 14,
   transport: 15,
-  interests: 10,
-  custom: 13,
+  diet: 6,
+  interests: 8,
+  custom: 7,
 };
 
 /**
@@ -81,27 +84,12 @@ export const STEP_CRITERIA = {
   basic: { route: 5, dates: 6, options: 4 },
   travelers: { counts: 8, details: 7 },
   budget: { range: 10, inclusions: 4, focus: 6 },
-  pace: { intensity: 4, limits: 4, route: 4 },
+  pace: { intensity: 4, limits: 4, route: 4, needs: 2 },
   transport: { mode: 6, lodging: 4, requirements: 5 },
-  interests: { selection: 10 },
-  /*
-   * 原型这一步是 `{ input: 4, confirmed: 9 }`：写了文字得 4 分，点「解析为旅行
-   * 条件 → 确认并添加」再得 9 分。那个按钮在本实现里被删掉了（它是 7 条关键词
-   * `if`，产出的标签不在 46 码字典内，发出去会被拒），**而 9 分的权重当时留了
-   * 下来** —— 于是 `confirmed` 只剩「勾我没有其他特殊需求」一条正向路径，
-   * 认真写了特殊需求的用户反而会把它显式清掉。
-   *
-   * 结果是方向反的：写了文字最高 91%、第 7 步永远不变绿；勾「我没有」才 100%。
-   * 越认真的用户分越低，而且他没有任何办法补上那 9 分。
-   *
-   * 合并成一项 13 分。删掉这个二级划分而不是给它另找一个达成条件：
-   * 解析按钮没了之后这一步只有一个动作 ——「就特殊需求给出明确回答」，
-   * 而「写了字」与「写完了」在这里无从区分。
-   *
-   * 用第 7 步自己那三组标签（饮食／无障碍／作息）当第二级也不行：
-   * 没有忌口、不需要无障碍的用户会被同样的方式卡住，只是换了个位置。
-   */
-  custom: { answered: 13 },
+  diet: { selection: 6 },
+  interests: { selection: 8 },
+  /* 写了补充文字或明确勾选“没有其他特殊需求”，都视为完成回答。 */
+  custom: { answered: 7 },
 } as const satisfies Record<StepId, Record<string, number>>;
 
 // ── 预算档位 ────────────────────────────────────────────────
@@ -243,12 +231,7 @@ export const ROUTE_SHAPES: readonly RouteShape[] = [
 export const TAG_GROUPS = [
   {
     /** 第 2 步「同行相关的偏好」。原型把这一组接到 travelers.details */
-    codes: [
-      'accommodation.family_room',
-      'accessibility.child_car_seat',
-      'schedule.daily_rest',
-      'accommodation.single_base',
-    ],
+    codes: ['accommodation.family_room', 'accommodation.single_base'],
     step: 'travelers',
     criterion: 'details',
     /*
@@ -299,31 +282,23 @@ export const TAG_GROUPS = [
     alsoSetByControls: false,
   },
   {
-    codes: [...CONDITION_CODES_BY_DOMAIN.interest],
-    step: 'interests',
+    /** 第 4 步「节奏路线」里的无障碍与作息要求。 */
+    codes: [...CONDITION_CODES_BY_DOMAIN.accessibility, ...CONDITION_CODES_BY_DOMAIN.schedule],
+    step: 'pace',
+    criterion: 'needs',
+    alsoSetByControls: false,
+  },
+  {
+    /** 第 6 步独立的饮食偏好。 */
+    codes: [...CONDITION_CODES_BY_DOMAIN.diet],
+    step: 'diet',
     criterion: 'selection',
     alsoSetByControls: false,
   },
   {
-    /*
-     * 第 7 步「饮食与无障碍」「作息」。**不参与完成度**。
-     *
-     * 让它们记分会把「没有忌口、不需要无障碍」的用户卡在未完成 ——
-     * 与被修掉的 `custom.confirmed` 是同一个形状的坑。这一步靠
-     * `custom.answered`（写了文字 或 勾「我没有」）算完。
-     *
-     * `child_car_seat` 与 `daily_rest` 不在这里：它们的入口在第 2 步，
-     * 那里才是用户会想到它们的位置。
-     */
-    codes: [
-      ...CONDITION_CODES_BY_DOMAIN.diet,
-      'accessibility.wheelchair',
-      'accessibility.stroller',
-      'accessibility.low_walking',
-      'schedule.no_late_night',
-    ],
-    step: null,
-    criterion: null,
+    codes: [...CONDITION_CODES_BY_DOMAIN.interest],
+    step: 'interests',
+    criterion: 'selection',
     alsoSetByControls: false,
   },
 ] as const satisfies readonly {
@@ -345,8 +320,9 @@ export const BUDGET_FOCUS_CODES = TAG_GROUPS[1].codes;
 export const TRANSPORT_CODES = TAG_GROUPS[2].codes;
 export const LODGING_TYPE_CODES = TAG_GROUPS[3].codes;
 export const LODGING_REQUIREMENT_CODES = TAG_GROUPS[4].codes;
-export const INTEREST_CODES = TAG_GROUPS[5].codes;
-export const CUSTOM_TAG_CODES = TAG_GROUPS[6].codes;
+export const PACE_NEED_CODES = TAG_GROUPS[5].codes;
+export const DIET_TAG_CODES = TAG_GROUPS[6].codes;
+export const INTEREST_CODES = TAG_GROUPS[7].codes;
 
 // ── 长者行动能力 ────────────────────────────────────────────
 
@@ -605,6 +581,7 @@ export type PlannerAction =
   | { readonly type: 'setWalkingLimit'; readonly value: number }
   | { readonly type: 'setRouteShape'; readonly value: string }
   | { readonly type: 'cycleCondition'; readonly code: ConditionCode }
+  | { readonly type: 'clearCondition'; readonly code: ConditionCode }
   | { readonly type: 'toggleNoSpecialRequirements' }
   | { readonly type: 'reset' };
 
@@ -739,7 +716,12 @@ export function plannerReducer(state: PlannerState, action: PlannerAction): Plan
         ...state,
         seniorMobility: action.value,
         conditions,
-        completed: setCriterion(state.completed, 'travelers', 'details', true),
+        completed: setCriterion(
+          setCriterion(state.completed, 'travelers', 'details', true),
+          'pace',
+          'needs',
+          action.value === 'FREQUENT_REST' || anySelectedFor(conditions, ['pace', 'needs']),
+        ),
       };
     }
 
@@ -820,8 +802,6 @@ export function plannerReducer(state: PlannerState, action: PlannerAction): Plan
     case 'cycleCondition': {
       const next = NEXT_STANCE[state.conditions[action.code] ?? 'NONE'];
       const conditions = { ...state.conditions };
-      // 回到未选时删键而不是留 undefined：后者会被 Object.entries 数进去，
-      // 于是右栏显示「1 项」而三个分组都是空的
       if (next === undefined) delete conditions[action.code];
       else conditions[action.code] = next;
 
@@ -847,6 +827,21 @@ export function plannerReducer(state: PlannerState, action: PlannerAction): Plan
          * 对应关系由 `TAG_GROUPS` 与 `STEP_CRITERIA` 一起保证，
          * 且「标签只给自己那一步记分」有测试守着。
          */
+        completed: setCriterion(state.completed, criterion[0], criterion[1] as never, keep),
+      };
+    }
+
+    case 'clearCondition': {
+      const conditions = { ...state.conditions };
+      delete conditions[action.code];
+
+      const criterion = criterionForCode(action.code);
+      if (criterion === null) return { ...state, conditions };
+
+      const keep = anySelectedFor(conditions, criterion) || groupAlsoSetByControls(action.code);
+      return {
+        ...state,
+        conditions,
         completed: setCriterion(state.completed, criterion[0], criterion[1] as never, keep),
       };
     }

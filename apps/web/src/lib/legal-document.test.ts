@@ -72,8 +72,8 @@ describe('loadLegalDocument（读真实的 docs 文件）', () => {
   });
 
   it('含 P7 之后的关键承诺', () => {
-    // 政策正文与实现一致：必须注册才能生成、口令无法自助找回
+    // 政策正文与实现一致：必须注册才能生成，忘记口令可用手机号验证码登录
     expect(document.html).toContain('需要注册才能使用');
-    expect(document.html).toContain('没有「忘记口令」的自助找回');
+    expect(document.html).toContain('忘记口令时仍可使用手机号验证码登录');
   });
 });

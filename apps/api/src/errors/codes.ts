@@ -45,7 +45,7 @@ export const AUTH_ERRORS = {
   AUTH_CREDENTIALS_INVALID: {
     httpStatus: 401,
     retryable: false,
-    message: '邮箱或密码不正确。',
+    message: '手机号、密码或验证码不正确。',
   },
   AUTH_ANONYMOUS_FORBIDDEN: {
     httpStatus: 403,
@@ -56,6 +56,26 @@ export const AUTH_ERRORS = {
     httpStatus: 409,
     retryable: false,
     message: '该邮箱已注册，请直接登录。',
+  },
+  AUTH_PHONE_ALREADY_REGISTERED: {
+    httpStatus: 409,
+    retryable: false,
+    message: '该手机号已注册，请直接登录。',
+  },
+  AUTH_VERIFICATION_CODE_INVALID: {
+    httpStatus: 400,
+    retryable: false,
+    message: '验证码不正确或已失效，请重新获取。',
+  },
+  AUTH_VERIFICATION_CODE_RATE_LIMITED: {
+    httpStatus: 429,
+    retryable: true,
+    message: '验证码发送或校验过于频繁，请稍后再试。',
+  },
+  AUTH_SMS_PROVIDER_UNAVAILABLE: {
+    httpStatus: 503,
+    retryable: true,
+    message: '验证码暂时无法发送，请稍后重试。',
   },
   AUTH_PASSWORD_TOO_WEAK: {
     httpStatus: 400,

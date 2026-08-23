@@ -85,8 +85,8 @@ describe('错误码体系（13.7、13.9.6）', () => {
     }
   });
 
-  it('凭据错误不区分邮箱不存在与口令错误（防枚举）', () => {
-    expect(AUTH_ERRORS.AUTH_CREDENTIALS_INVALID.message).toBe('邮箱或密码不正确。');
+  it('凭据错误不区分账号不存在、口令或验证码错误（防枚举）', () => {
+    expect(AUTH_ERRORS.AUTH_CREDENTIALS_INVALID.message).toBe('手机号、密码或验证码不正确。');
     // 不应存在「邮箱不存在」这类单独的码
     expect(codes).not.toContain('AUTH_EMAIL_NOT_FOUND');
   });

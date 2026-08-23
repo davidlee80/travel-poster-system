@@ -25,6 +25,8 @@ export interface Identity {
   readonly userId: string;
   readonly userType: IdentityKind;
   readonly email: string | null;
+  readonly phone: string | null;
+  readonly hasPassword: boolean;
   readonly displayName: string | null;
   readonly dailyQuota: number;
   readonly monthlyQuota: number;
@@ -87,6 +89,7 @@ export type RegisterResult =
       readonly upgraded: boolean;
     }
   | { readonly outcome: 'email_taken' }
+  | { readonly outcome: 'phone_taken' }
   | { readonly outcome: 'password_too_weak'; readonly reason: string }
   | { readonly outcome: 'anonymous_already_upgraded' };
 
@@ -134,6 +137,8 @@ function toIdentity(row: UserRow): Identity {
     userId: row.id,
     userType: row.user_type,
     email: row.email,
+    phone: row.phone_e164 ?? null,
+    hasPassword: row.password_hash !== null,
     displayName: row.display_name,
     dailyQuota: row.daily_plan_quota,
     monthlyQuota: row.monthly_plan_quota,
@@ -376,6 +381,68 @@ export class IdentityService {
     };
   }
 
+  /** 手机验证码已经由路由层一次性核销后，创建或升级手机号账号。 */
+  async registerPhone(input: {
+    readonly phone: string;
+    readonly password: string | null;
+    readonly displayName: string | null;
+    readonly anonCookie: string | undefined;
+  }): Promise<RegisterResult> {
+    const { users, sessions, quotaConfig } = this.deps;
+    if (input.password !== null) {
+      const strength = checkPasswordStrength(input.password);
+      if (!strength.ok) return { outcome: 'password_too_weak', reason: strength.reason };
+    }
+    const passwordHash = input.password === null ? null : await hashPassword(input.password);
+    const quotas = {
+      dailyQuota: quotaConfig.registered.dailyPlans,
+      monthlyQuota: quotaConfig.registered.monthlyPlans,
+    };
+    const anonRow =
+      input.anonCookie === undefined || !this.deps.anonymousEnabled
+        ? null
+        : await users.findActiveByAnonTokenHash(hashToken(input.anonCookie));
+
+    let row: UserRow | null;
+    let upgraded = false;
+    try {
+      if (anonRow !== null) {
+        row = await users.upgradeAnonymousPhone({
+          anonymousUserId: anonRow.id,
+          phoneE164: input.phone,
+          passwordHash,
+          displayName: input.displayName,
+          ...quotas,
+        });
+        if (row === null) return { outcome: 'anonymous_already_upgraded' };
+        upgraded = true;
+      } else {
+        row = await users.createPhoneRegistered({
+          phoneE164: input.phone,
+          passwordHash,
+          displayName: input.displayName,
+          ...quotas,
+        });
+      }
+    } catch (error) {
+      if (error instanceof UniqueViolationError) return { outcome: 'phone_taken' };
+      throw error;
+    }
+
+    if (row === null) throw new Error('手机注册未返回用户');
+
+    const session = await sessions.create(row.id);
+    return {
+      outcome: 'registered',
+      identity: toIdentity(row),
+      cookies: [
+        { name: COOKIE_NAMES.session, value: session.token, maxAgeSeconds: session.ttlSeconds },
+        { name: COOKIE_NAMES.anonymous, value: null, maxAgeSeconds: 0 },
+      ],
+      upgraded,
+    };
+  }
+
   /**
    * 登录（13.9.3），副作用包含匿名归并（13.9.4）。
    *
@@ -424,6 +491,57 @@ export class IdentityService {
 
     const session = await sessions.create(row.id);
 
+    return {
+      outcome: 'logged_in',
+      identity: toIdentity(row),
+      cookies: [
+        { name: COOKIE_NAMES.session, value: session.token, maxAgeSeconds: session.ttlSeconds },
+        { name: COOKIE_NAMES.anonymous, value: null, maxAgeSeconds: 0 },
+      ],
+      merged,
+    };
+  }
+
+  async loginPhone(input: {
+    readonly phone: string;
+    readonly password?: string;
+    readonly codeVerified: boolean;
+    readonly anonCookie: string | undefined;
+    readonly ip: string | null;
+  }): Promise<LoginResult> {
+    const { users, quota } = this.deps;
+    const row = await users.findActiveByPhone(input.phone);
+    let valid = input.codeVerified && row !== null;
+    if (!input.codeVerified) {
+      const supplied = input.password ?? '';
+      valid =
+        row?.password_hash != null
+          ? await verifyPassword(row.password_hash, supplied)
+          : await verifyPassword(DUMMY_ARGON2_HASH, supplied);
+    }
+    if (row === null || !valid) {
+      const failure = await quota.recordLoginFailure({
+        ip: input.ip,
+        email: `phone:${input.phone}`,
+      });
+      if (failure.locked) {
+        return { outcome: 'rate_limited', retryAfterSeconds: failure.retryAfterSeconds };
+      }
+      return { outcome: 'invalid_credentials' };
+    }
+    return this.finishLogin(row, input.anonCookie);
+  }
+
+  private async finishLogin(row: UserRow, anonCookie: string | undefined): Promise<LoginResult> {
+    let merged: { anonymousUserId: string } | null = null;
+    if (anonCookie !== undefined && this.deps.anonymousEnabled) {
+      const anonRow = await this.deps.users.findActiveByAnonTokenHash(hashToken(anonCookie));
+      if (anonRow !== null && anonRow.id !== row.id) {
+        await this.deps.users.mergeAnonymousInto(anonRow.id, row.id);
+        merged = { anonymousUserId: anonRow.id };
+      }
+    }
+    const session = await this.deps.sessions.create(row.id);
     return {
       outcome: 'logged_in',
       identity: toIdentity(row),

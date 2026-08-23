@@ -11,6 +11,8 @@ export interface SessionInfo {
   readonly user_type: 'ANONYMOUS' | 'REGISTERED';
   readonly user_id: string;
   readonly email: string | null;
+  readonly phone: string | null;
+  readonly has_password: boolean;
   readonly display_name: string | null;
   readonly quota: {
     readonly daily_remaining: number;
@@ -124,15 +126,17 @@ export function getSession(): Promise<ApiResult<SessionInfo>> {
 
 /** 13.9.2 注册。携带匿名 Cookie 时服务端执行原地升级，历史自动继承。 */
 export function register(input: {
-  readonly email: string;
-  readonly password: string;
+  readonly phone: string;
+  readonly verificationCode: string;
+  readonly password?: string;
   readonly displayName?: string;
 }): Promise<ApiResult<SessionInfo>> {
   return request<SessionInfo>('/api/v1/auth/register', {
     method: 'POST',
     body: JSON.stringify({
-      email: input.email,
-      password: input.password,
+      phone: input.phone,
+      verification_code: input.verificationCode,
+      password: input.password ?? null,
       display_name: input.displayName ?? null,
     }),
   });
@@ -140,13 +144,53 @@ export function register(input: {
 
 /** 13.9.3 登录。副作用含匿名归并（13.9.4）。 */
 export function login(input: {
-  readonly email: string;
-  readonly password: string;
+  readonly phone: string;
+  readonly method: 'CODE' | 'PASSWORD';
+  readonly credential: string;
 }): Promise<ApiResult<SessionInfo>> {
   return request<SessionInfo>('/api/v1/auth/login', {
     method: 'POST',
+    body: JSON.stringify({
+      phone: input.phone,
+      login_type: input.method,
+      ...(input.method === 'CODE'
+        ? { verification_code: input.credential }
+        : { password: input.credential }),
+    }),
+  });
+}
+
+export interface SendCodeResponse {
+  readonly sent: true;
+  readonly expires_in_seconds: number;
+  /** 仅 SMS_MODE=local 时存在，便于本地浏览器测试。 */
+  readonly dev_code?: string;
+}
+
+export function sendVerificationCode(input: {
+  readonly phone: string;
+  readonly purpose: 'REGISTER' | 'LOGIN';
+}): Promise<ApiResult<SendCodeResponse>> {
+  return request<SendCodeResponse>('/api/v1/auth/sms/send', {
+    method: 'POST',
     body: JSON.stringify(input),
   });
+}
+
+export interface PlannerConfigOption {
+  readonly key: string;
+  readonly label: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+}
+
+export interface PlannerConfigResponse {
+  readonly version: number;
+  readonly published_at: string;
+  readonly fields: Readonly<Record<string, readonly PlannerConfigOption[]>>;
+}
+
+export function getPlannerConfig(): Promise<ApiResult<PlannerConfigResponse>> {
+  return request<PlannerConfigResponse>('/api/v1/planner/config', { method: 'GET' });
 }
 
 export function logout(): Promise<ApiResult<void>> {

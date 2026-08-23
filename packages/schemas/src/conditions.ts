@@ -147,8 +147,18 @@ export const CONDITION_CODE_VALUES = [
  */
 export const CONDITION_CODE_COUNT = 46;
 
-export const ConditionCodeSchema = z.enum(CONDITION_CODE_VALUES);
 export type ConditionCode = (typeof CONDITION_CODE_VALUES)[number];
+
+/**
+ * 运行期允许配置中心发布七个既有域下的新机器码；是否已发布由 API 查询数据库校验。
+ * 类型仍保留内置联合，避免全仓库的静态映射失去穷尽检查。
+ */
+export const ConditionCodeSchema = z
+  .string()
+  .regex(
+    /^(?:interest|transport|accommodation|budget|accessibility|diet|schedule)\.[a-z][a-z0-9_]{1,63}$/,
+  )
+  .transform((value) => value as ConditionCode);
 
 /**
  * 域 → 该域的全部 code，由扁平清单按前缀分组派生。

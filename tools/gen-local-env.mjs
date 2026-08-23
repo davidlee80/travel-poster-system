@@ -98,6 +98,10 @@ INTERNAL_API_KEY=${key()}
 # 会话 Cookie —— 表现是「注册成功但立刻又是未登录」。云上配好 TLS 后删掉这行。
 COOKIE_SECURE=false
 
+# 本机验证码不调用短信供应商；接口回传 dev_code，前端自动填入。
+SMS_MODE=local
+SMS_VERIFICATION_PEPPER=${key()}
+
 # ── 模型与图源 ────────────────────────────────────────────────
 #
 # 【与云上差异 3／3】保持 fake：本轮先验证编排本身，模型凭据另一条线走

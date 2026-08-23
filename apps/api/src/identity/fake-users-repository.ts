@@ -1,8 +1,10 @@
 import type {
   CreateAnonymousInput,
   CreateRegisteredInput,
+  CreatePhoneRegisteredInput,
   MergeCounts,
   UpgradeAnonymousInput,
+  UpgradeAnonymousPhoneInput,
   UserRow,
   UsersRepository,
 } from '@tps/db';
@@ -83,6 +85,20 @@ export class FakeUsersRepository implements UsersRepository {
     return Promise.resolve(null);
   }
 
+  async findActiveByPhone(phoneE164: string): Promise<UserRow | null> {
+    for (const row of this.rows.values()) {
+      if (
+        row.phone_e164 === phoneE164 &&
+        row.phone_verified_at !== null &&
+        row.user_type === 'REGISTERED' &&
+        row.status === 'ACTIVE'
+      ) {
+        return Promise.resolve(row);
+      }
+    }
+    return Promise.resolve(null);
+  }
+
   async createAnonymous(input: CreateAnonymousInput): Promise<UserRow> {
     const id = `user-${this.nextId++}`;
     this.tokenHashes.set(id, input.tokenHash);
@@ -91,6 +107,8 @@ export class FakeUsersRepository implements UsersRepository {
         id,
         user_type: 'ANONYMOUS',
         email: null,
+        phone_e164: null,
+        phone_verified_at: null,
         password_hash: null,
         display_name: null,
         anon_expires_at: input.expiresAt,
@@ -114,6 +132,32 @@ export class FakeUsersRepository implements UsersRepository {
       id,
       user_type: 'REGISTERED',
       email: input.email,
+      phone_e164: null,
+      phone_verified_at: null,
+      password_hash: input.passwordHash,
+      display_name: input.displayName,
+      anon_expires_at: null,
+      status: 'ACTIVE',
+      merged_into: null,
+      daily_plan_quota: input.dailyQuota,
+      monthly_plan_quota: input.monthlyQuota,
+      upgraded_at: null,
+      last_seen_at: this.now(),
+      created_at: this.now(),
+    });
+  }
+
+  async createPhoneRegistered(input: CreatePhoneRegisteredInput): Promise<UserRow> {
+    if ((await this.findActiveByPhone(input.phoneE164)) !== null) {
+      throw new UniqueViolationError('users_phone_e164_uk');
+    }
+    const id = `user-${this.nextId++}`;
+    return this.put({
+      id,
+      user_type: 'REGISTERED',
+      email: null,
+      phone_e164: input.phoneE164,
+      phone_verified_at: this.now(),
       password_hash: input.passwordHash,
       display_name: input.displayName,
       anon_expires_at: null,
@@ -142,6 +186,29 @@ export class FakeUsersRepository implements UsersRepository {
       ...row,
       user_type: 'REGISTERED',
       email: input.email,
+      phone_e164: null,
+      phone_verified_at: null,
+      password_hash: input.passwordHash,
+      display_name: input.displayName,
+      anon_expires_at: null,
+      daily_plan_quota: input.dailyQuota,
+      monthly_plan_quota: input.monthlyQuota,
+      upgraded_at: this.now(),
+    });
+  }
+
+  async upgradeAnonymousPhone(input: UpgradeAnonymousPhoneInput): Promise<UserRow | null> {
+    const row = this.rows.get(input.anonymousUserId);
+    if (!row || row.user_type !== 'ANONYMOUS' || row.status !== 'ACTIVE') return null;
+    if ((await this.findActiveByPhone(input.phoneE164)) !== null) {
+      throw new UniqueViolationError('users_phone_e164_uk');
+    }
+    this.tokenHashes.delete(row.id);
+    return this.put({
+      ...row,
+      user_type: 'REGISTERED',
+      phone_e164: input.phoneE164,
+      phone_verified_at: this.now(),
       password_hash: input.passwordHash,
       display_name: input.displayName,
       anon_expires_at: null,
