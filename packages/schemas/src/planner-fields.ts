@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * 76 个产品字段的元数据（Planner V2.1，`docs/design/Planner_V2_产品字段表.xlsx`
  * 与《Planner V2.1 页面交互规范》附录 A）。
@@ -136,6 +138,18 @@ export const PLANNER_CONSTRAINT_TYPE_VALUES = [
   'INFO',
 ] as const;
 export type PlannerConstraintType = (typeof PLANNER_CONSTRAINT_TYPE_VALUES)[number];
+
+/**
+ * 运行时约束类型的 Zod schema。
+ *
+ * 定义在这里而不是在唯一的消费方（`travel-request.ts` 的 `RuntimeConstraint`）：
+ * 取值数组在本文件，两处分开会让下一个加类型的人只改了数组 ——
+ * 而那时 schema 会拒掉一个刚加进来的合法类型，错误是 `REQ_SCHEMA_INVALID`。
+ *
+ * 这是本文件唯一用到 zod 的地方。其余部分刻意保持为纯元数据 ——
+ * 它被前端逐字段遍历，不该拖进一个校验库的运行时。
+ */
+export const PlannerConstraintTypeSchema = z.enum(PLANNER_CONSTRAINT_TYPE_VALUES);
 
 /**
  * 4.1 的运行时优先级：`LOCKED > CONSENT/安全硬约束 > HARD > EXCLUDE > VERIFY > PREFER`。

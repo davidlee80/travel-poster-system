@@ -13,6 +13,7 @@ import {
   type BudgetIncludedItem,
 } from './enums.js';
 import { TravelConditionSchema } from './conditions.js';
+import { PlannerConstraintTypeSchema } from './planner-fields.js';
 import { PlannerProfileSchema } from './planner-profile.js';
 import { DateStringSchema, NonEmptyStringSchema, TimeStringSchema } from './primitives.js';
 import { SCHEMA_VERSIONS } from './versions.js';
@@ -393,6 +394,82 @@ export const NormalizedBudgetSchema = z.object({
   included_items: z.array(BudgetIncludedItemSchema),
 });
 
+/**
+ * 一条运行时约束（规范 4 章 + 4.1，P9）。
+ *
+ * ## 为什么不是「又一个 conditions 数组」
+ *
+ * `must_conditions` / `should_conditions` 的元素只有 `code` + `mode` + `value`
+ * 三个字段，而 code 必须在冻结字典里。76 字段里有大量约束**没有对应的 code**：
+ * 「花生过敏，严重程度 ANAPHYLAXIS，需避免交叉污染」、「10/06 09:00–11:00
+ * 不能移动的会议」、「不要去夜店」。硬塞一个 code 会让 N-08 拒掉整个请求，
+ * 而放进自由文本会让一条硬约束降级成一句「补充信息」。
+ *
+ * 因此这是一份**带类型与来源的自然语言约束清单**：
+ *
+ *   - `type` 决定它在 Prompt 里落进哪一段（规范 4.1 的优先级分段）；
+ *   - `source_field_id` 让生成结果可以指回具体字段（规范 21.2 的可追溯性）；
+ *   - `decision_weight` 是 `PLANNER_CONSTRAINT_PRECEDENCE` 里的数字，
+ *     取舍时**数字小的不得被数字大的静默覆盖**。
+ *
+ * `conditions` 并不因此过时：它是**结构化**的那一部分，受 V-30/V-32 的
+ * 机器校验保护（比对 code 集合），而这份清单只能靠 Prompt 与人工审阅。
+ * 两者的分工是「能结构化的走结构化，剩下的至少别丢」。
+ */
+export const RuntimeConstraintSchema = z.object({
+  /**
+   * 稳定标识，形如 `HARD:diet.halal` / `LOCKED:PV2-01-009#0`。
+   *
+   * 存在的理由是**跨版本比对**：同一份问卷改了一个字段之后重新生成，
+   * 要能看出「哪几条约束变了」。用数组下标做标识的话，删掉中间一条
+   * 会让其后所有约束看起来都变了。
+   */
+  constraint_id: NonEmptyStringSchema.max(120),
+  type: PlannerConstraintTypeSchema,
+  /** 规范 21.2：指回 76 个字段之一。空串不合法 —— 无来源的约束无法追溯 */
+  source_field_id: NonEmptyStringSchema.max(20),
+  /** 给模型看的一句话。中文，不含 code */
+  text: NonEmptyStringSchema.max(300),
+  /** `PLANNER_CONSTRAINT_PRECEDENCE` 的值。数字小 = 优先级高 */
+  decision_weight: z.number().int().min(0),
+});
+export type RuntimeConstraint = z.infer<typeof RuntimeConstraintSchema>;
+
+/**
+ * 一条待核验项（规范 4.3、17.1）。
+ *
+ * `status` 只有 `user_reported` 一个取值：本轮不做后台核验（见实施计划的
+ * 「明确不在本轮范围」）。留着这个字段而不是省掉它，是因为省掉之后接核验的人
+ * 要同时改契约与所有下游 —— 而留着它意味着那时只需追加一个枚举值。
+ *
+ * **不把它折成布尔 `verified`。** 规范 4.3 的核心是「用户自报永远不等于官方
+ * 核验结论」，而一个 `verified: false` 的字段读起来像「核验过了，没通过」。
+ */
+export const VERIFY_STATUS_VALUES = ['user_reported'] as const;
+export const VerifyStatusSchema = z.enum(VERIFY_STATUS_VALUES);
+
+export const VerifyItemSchema = z.object({
+  item_id: NonEmptyStringSchema.max(120),
+  source_field_id: NonEmptyStringSchema.max(20),
+  /** 是否阻塞初步方案（VERIFY-BLOCKING 与 VERIFY-NONBLOCKING 的唯一区别）*/
+  blocking: z.boolean(),
+  status: VerifyStatusSchema,
+  text: NonEmptyStringSchema.max(300),
+});
+export type VerifyItem = z.infer<typeof VerifyItemSchema>;
+
+/**
+ * 弹性日期（P9）。
+ *
+ * `days` 与 `mode` 都保留：前者是可计算的窗口宽度（下游排期用它），
+ * 后者是用户的原始选择。只留 `days` 的话「只定月份」与「前后差 30 天」
+ * 变成同一件事 —— 而前者压根还没有具体日期，后者有一个中心日。
+ */
+export const NormalizedDateFlexibilitySchema = z.object({
+  days: z.number().int().min(0),
+  mode: z.string().max(32).optional(),
+});
+
 export const NormalizedTravelRequestSchema = z.object({
   schema_version: z.literal(SCHEMA_VERSIONS.normalizedTravelRequest),
   client_request_id: NonEmptyStringSchema,
@@ -432,5 +509,40 @@ export const NormalizedTravelRequestSchema = z.object({
    * 这不是日志 —— 它随计划一起返回给用户，让「系统替你做了什么决定」可见。
    */
   assumptions: z.array(z.string()),
+
+  /*
+   * ── P9 新增的四个字段。**全部可选。** ──────────────────────
+   *
+   * `apps/generation-worker/src/generate-plan.ts` 会把库里的
+   * `normalized_request` 重新 `safeParse` 一遍。新增**必填**字段会让 P8 及
+   * 之前落的行全部解析失败 —— 而那条路径上的注释说这只可能是
+   * 「标准化规则改版」，也就是说它会被当成脏数据而不是版本问题。
+   *
+   * 下游取值一律走 helper（`planCities` 等）而不是直接读字段，
+   * 因此存量单目的地行仍然得到一个单元素城市序列，
+   * V-04 的集合校验对它退化成原来的等值校验。
+   */
+
+  /**
+   * 城市序列（P9）。顺序即行程顺序，1～5 个。
+   *
+   * 缺省时由 `planCities` 退化成 `[{ text: destination_name }]` ——
+   * 因此下游不需要区分「单目的地」与「多城市」两条代码路径。
+   */
+  cities: z.array(PlaceRefSchema).min(1).max(5).optional(),
+
+  /** 弹性日期（P9）。缺省等价于 `{ days: 0 }`，也就是日期固定 */
+  date_flexibility: NormalizedDateFlexibilitySchema.optional(),
+
+  /**
+   * 运行时约束清单（P9）。
+   *
+   * 上限 200：一个 76 字段的问卷全部填满大约产出 60～80 条，
+   * 200 是防滥用而不是业务上限。
+   */
+  constraints: z.array(RuntimeConstraintSchema).max(200).optional(),
+
+  /** 待核验清单（P9）。上限与字段总数同阶 */
+  verify_items: z.array(VerifyItemSchema).max(76).optional(),
 });
 export type NormalizedTravelRequest = z.infer<typeof NormalizedTravelRequestSchema>;

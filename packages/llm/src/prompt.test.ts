@@ -1,4 +1,4 @@
-import { buildRetrievalProjection, makeValidContext, makeValidPlan } from '@tps/planning';
+import { buildRetrievalProjection, makeValidContext, makeValidPlan, planCities } from '@tps/planning';
 import { makeTravelPlanFixture, type TravelPlanLlmOutput } from '@tps/schemas';
 import { describe, expect, it } from 'vitest';
 
@@ -305,5 +305,128 @@ describe('分段合并（6.3）', () => {
 
   it('空数组时抛错', () => {
     expect(() => mergeSegments([])).toThrow(/至少需要一段/);
+  });
+});
+
+/**
+ * P9：多城城市序列与按优先级分段的约束渲染（规范 4.1、7）。
+ */
+describe('多城与约束分段（P9）', () => {
+  const promptFor = (overrides: Partial<typeof normalized>): string =>
+    buildPlanPrompt({
+      normalized: { ...normalized, ...overrides },
+      segment: { startDay: 1, endDay: normalized.total_days },
+      totalSegments: 1,
+      references: [],
+    }).user;
+
+  it('单城时给出「一律填 X」', () => {
+    /*
+     * 单城也给指令而不是省掉：V-04 校验每日 city 属于城市序列，
+     * 而模型在单城行程里也可能自作主张填上一个近郊地名。
+     */
+    const user = promptFor({});
+    expect(user).toContain(`每天的 city 一律填「${normalized.destination_name}」`);
+    expect(user).toContain(`目的地：${normalized.destination_name}`);
+  });
+
+  it('多城时给出城市序列与集合约束', () => {
+    const user = promptFor({ cities: [{ text: '东京' }, { text: '京都' }] });
+    expect(user).toContain('城市序列（按此顺序走，不要增删城市）：东京 → 京都');
+    expect(user).toContain('必须是城市序列里的一个');
+    expect(user).toContain('「东京」、「京都」');
+    /*
+     * **不**写死「第 N 天填第 M 个城市」：天数与城市数的对应关系该由模型按
+     * 景点分布决定（3 天 2 城可以是 2+1 也可以是 1+2）。
+     */
+    expect(user).toContain('同一个城市的日子要连续');
+  });
+
+  it('cities 缺省时退化成 destination_name —— 与 planCities 同结果', () => {
+    /*
+     * `@tps/llm` 不能依赖 `@tps/planning`（依赖方向相反），因此退化逻辑
+     * 在两处各有一份。这条断言盯住它们给出同样的结果。
+     */
+    const legacy = { ...normalized };
+    expect(planCities(legacy).map((city) => city.text)).toEqual([legacy.destination_name]);
+    expect(promptFor({})).toContain(`目的地：${legacy.destination_name}`);
+  });
+
+  it('弹性日期为 0 时不渲染那一行', () => {
+    /* 恒渲染「弹性 0 天」会让模型把「日期固定」当成一个需要考虑的变量 */
+    expect(promptFor({})).not.toContain('日期弹性');
+    expect(promptFor({ date_flexibility: { days: 0 } })).not.toContain('日期弹性');
+  });
+
+  it('有弹性时说明可以调整并要记进 assumptions', () => {
+    const user = promptFor({ date_flexibility: { days: 3, mode: 'PLUS_MINUS_3' } });
+    expect(user).toContain('前后可浮动 3 天');
+    expect(user).toContain('assumptions');
+  });
+
+  it('约束按 4.1 的优先级分段，段内带 field_id', () => {
+    const user = promptFor({
+      constraints: [
+        {
+          constraint_id: 'LOCKED:PV2-01-009#0',
+          type: 'LOCKED',
+          source_field_id: 'PV2-01-009',
+          text: '已购买且不可移动：住宿「东京湾酒店」',
+          decision_weight: 0,
+        },
+        {
+          constraint_id: 'HARD:PV2-07-002',
+          type: 'HARD',
+          source_field_id: 'PV2-07-002',
+          text: '必须遵守的饮食方式：清真',
+          decision_weight: 2,
+        },
+        {
+          constraint_id: 'PREFER:PV2-03-004',
+          type: 'PREFER',
+          source_field_id: 'PV2-03-004',
+          text: '整体档次：品质型',
+          decision_weight: 6,
+        },
+      ],
+    });
+
+    expect(user).toContain('低优先级不得覆盖高优先级');
+    expect(user).toContain('【已购买且不可改动');
+    expect(user).toContain('  - [PV2-01-009] 已购买且不可移动：住宿「东京湾酒店」');
+    expect(user).toContain('  - [PV2-07-002] 必须遵守的饮食方式：清真');
+    expect(user).toContain('  - [PV2-03-004] 整体档次：品质型');
+
+    /*
+     * 顺序是这条断言的核心：一段混在一起的文本表达不了优先级，模型会把
+     * 「优先安静的酒店」与「已购买不可退的台场酒店」当成同等的两条要求，
+     * 然后为了满足前者换掉后者。
+     */
+    expect(user.indexOf('【已购买且不可改动')).toBeLessThan(user.indexOf('【必须满足'));
+    expect(user.indexOf('【必须满足')).toBeLessThan(user.indexOf('【优先满足'));
+  });
+
+  it('没有约束时不渲染分段标题', () => {
+    const user = promptFor({});
+    expect(user).not.toContain('低优先级不得覆盖高优先级');
+    expect(user).not.toContain('【必须满足');
+  });
+
+  it('空的类型不产出空段落', () => {
+    /* 一个只有标题没有条目的段落会让模型以为那一类被刻意留空了 */
+    const user = promptFor({
+      constraints: [
+        {
+          constraint_id: 'EXCLUDE:PV2-04-008',
+          type: 'EXCLUDE',
+          source_field_id: 'PV2-04-008',
+          text: '绝对不要安排：红眼航班',
+          decision_weight: 3,
+        },
+      ],
+    });
+    expect(user).toContain('【绝对不要安排');
+    expect(user).not.toContain('【必须满足');
+    expect(user).not.toContain('【信息使用授权');
   });
 });

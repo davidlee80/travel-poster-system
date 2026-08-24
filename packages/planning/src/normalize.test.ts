@@ -1,4 +1,4 @@
-import { PACE_LEVEL_VALUES } from '@tps/schemas';
+import { NormalizedTravelRequestSchema, PACE_LEVEL_VALUES } from '@tps/schemas';
 import { describe, expect, it } from 'vitest';
 
 import { makeRequestFixture } from './fixtures.js';
@@ -9,7 +9,10 @@ import {
   computeBudgetTotals,
   computeTotalDays,
   computeTravelerCount,
+  isMultiCity,
   normalizeTravelRequest,
+  planCities,
+  planFlexibilityDays,
   resolvePace,
   truncateCustomText,
 } from './normalize.js';
@@ -270,5 +273,128 @@ describe('normalizeTravelRequest（3.1.1 整体）', () => {
     expect('origin_place_id' in normalized).toBe(false);
     expect('destination_place_id' in normalized).toBe(false);
     expect(JSON.stringify(normalized)).not.toContain('place_id');
+  });
+});
+
+/**
+ * P9 新增的四个字段与两个 helper（陷阱 2）。
+ *
+ * 重点是**向后兼容**：`generate-plan.ts` 会把库里的 `normalized_request`
+ * 重新 safeParse 一遍，而那条路径把解析失败当成脏数据而不是版本问题。
+ */
+describe('P9 新增字段全部可选（陷阱 2）', () => {
+  it('不带 planner_profile 时四个字段一个都不写', () => {
+    const normalized = normalizeTravelRequest(makeRequestFixture());
+    for (const key of ['cities', 'date_flexibility', 'constraints', 'verify_items']) {
+      expect(key in normalized, key).toBe(false);
+    }
+  });
+
+  it('存量 v1 行（没有这四个字段）仍能被 schema 解析', () => {
+    /*
+     * 这条是陷阱 2 的核心断言。加一个**必填**字段会让 P8 及之前落的行全部
+     * 解析失败 —— 而 `generate-plan.ts` 的注释说那只可能是「标准化规则改版」，
+     * 也就是说它会被当成脏数据。
+     */
+    const legacy = normalizeTravelRequest(makeRequestFixture());
+    const result = NormalizedTravelRequestSchema.safeParse(JSON.parse(JSON.stringify(legacy)));
+    expect(result.error?.issues ?? []).toEqual([]);
+    expect(result.success).toBe(true);
+  });
+
+  it('planCities 对存量行退化为单元素序列', () => {
+    /*
+     * 退化而不是返回空数组：V-04 的集合校验对单元素序列自然退化成原来的
+     * 等值校验，因此下游不需要区分「单目的地」与「多城市」两条代码路径。
+     */
+    const legacy = normalizeTravelRequest(makeRequestFixture());
+    expect(planCities(legacy)).toEqual([{ text: '杭州', place_id: 'cn-hangzhou' }]);
+    expect(isMultiCity(legacy)).toBe(false);
+    expect(planFlexibilityDays(legacy)).toBe(0);
+  });
+
+  it('多城请求写入城市序列，planCities 原样返回', () => {
+    const normalized = normalizeTravelRequest(
+      makeRequestFixture({
+        trip: {
+          origin: { text: '上海', place_id: 'cn-shanghai' },
+          destination: { mode: 'FIXED', text: '东京', allow_multiple_destinations: true },
+          dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 3 },
+        },
+        planner_profile: {
+          trip: {
+            destinations: [{ text: '东京' }, { text: '京都' }],
+            date_flexibility: 'PLUS_MINUS_3',
+          },
+        },
+      }),
+    );
+    expect(planCities(normalized)).toEqual([{ text: '东京' }, { text: '京都' }]);
+    expect(isMultiCity(normalized)).toBe(true);
+    expect(normalized.date_flexibility).toEqual({ days: 3, mode: 'PLUS_MINUS_3' });
+    expect(planFlexibilityDays(normalized)).toBe(3);
+  });
+
+  it('约束清单按优先级排好序才写入', () => {
+    /*
+     * 在这里排一次而不是让 Prompt 自己排：两处各排一遍会让 Prompt 里的顺序
+     * 与将来约束报告页的顺序不同，而用户会以为那是两份不同的约束。
+     */
+    const normalized = normalizeTravelRequest(
+      makeRequestFixture({
+        planner_profile: {
+          budget: { travel_tier: 'QUALITY' },
+          food: { dietary_requirements: { values: ['HALAL'] } },
+          privacy: { trip_processing_consent: true },
+        },
+      }),
+    );
+    const weights = (normalized.constraints ?? []).map((c) => c.decision_weight);
+    expect(weights).toEqual([...weights].sort((a, b) => a - b));
+    expect(weights.length).toBeGreaterThan(0);
+  });
+
+  it('待核验项与约束分开写', () => {
+    const normalized = normalizeTravelRequest(
+      makeRequestFixture({
+        planner_profile: { insurance: { status: { user_reported: 'WILL_BUY' } } },
+      }),
+    );
+    expect(normalized.verify_items).toHaveLength(1);
+    /* 保险只产出待核验项，不产出约束 —— 因此 constraints 键压根不该出现 */
+    expect('constraints' in normalized).toBe(false);
+  });
+});
+
+describe('「只知道档次」把估算记进 assumptions', () => {
+  it('TIER 模式下 assumptions 说明金额是估算的', () => {
+    /*
+     * 规范要求「系统替你做了什么决定」对用户可见，而 assumptions 会随计划返回。
+     * 不记的话用户会看到一个自己没填过的预算，且无从知道它是怎么来的。
+     */
+    const normalized = normalizeTravelRequest(
+      makeRequestFixture({
+        budget: {
+          currency: 'CNY',
+          basis: 'PER_PERSON_PER_DAY',
+          min: 1_200,
+          max: 2_500,
+          included_items: ['ACCOMMODATION', 'MEALS'],
+        },
+        planner_profile: { budget: { mode: 'TIER', travel_tier: 'QUALITY' } },
+      }),
+    );
+    const note = normalized.assumptions.find((entry) => entry.includes('估算'));
+    expect(note).toContain('QUALITY');
+    expect(note).toContain('1200');
+  });
+
+  it('给了具体金额时不记这条', () => {
+    const normalized = normalizeTravelRequest(
+      makeRequestFixture({
+        planner_profile: { budget: { mode: 'TOTAL', target_range: { min: 30_000, max: 45_000 } } },
+      }),
+    );
+    expect(normalized.assumptions.filter((entry) => entry.includes('估算'))).toEqual([]);
   });
 });

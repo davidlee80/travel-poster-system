@@ -18,6 +18,15 @@ export interface RequestFixtureOverrides {
   readonly custom_requirements?: Partial<TravelRequestUI['custom_requirements']>;
   readonly output_preferences?: Partial<TravelRequestUI['output_preferences']>;
   readonly timezone?: string;
+  /**
+   * P9：九步问卷答案。
+   *
+   * **不做浅合并，也不给默认值。** 基准夹具刻意不带 `planner_profile` ——
+   * 它代表 P8 及之前的客户端，而 N-10/N-13/N-14 三条规则的判定条件都是
+   * 「发了问卷才检查」。给它一个默认值会让基准夹具突然要过授权与证件校验，
+   * 而那与那三条规则想表达的向后兼容正好相反。
+   */
+  readonly planner_profile?: TravelRequestUI['planner_profile'];
 }
 
 /**
@@ -91,5 +100,9 @@ export function makeRequestFixture(overrides: RequestFixtureOverrides = {}): Tra
       generate_pdf: true,
       ...overrides.output_preferences,
     },
+
+    ...(overrides.planner_profile === undefined
+      ? {}
+      : { planner_profile: overrides.planner_profile }),
   };
 }

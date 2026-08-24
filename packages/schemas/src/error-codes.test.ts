@@ -64,7 +64,7 @@ describe('13.7 错误码表', () => {
     }
   });
 
-  it('REQ 域覆盖 3.1.2 的 N-01～N-12 全部错误码', () => {
+  it('REQ 域覆盖 N-01～N-14 全部错误码', () => {
     const expected = [
       'REQ_START_DATE_IN_PAST',
       'REQ_DATE_RANGE_INVALID',
@@ -81,6 +81,16 @@ describe('13.7 错误码表', () => {
       // 13.7 另列的两个：结构错误与目的地无法识别
       'REQ_SCHEMA_INVALID',
       'REQ_DESTINATION_UNKNOWN',
+      /*
+       * P9 新增两条（N-13、N-14）。
+       *
+       * 都在 REQ 域而不是新开一域：它们是「用户输入还不足以生成」，
+       * 与 N-01～N-12 同类 —— 400、不可重试、带指向具体表单项的 field。
+       * `REQ_CONSENT_REQUIRED` 尤其不属于 AUTH 域：AUTH 是「你是谁」，
+       * 而一个已登录用户完全可以没有勾那个授权框。
+       */
+      'REQ_CONSENT_REQUIRED',
+      'REQ_BLOCKING_VERIFY_INCOMPLETE',
     ];
     expect(Object.keys(REQUEST_ERRORS).sort()).toEqual([...expected].sort());
   });

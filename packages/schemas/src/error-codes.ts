@@ -103,6 +103,33 @@ export const REQUEST_ERRORS = {
     retryable: false,
     message: '无法识别该目的地，请换一种写法。',
   },
+  /**
+   * P9（N-13）：没有本次服务的信息使用授权。
+   *
+   * 规范 15 与 4.1：授权是独立且不可预勾选的，没有它「不能处理需敏感数据的
+   * 功能」。放在 REQ 域而不是 AUTH 域 —— AUTH 域是「你是谁」，
+   * 这一条是「你有没有同意我们用这些信息」，两者互不替代：
+   * 一个已登录用户完全可以没有勾这个框。
+   *
+   * 文案指向界面上那一步而不是说「缺少参数」：这一项用户能自己解决。
+   */
+  REQ_CONSENT_REQUIRED: {
+    httpStatus: 400,
+    retryable: false,
+    message: '需要先在最后一步勾选信息使用授权，我们才能用这些信息生成行程。',
+  },
+  /**
+   * P9（N-14）：有阻塞生成的待确认项没有完成。
+   *
+   * 与 `REQ_SCHEMA_INVALID` 的区别：那些字段**结构上合法**（用户可以留空
+   * 提交一份草稿），只是按规范 5.3 还不足以生成初步方案。
+   * 用 schema 拦会给出一个定位不到具体项目的码。
+   */
+  REQ_BLOCKING_VERIFY_INCOMPLETE: {
+    httpStatus: 400,
+    retryable: false,
+    message: '还有会影响方案的问题没有确认，请在最后一步补齐后再生成。',
+  },
 } as const satisfies Record<string, ErrorDefinition>;
 
 /** PLAN 域：计划生成（13.7） */

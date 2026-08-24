@@ -83,7 +83,8 @@ describe('prepareTravelRequest', () => {
             place_id: 'cn-hangzhou',
             allow_multiple_destinations: true,
           },
-          dates: { start_date: '2026-04-12', end_date: '2026-04-10', flexibility_days: 5 },
+          /* 弹性 31 天超过 P9 的上限 30，因此仍然触发 N-09（5 天在 P9 之后是合法的）*/
+          dates: { start_date: '2026-04-12', end_date: '2026-04-10', flexibility_days: 31 },
         },
       }),
       { now: NOW },

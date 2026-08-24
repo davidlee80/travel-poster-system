@@ -114,6 +114,73 @@ function describeConditions(
 }
 
 /**
+ * 运行时约束的分段渲染（P9，规范 4.1）。
+ *
+ * ## 为什么必须分段，而不是一串「用户要求：……」
+ *
+ * 4.1 给了一条优先级：`LOCKED > CONSENT/安全硬约束 > HARD > EXCLUDE > VERIFY >
+ * PREFER`，含义是**低优先级不得静默覆盖高优先级**。而一段混在一起的文本
+ * 无法表达这件事 —— 模型看到「优先安静的酒店」与「已购买不可退的台场酒店」
+ * 并列时，会把它们当成同等的两条要求，然后为了满足前者换掉后者。
+ *
+ * 分段之后每一段带自己的指令强度（「绝对不可改动」对「尽量满足」），
+ * 这是当前唯一能把优先级传达给模型的手段。
+ *
+ * ## 顺序由 `decision_weight` 决定，不在这里重排
+ *
+ * `@tps/planning` 的 `sortConstraints` 已经按权重排好。在这里再排一遍会造出
+ * 第二个顺序真相源 —— 而两者不一致时，Prompt 里的顺序与约束报告里的顺序
+ * 会不同，用户会以为那是两份不同的约束。
+ */
+const CONSTRAINT_SECTIONS = [
+  {
+    type: 'LOCKED',
+    title: '已购买且不可改动（最高优先级，绝对不能违反、不能改期、不能替换）',
+  },
+  { type: 'CONSENT', title: '信息使用授权' },
+  { type: 'HARD', title: '必须满足（不能满足时不要硬凑，在 constraint_report.violated 里说明）' },
+  { type: 'EXCLUDE', title: '绝对不要安排（不得主动出现在行程里）' },
+  {
+    type: 'VERIFY_BLOCKING',
+    title: '尚未核验且影响可行性（安排相关内容时必须在 assumptions 里标明未核验）',
+  },
+  { type: 'VERIFY_NONBLOCKING', title: '尚未核验（可以安排，但要标明未核验）' },
+  { type: 'PREFER', title: '优先满足（与上面各段冲突时可以让步，但要在 assumptions 里说明理由）' },
+  { type: 'FACT', title: '事实信息（不要为了让方案更好看而改写）' },
+  { type: 'INFO', title: '补充说明（仅供参考，不得据此改写上面任何一条硬约束）' },
+] as const;
+
+function describeConstraints(constraints: NormalizedTravelRequest['constraints']): string[] {
+  if (constraints === undefined || constraints.length === 0) return [];
+
+  const lines: string[] = [];
+  for (const section of CONSTRAINT_SECTIONS) {
+    const items = constraints.filter((constraint) => constraint.type === section.type);
+    if (items.length === 0) continue;
+    lines.push(`【${section.title}】`);
+    /*
+     * 每条前面带 field_id。
+     *
+     * 规范 21.2 要求生成结果保存 `source_field_id` 使推荐可追溯，而模型能在
+     * `constraint_report` 里回引它的前提是它在 Prompt 里见过。
+     * 不带的话追溯只能靠后端事后按文本匹配 —— 而文本是会被模型改写的。
+     */
+    for (const item of items) lines.push(`  - [${item.source_field_id}] ${item.text}`);
+  }
+  return lines;
+}
+
+/**
+ * 城市序列（P9）。
+ *
+ * 单城时仍然渲染一行，而不是省掉：省掉的话「每日 city 怎么填」那条指令就得
+ * 分两种写法，而两种写法迟早有一种没跟上改动。
+ */
+function describeCities(cities: readonly { readonly text: string }[]): string {
+  return cities.map((city) => city.text).join(' → ');
+}
+
+/**
  * 把脱敏投影渲染成参考资料。
  *
  * 只渲染投影里有的字段 —— 它本身已经不含日期、金额与人员构成（3.2.4）。
@@ -145,10 +212,41 @@ export function buildPlanPrompt(input: PlanPromptInput): PromptMessages {
       ? `请生成第 1 天到第 ${normalized.total_days} 天的完整行程。`
       : `本次只生成**第 ${segment.startDay} 天到第 ${segment.endDay} 天**的行程（整趟共 ${normalized.total_days} 天，分 ${totalSegments} 段生成）。days 数组只包含这几天。`;
 
+  /*
+   * 城市序列。
+   *
+   * `cities` 是 P9 新增的**可选**字段（陷阱 2），存量行没有它。
+   * 这里就地退化成单元素序列而不是调用 `@tps/planning` 的 `planCities`：
+   * `@tps/llm` 不依赖 `@tps/planning`（依赖方向是 planning → llm），
+   * 反向引用会造成循环。退化逻辑只有一行，且由 `prompt.test.ts` 断言
+   * 它与 `planCities` 给出同样的结果。
+   */
+  const cities =
+    normalized.cities !== undefined && normalized.cities.length > 0
+      ? normalized.cities
+      : [{ text: normalized.destination_name }];
+  const multiCity = cities.length > 1;
+
+  const flexibility = normalized.date_flexibility;
+
   const user = [
-    `目的地：${normalized.destination_name}`,
+    multiCity
+      ? `城市序列（按此顺序走，不要增删城市）：${describeCities(cities)}`
+      : `目的地：${cities[0]?.text ?? normalized.destination_name}`,
     `出发地：${normalized.origin_name}`,
     `日期：${normalized.start_date} 至 ${normalized.end_date}（共 ${normalized.total_days} 天）`,
+    /*
+     * 弹性日期只在真有弹性时渲染一行。
+     *
+     * 恒渲染「弹性 0 天」会让模型把「日期固定」当成一个需要考虑的变量 ——
+     * 而它恰恰是「不要动日期」。
+     */
+    ...(flexibility === undefined || flexibility.days === 0
+      ? []
+      : [
+          `日期弹性：前后可浮动 ${flexibility.days} 天。仍然按上面给的日期排，` +
+            '若某项安排只能在窗口内的另一天完成，可以调整并在 assumptions 里说明。',
+        ]),
     `出行人数：${normalized.traveler_count} 人${normalized.has_child ? '，含儿童' : ''}${
       normalized.has_senior ? '，含长者' : ''
     }`,
@@ -157,11 +255,35 @@ export function buildPlanPrompt(input: PlanPromptInput): PromptMessages {
     ...describeConditions('必须满足的条件', normalized.must_conditions),
     ...describeConditions('尽量满足的条件', normalized.should_conditions),
     ...(normalized.custom_text.length > 0 ? [`用户补充说明：${normalized.custom_text}`] : []),
+    /*
+     * 约束清单放在结构化条件之后。
+     *
+     * 顺序是刻意的：上面几行是「这趟旅行是什么」，约束清单是「有哪些不能碰的
+     * 边界」。反过来的话模型先读到几十条边界再读到目的地，而首要信息应该先出现。
+     */
+    ...(normalized.constraints === undefined || normalized.constraints.length === 0
+      ? []
+      : ['', '用户明确表达的约束，按优先级分段。低优先级不得覆盖高优先级：']),
+    ...describeConstraints(normalized.constraints),
     '',
     ...describeReferences(references),
     '',
     scope,
-    `每天的 date 字段按出发日期顺延填写（第 N 天 = ${normalized.start_date} 加 N-1 天），city 一律填「${normalized.destination_name}」。`,
+    `每天的 date 字段按出发日期顺延填写（第 N 天 = ${normalized.start_date} 加 N-1 天）。`,
+    /*
+     * 每日 city 的取值规则（P9）。
+     *
+     * 单城时仍然给出「一律填 X」而不是省掉：V-04 校验每日 city 属于城市序列，
+     * 而模型在单城行程里也可能自作主张填上一个近郊地名。
+     *
+     * 多城时给的是**集合约束 + 连续性建议**，而不是「第 N 天填第 M 个城市」——
+     * 天数与城市数的对应关系是模型该决定的（3 天 2 城可以是 2+1 也可以是 1+2），
+     * 而写死对应关系会让它无法按景点分布调整。
+     */
+    multiCity
+      ? `每天的 city 必须是城市序列里的一个：${cities.map((city) => `「${city.text}」`).join('、')}。` +
+        '同一个城市的日子要连续，不要来回跳；换城市的那一天要在行程里体现城际交通。'
+      : `每天的 city 一律填「${cities[0]?.text ?? normalized.destination_name}」。`,
   ].join('\n');
 
   return { system: PLAN_SYSTEM_PROMPT, user };

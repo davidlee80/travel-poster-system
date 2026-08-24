@@ -6,13 +6,25 @@ export {
   computeBudgetTotals,
   computeTotalDays,
   computeTravelerCount,
+  isMultiCity,
   normalizeTravelRequest,
+  planCities,
+  planFlexibilityDays,
   resolvePace,
   truncateCustomText,
 } from './normalize.js';
 
 export {
+  deriveConstraints,
+  sortConstraints,
+  type DerivedConstraints,
+} from './constraints.js';
+
+export {
+  MAX_DESTINATIONS,
+  MAX_FLEXIBILITY_DAYS,
   MAX_TRIP_DAYS,
+  MIN_DAILY_BUDGET_PER_PERSON,
   MIN_DAILY_BUDGET_PER_PERSON_CNY,
   MIN_TRIP_DAYS,
   REQUEST_RULE_IDS,

@@ -65,6 +65,44 @@ const PresentationQuerySchema = z.object({
 
 export const DEFAULT_LIST_LIMIT = 20;
 
+/**
+ * 这个配置字段装的是不是条件机器码。
+ *
+ * ## 为什么不是 `fieldKey.endsWith('.tags')`
+ *
+ * 原来写的正是那一句，而它**漏掉了五个字段** —— `planner_config_options` 里
+ * 装条件码的 8 个 field_key 命名并不统一：
+ *
+ *     traveler.tags                          ✓ 被 '.tags' 命中
+ *     diet.tags                              ✓
+ *     interest.tags                          ✓
+ *     budget.focus_tags                      ✗ 结尾是 `_tags`
+ *     pace.need_tags                         ✗
+ *     transport.mode_tags                    ✗
+ *     transport.lodging_type_tags            ✗
+ *     transport.lodging_requirement_tags     ✗
+ *
+ * 后果不是「少几个新码」而是**P8 自己的 26 个码在装了配置中心的环境里全被
+ * N-08 拒掉**：`conflicts.ts` 那一行是
+ * `allowedConditionCodes?.has(code) ?? isKnownConditionCode(code)`，`??` 意味着
+ * 一旦有已发布配置，内置字典就完全不参与判断。于是一个勾了「优先公共交通」的
+ * 请求会收到「存在暂不支持的偏好条件」，而那个标签在界面上完全正常。
+ *
+ * 本地开发与单测通常不装配置中心（`plannerConfig` 为 undefined），
+ * 因此这个缺陷在开发期完全看不见 —— 它由 P9-6 的
+ * `planner-config-coverage.test.ts` 发现。
+ *
+ * ## 为什么按 `tags` 结尾而不是按 option_key 的形态判断
+ *
+ * 「option_key 长得像 `domain.code`」也是一种判法，但它会把任何将来偶然
+ * 带点号的选项值也算成条件码。而 field_key 是我们自己命的名 ——
+ * 「装条件码的字段以 tags 结尾」是一条可以维护的约定，
+ * 且 8 个既有字段全部符合。
+ */
+export function isConditionCodeField(fieldKey: string): boolean {
+  return fieldKey.endsWith('tags');
+}
+
 export interface TravelPlanRoutesDeps extends IdentityContextDeps {
   readonly plans: TravelPlansRepository;
   /** 13.4 的展示数据（P3 起） */
@@ -197,7 +235,7 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
       if (plannerConfig === null) return fail(request, reply, 'SYS_DEPENDENCY_UNAVAILABLE');
       allowedConditionCodes = new Set(
         Object.entries(plannerConfig.fields)
-          .filter(([fieldKey]) => fieldKey.endsWith('.tags'))
+          .filter(([fieldKey]) => isConditionCodeField(fieldKey))
           .flatMap(([, options]) => options.map((option) => option.key)),
       );
     }

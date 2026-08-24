@@ -1,6 +1,7 @@
 import {
   TEMPLATE_ID_VALUES,
   isKnownConditionCode,
+  type Currency,
   type NormalizedTravelRequest,
   type RequestErrorCode,
   type TravelRequestUI,
@@ -41,6 +42,10 @@ export const REQUEST_RULE_IDS = [
   'N-10',
   'N-11',
   'N-12',
+  /** P9：信息使用授权（规范 15、4.1）*/
+  'N-13',
+  /** P9：阻塞生成的待确认项（规范 5.3、18）*/
+  'N-14',
 ] as const;
 export type RequestRuleId = (typeof REQUEST_RULE_IDS)[number];
 
@@ -53,9 +58,61 @@ export type RequestRuleId = (typeof REQUEST_RULE_IDS)[number];
  */
 export const MIN_DAILY_BUDGET_PER_PERSON_CNY = 50;
 
+/**
+ * N-12 的每币种物理下限（P9）。
+ *
+ * ## 为什么必须按币种查表
+ *
+ * P9 把币种从「仅 CNY」扩到 6 种，而 50 **日元**每人每天是一个荒谬的下限 ——
+ * 它比真实下限低了两个数量级，于是 N-12 对所有日元请求完全失效：
+ * 一个填了「每人每天 200 日元」（约 10 元人民币）的请求会被放行，
+ * 而生成出的计划里每一餐都排不出来。
+ *
+ * ## 为什么不引入汇率
+ *
+ * 汇率是一个会变的外部依赖，而这里要的是一条「物理上排不出来」的硬下限 ——
+ * 它的精度要求远低于汇率精度。用汇率意味着 N-12 的结果取决于某个 API
+ * 当天的返回值，而一个昨天通过、今天被拒的请求无法向用户解释。
+ *
+ * 因此这是一张**声明式的每币种阈值表**，与原来声明「50 CNY」同性质。
+ * 数值按各币种取整到一个好记的量级，宁可略低（宁可漏拒一个极端便宜的请求，
+ * 也不要错拒一个正常请求 —— 后者用户完全无法理解）。
+ *
+ * `Record<Currency, number>` 而不是普通对象：新增币种漏填是**编译错误**。
+ * 漏填的运行期表现是那个币种的下限是 undefined，比较结果恒为 false，
+ * 于是 N-12 对它静默失效。
+ */
+export const MIN_DAILY_BUDGET_PER_PERSON: Record<Currency, number> = {
+  CNY: MIN_DAILY_BUDGET_PER_PERSON_CNY,
+  JPY: 1_000,
+  USD: 8,
+  EUR: 7,
+  GBP: 6,
+  HKD: 60,
+};
+
 /** 允许的行程天数（1.1 支持范围） */
 export const MIN_TRIP_DAYS = 1;
 export const MAX_TRIP_DAYS = 14;
+
+/**
+ * 允许的目的地数量（P9，规范 7 的多城市）。
+ *
+ * 上限 5 与契约里 `planner_profile.trip.destinations` 的 `.max(5)` 是同一个数。
+ * 两处都写而不是只写一处：schema 层拒绝会给出 `REQ_SCHEMA_INVALID`
+ * （定位不到表单项），而这里能给出 `REQ_MULTI_DESTINATION_UNSUPPORTED` +
+ * 精确的 `field` —— 13.7 要求的正是后者。
+ */
+export const MAX_DESTINATIONS = 5;
+
+/**
+ * 弹性日期的天数上限（P9）。
+ *
+ * 30 天对应问卷里最松的一档「只定月份」（见前端的 `FLEXIBILITY_DAYS`）。
+ * 留一条上限而不是完全放开：`flexibility_days` 本轮不参与任何排期计算，
+ * 它只是告诉模型「日期可以动」，而一个 365 的值会让模型自由发挥。
+ */
+export const MAX_FLEXIBILITY_DAYS = 30;
 
 export interface ConflictCheckContext {
   /**
@@ -229,39 +286,85 @@ export function checkRequestConflicts(
     }
   });
 
-  // N-09：flexibility_days === 0（V1 不支持弹性日期）
-  if (ui.trip.dates.flexibility_days !== 0) {
+  /*
+   * N-09：弹性日期的天数上限（P9 放开）。
+   *
+   * ## 原来这条是「必须为 0」
+   *
+   * V1 不支持弹性日期，因此任何非 0 都被拒。P9 的规范 7 把日期弹性列为
+   * 必填字段（五档：固定 / ±1 / ±3 / 整周 / 只定月份），因此这条规则从
+   * 「等于 0」改成「不超过 30」——「只定月份」折成 30 天（见前端的
+   * `FLEXIBILITY_DAYS`），而 30 就是这条规则的上限。
+   *
+   * ## 为什么还留一条上限
+   *
+   * `flexibility_days` 参与不了任何计算（本轮没有「在窗口内选日期」的排期器），
+   * 它的作用是让模型知道「日期可以动」。一个 365 的值传下去只会让模型
+   * 自由发挥，而用户实际是想表达「今年内某个时候」—— 那不是本轮支持的场景。
+   * 上限拦住它并给出精确错误码，比静默按 365 天生成好。
+   */
+  if (ui.trip.dates.flexibility_days > MAX_FLEXIBILITY_DAYS) {
     add(
       'N-09',
       'REQ_DATE_FLEXIBILITY_UNSUPPORTED',
       'trip.dates.flexibility_days',
-      `弹性天数 ${ui.trip.dates.flexibility_days} 不为 0`,
+      `弹性天数 ${ui.trip.dates.flexibility_days} 超过上限 ${MAX_FLEXIBILITY_DAYS}`,
     );
   }
 
   /*
-   * N-10：destination.mode === 'FIXED' 且 allow_multiple_destinations === false
+   * N-10：目的地数量 1～5（P9 放开）。
    *
-   * mode 一侧在 V1 由 schema 的单值枚举兜住（DESTINATION_MODE_VALUES 只有
-   * FIXED），因此那条分支当前不可达。仍然写出来：V2 加入 SUGGESTED 后
-   * 枚举放宽，这条检查会自动接管，不需要有人记得回来补。
+   * ## 原来这条是「必须单目的地」
+   *
+   * V1 不支持多目的地，因此 `allow_multiple_destinations: true` 被直接拒。
+   * P9 的规范 7 支持 1～5 个城市，因此这条规则改成检查**数量**。
+   *
+   * 数量取 `planner_profile.trip.destinations`：`trip.destination` 在契约里
+   * 永远是单个（它是数据库提取列的来源，见陷阱 3），因此它数不出多城。
+   *
+   * ## `allow_multiple_destinations` 与实际数量必须一致
+   *
+   * 两者不一致有两种走法，都很糟：标了 true 却只发一个城市，会让模型以为
+   * 还有城市没告诉它；发了三个城市却没标 true，会让任何按这个布尔分支的
+   * 下游（当前是 Prompt 的城市序列渲染）只安排第一个城市 ——
+   * 而那份计划看起来完全正常。
    */
-  // 同上：单值枚举下取反即 never，显式加宽才能把实际值写进错误消息
+  const destinations = ui.planner_profile?.trip?.destinations ?? [];
+  if (destinations.length > MAX_DESTINATIONS) {
+    add(
+      'N-10',
+      'REQ_MULTI_DESTINATION_UNSUPPORTED',
+      'planner_profile.trip.destinations',
+      `目的地数量 ${destinations.length} 超过上限 ${MAX_DESTINATIONS}`,
+    );
+  }
+  if (destinations.length > 1 !== ui.trip.destination.allow_multiple_destinations) {
+    add(
+      'N-10',
+      'REQ_MULTI_DESTINATION_UNSUPPORTED',
+      'trip.destination.allow_multiple_destinations',
+      `多目的地标记为 ${String(ui.trip.destination.allow_multiple_destinations)}，` +
+        `而实际目的地数量为 ${destinations.length}`,
+    );
+  }
+
+  /*
+   * `destination.mode` 仍然只接受 `FIXED`。
+   *
+   * 多城市与「目的地未定」是两件不同的事：前者是「去这几个城市」，后者是
+   * 「还没想好去哪，帮我推荐」。规范 7 的目的地发现分支不在本轮范围内
+   * （`DESTINATION_MODE_VALUES` 至今只有 `FIXED` 一个值），因此这条保持原样。
+   *
+   * 单值枚举下取反即 never，显式加宽才能把实际值写进错误消息。
+   */
   const destinationMode: string = ui.trip.destination.mode;
   if (destinationMode !== 'FIXED') {
     add(
       'N-10',
       'REQ_MULTI_DESTINATION_UNSUPPORTED',
       'trip.destination.mode',
-      `目的地模式 ${destinationMode} 在 V1 不支持`,
-    );
-  }
-  if (ui.trip.destination.allow_multiple_destinations) {
-    add(
-      'N-10',
-      'REQ_MULTI_DESTINATION_UNSUPPORTED',
-      'trip.destination.allow_multiple_destinations',
-      '多目的地行程在 V1 不支持',
+      `目的地模式 ${destinationMode} 暂不支持`,
     );
   }
 
@@ -288,18 +391,128 @@ export function checkRequestConflicts(
   const feasibleDays = normalized.total_days >= MIN_TRIP_DAYS;
   const feasibleTravelers = normalized.traveler_count >= 1;
   if (feasibleDays && feasibleTravelers) {
-    const floor =
-      normalized.total_days * normalized.traveler_count * MIN_DAILY_BUDGET_PER_PERSON_CNY;
+    /*
+     * P9：下限按币种查表。
+     *
+     * 原来这里写死 50（CNY）。币种从「仅 CNY」扩到 6 种之后，50 日元每人每天
+     * 比真实下限低两个数量级 —— 于是 N-12 对所有日元请求静默失效，
+     * 一个「每人每天 200 日元」的请求会被放行而生成出的计划里每一餐都排不出来。
+     */
+    const perPersonPerDay = MIN_DAILY_BUDGET_PER_PERSON[normalized.budget.currency];
+    const floor = normalized.total_days * normalized.traveler_count * perPersonPerDay;
     if (normalized.budget.total_min < floor) {
       add(
         'N-12',
         'REQ_BUDGET_INFEASIBLE',
         'budget.min',
         `预算总下限 ${normalized.budget.total_min} 低于物理下限 ${floor}` +
-          `（${normalized.total_days} 天 × ${normalized.traveler_count} 人 × ${MIN_DAILY_BUDGET_PER_PERSON_CNY} 元）`,
+          `（${normalized.total_days} 天 × ${normalized.traveler_count} 人 × ` +
+          `${perPersonPerDay} ${normalized.budget.currency}）`,
       );
     }
   }
 
+  /*
+   * N-13：必须有本次服务的信息使用授权（P9，规范 15 与 4.1）。
+   *
+   * ## 只对**发了问卷**的请求生效
+   *
+   * P8 及之前的客户端没有 `planner_profile`，它们的请求里压根没有这个字段。
+   * 一律要求会让所有存量客户端立刻全部失败，而它们并没有做错任何事 ——
+   * 授权是 V2 才引入的采集项。因此判定条件是「发了问卷但没勾授权」。
+   *
+   * ## 为什么不在 schema 里要求它
+   *
+   * 用户可以中途离开、可以提交一份草稿（规范 18 允许 `research-needed`
+   * 状态下生成）。schema 拦住会让整个请求以 `REQ_SCHEMA_INVALID` 被拒 ——
+   * 一个定位不到任何表单项的码。这里能给出 `REQ_CONSENT_REQUIRED`
+   * 与指向那个勾选框的 `field`。
+   */
+  const profile = ui.planner_profile;
+  if (profile !== undefined && profile.privacy?.trip_processing_consent !== true) {
+    add(
+      'N-13',
+      'REQ_CONSENT_REQUIRED',
+      'planner_profile.privacy.trip_processing_consent',
+      '缺少本次服务的信息使用授权',
+    );
+  }
+
+  /*
+   * N-14：阻塞生成的待确认项必须已回答（P9，规范 5.3 与 18）。
+   *
+   * ## 判定的是「有没有回答」，不是「有没有核验」
+   *
+   * 规范 4.3 的核心是「用户自报永远不等于官方核验结论」，而后台核验不在本轮
+   * 范围内（见实施计划的「明确不在本轮范围」）。因此这里能且只能要求
+   * **用户那一侧做完了** —— 也就是 `verify_items` 里的 blocking 项都已登记。
+   *
+   * 反过来说：这条规则拦的是「跨境行程但护照状态一片空白」这种情况。
+   * 那时 `verify_items` 里压根没有护照那一项（`deriveConstraints` 只为
+   * 有答案的字段产出条目），因此判定方式是**比对应有与实有**：
+   * 前端的 Field/Step 状态机已经算过一遍（`snapshot.blockers`），
+   * 而服务端不能信任前端算的结果 —— 它只能看请求里有没有那些答案。
+   *
+   * 这里采用一个刻意保守的口径：**只检查跨境三件套**（国籍、护照、签证）。
+   * 把 9 个 VERIFY 字段全查一遍需要在服务端复刻整个触发引擎，
+   * 而那会造出第二套触发规则 —— 两套不一致的表现是
+   * 「界面说可以生成，服务端说还缺项」，且用户无从判断谁是对的。
+   * 跨境三件套的触发条件（出发国 ≠ 目的国）在服务端可独立、无歧义地判断。
+   */
+  for (const violation of checkBlockingVerify(profile)) violations.push(violation);
+
   return violations;
+}
+
+/**
+ * 跨境三件套的完整性（N-14 的实现）。
+ *
+ * 跨境判定与前端的 D-02 同口径：**两边国家都已知且不同**。国家未知时不判跨境 ——
+ * 猜错的两个方向都很糟（漏触发让用户拿到没查签证的跨境方案，误触发让国内游
+ * 用户被拦住要求填护照）。
+ */
+function checkBlockingVerify(
+  profile: TravelRequestUI['planner_profile'],
+): readonly RequestViolation[] {
+  if (profile === undefined) return [];
+
+  const originCountry = profile.trip?.origin?.country;
+  const destinations = profile.trip?.destinations ?? [];
+  const international =
+    originCountry !== undefined &&
+    originCountry.length > 0 &&
+    destinations.some(
+      (place) =>
+        place.country !== undefined && place.country.length > 0 && place.country !== originCountry,
+    );
+  if (!international) return [];
+
+  const out: RequestViolation[] = [];
+  const require = (ok: boolean, field: string, detail: string): void => {
+    if (ok) return;
+    out.push({
+      rule: 'N-14',
+      code: 'REQ_BLOCKING_VERIFY_INCOMPLETE',
+      field,
+      detail,
+    });
+  };
+
+  require(
+    profile.documents?.nationality_residency?.nationality !== undefined,
+    'planner_profile.documents.nationality_residency.nationality',
+    '跨境行程缺少国籍 —— 签证与入境规则由它决定',
+  );
+  require(
+    profile.documents?.passport_status?.user_reported?.status !== undefined,
+    'planner_profile.documents.passport_status',
+    '跨境行程缺少护照状态 —— 它决定能否做不可退预订',
+  );
+  require(
+    profile.documents?.visa_status?.user_reported?.status !== undefined,
+    'planner_profile.documents.visa_status',
+    '跨境行程缺少签证状态 —— 办理时间需要排进时间线',
+  );
+
+  return out;
 }

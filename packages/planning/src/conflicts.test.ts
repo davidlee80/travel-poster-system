@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { FIXTURE_TODAY, makeRequestFixture } from './fixtures.js';
 import {
+  MAX_FLEXIBILITY_DAYS,
   MIN_DAILY_BUDGET_PER_PERSON_CNY,
   REQUEST_RULE_IDS,
   checkRequestConflicts,
@@ -12,7 +13,7 @@ import { normalizeTravelRequest } from './normalize.js';
 import type { TravelRequestUI } from '@tps/schemas';
 
 /**
- * N-01～N-12（TP-2-05，设计稿 3.1.2）。
+ * N-01～N-14（TP-2-05，设计稿 3.1.2；N-13/N-14 是 P9 新增）。
  *
  * 每条规则**一个违规用例 + 基准用例证明它不误报**。
  * 只测违规不够：一条永远为真的检查同样能通过「违规用例」，
@@ -343,9 +344,9 @@ describe('N-08 条件 code 在字典内', () => {
   });
 });
 
-describe('N-09 不支持弹性日期', () => {
-  it('flexibility_days 非 0 违规', () => {
-    const ui = makeRequestFixture({
+describe('N-09 弹性日期的天数上限（P9 放开）', () => {
+  const withFlexibility = (days: number): TravelRequestUI =>
+    makeRequestFixture({
       trip: {
         origin: { text: '上海', place_id: 'cn-shanghai' },
         destination: {
@@ -354,32 +355,89 @@ describe('N-09 不支持弹性日期', () => {
           place_id: 'cn-hangzhou',
           allow_multiple_destinations: false,
         },
-        dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 2 },
+        dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: days },
       },
     });
-    const n09 = check(ui).find((v) => v.rule === 'N-09');
+
+  it('五档问卷取值都通过', () => {
+    /*
+     * 规范 7 把日期弹性列为必填字段（固定 / ±1 / ±3 / 整周 / 只定月份），
+     * 因此这条规则从「必须为 0」改成「不超过 30」。前端的 FLEXIBILITY_DAYS
+     * 折出的正是这五个数 —— 其中任何一个被拒都意味着两处的口径不一致。
+     */
+    for (const days of [0, 1, 3, 7, 30]) {
+      expect(rules(withFlexibility(days)), `弹性 ${days} 天`).not.toContain('N-09');
+    }
+  });
+
+  it('超过上限违规', () => {
+    const n09 = check(withFlexibility(MAX_FLEXIBILITY_DAYS + 1)).find((v) => v.rule === 'N-09');
     expect(n09?.code).toBe('REQ_DATE_FLEXIBILITY_UNSUPPORTED');
     expect(n09?.field).toBe('trip.dates.flexibility_days');
   });
 });
 
-describe('N-10 不支持多目的地', () => {
-  it('allow_multiple_destinations 为 true 违规', () => {
-    const ui = makeRequestFixture({
+describe('N-10 目的地数量 1～5（P9 放开）', () => {
+  /** 造一份多城请求。首个目的地必须与 `trip.destination` 一致（陷阱 3）*/
+  const withCities = (names: readonly string[]): TravelRequestUI =>
+    makeRequestFixture({
       trip: {
         origin: { text: '上海', place_id: 'cn-shanghai' },
         destination: {
           mode: 'FIXED',
-          text: '杭州',
-          place_id: 'cn-hangzhou',
-          allow_multiple_destinations: true,
+          text: names[0] ?? '杭州',
+          allow_multiple_destinations: names.length > 1,
         },
         dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 0 },
       },
+      planner_profile: { trip: { destinations: names.map((text) => ({ text })) } },
     });
-    const n10 = check(ui).find((v) => v.rule === 'N-10');
+
+  it('两到五个城市都通过', () => {
+    for (const count of [2, 3, 4, 5]) {
+      const names = Array.from({ length: count }, (_unused, i) => `城市${i}`);
+      expect(rules(withCities(names)), `${count} 个城市`).not.toContain('N-10');
+    }
+  });
+
+  it('超过五个违规', () => {
+    const names = Array.from({ length: 6 }, (_unused, i) => `城市${i}`);
+    const n10 = check(withCities(names)).find((v) => v.rule === 'N-10');
     expect(n10?.code).toBe('REQ_MULTI_DESTINATION_UNSUPPORTED');
+    expect(n10?.field).toBe('planner_profile.trip.destinations');
+  });
+
+  it('标记与实际数量不一致时违规', () => {
+    /*
+     * 两者不一致有两种走法，都很糟：标了 true 却只发一个城市，模型会以为
+     * 还有城市没告诉它；发了三个城市却没标 true，任何按这个布尔分支的下游
+     * 只安排第一个城市 —— 而那份计划看起来完全正常。
+     */
+    const understated = makeRequestFixture({
+      trip: {
+        origin: { text: '上海', place_id: 'cn-shanghai' },
+        destination: { mode: 'FIXED', text: '东京', allow_multiple_destinations: false },
+        dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 0 },
+      },
+      planner_profile: { trip: { destinations: [{ text: '东京' }, { text: '京都' }] } },
+    });
+    const n10 = check(understated).find((v) => v.rule === 'N-10');
     expect(n10?.field).toBe('trip.destination.allow_multiple_destinations');
+
+    const overstated = makeRequestFixture({
+      trip: {
+        origin: { text: '上海', place_id: 'cn-shanghai' },
+        destination: { mode: 'FIXED', text: '东京', allow_multiple_destinations: true },
+        dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 0 },
+      },
+      planner_profile: { trip: { destinations: [{ text: '东京' }] } },
+    });
+    expect(rules(overstated)).toContain('N-10');
+  });
+
+  it('没有 planner_profile 的存量请求不受影响', () => {
+    /* P8 及之前的客户端不发问卷，它们恒是单目的地且不标 true */
+    expect(rules(makeRequestFixture({}))).not.toContain('N-10');
   });
 
   it('非 FIXED 模式违规（V2 放宽枚举后这条分支才可达）', () => {
@@ -491,7 +549,7 @@ describe('N-12 预算物理可行', () => {
 });
 
 describe('规则集完整性', () => {
-  it('3.1.2 的 12 条规则都有实现', () => {
+  it('N-01～N-14 全部有实现', () => {
     /*
      * 逐条构造违规输入，断言每个规则 ID 至少被触发过一次。
      * 只靠上面分散的用例不足以说明「12 条都实现了」——
@@ -553,7 +611,7 @@ describe('规则集完整性', () => {
       makeRequestFixture({
         conditions: [{ code: 'nope.nope' as never, mode: 'MUST', value: true }],
       }),
-      // N-09
+      // N-09：超过 30 天上限（3 天在 P9 之后是合法的）
       makeRequestFixture({
         trip: {
           origin: { text: '上海', place_id: 'cn-shanghai' },
@@ -563,10 +621,10 @@ describe('规则集完整性', () => {
             place_id: 'cn-hangzhou',
             allow_multiple_destinations: false,
           },
-          dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 3 },
+          dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 31 },
         },
       }),
-      // N-10
+      // N-10：标记与实际数量不一致
       makeRequestFixture({
         trip: {
           origin: { text: '上海', place_id: 'cn-shanghai' },
@@ -577,6 +635,23 @@ describe('规则集完整性', () => {
             allow_multiple_destinations: true,
           },
           dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 0 },
+        },
+      }),
+      // N-13：发了问卷但没勾授权
+      makeRequestFixture({ planner_profile: { privacy: { save_preferences: true } } }),
+      // N-14：跨境行程缺证件三件套
+      makeRequestFixture({
+        trip: {
+          origin: { text: '上海', place_id: 'cn-shanghai' },
+          destination: { mode: 'FIXED', text: '东京', allow_multiple_destinations: false },
+          dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 0 },
+        },
+        planner_profile: {
+          trip: {
+            origin: { text: '上海', country: '中国' },
+            destinations: [{ text: '东京', country: '日本' }],
+          },
+          privacy: { trip_processing_consent: true },
         },
       }),
       // N-11

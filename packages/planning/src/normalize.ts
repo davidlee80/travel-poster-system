@@ -3,9 +3,12 @@ import {
   SCHEMA_VERSIONS,
   type NormalizedTravelRequest,
   type PaceLevel,
+  type PlaceRef,
   type ResolvedPace,
   type TravelRequestUI,
 } from '@tps/schemas';
+
+import { deriveConstraints, sortConstraints } from './constraints.js';
 
 /**
  * 标准化计算（TP-2-04，设计稿 3.1.1、5.1）。
@@ -142,6 +145,50 @@ export function truncateCustomText(raw: string): {
 }
 
 /**
+ * 城市序列（P9，陷阱 2 的 helper）。
+ *
+ * ## 下游一律走这个函数，不直接读 `cities`
+ *
+ * `cities` 是**可选**字段：给它加必填会让 P8 及之前落的 `normalized_request`
+ * 行全部解析失败，而 `generate-plan.ts` 那条路径会把解析失败当成脏数据
+ * 而不是版本问题（见 travel-request.ts 里 P9 新增字段那一段）。
+ *
+ * 于是「多城市」在下游有两种形状：有 `cities` 的新行与只有 `destination_name`
+ * 的存量行。让每个下游各自 `?? [destination_name]` 会有两个后果：
+ * 漏一处就是「存量计划的每日城市校验拿到空数组」，而写法各异会让
+ * 「城市序列到底是什么」在不同文件里给出不同答案。
+ *
+ * 因此存量单目的地行在这里退化成一个**单元素**序列，
+ * V-04 的集合校验对它自然退化成原来的等值校验。
+ */
+export function planCities(normalized: NormalizedTravelRequest): readonly PlaceRef[] {
+  const cities = normalized.cities;
+  if (cities !== undefined && cities.length > 0) return cities;
+  return [
+    {
+      text: normalized.destination_name,
+      ...(normalized.destination_place_id === undefined
+        ? {}
+        : { place_id: normalized.destination_place_id }),
+    },
+  ];
+}
+
+/** 这趟行程是否跨多个城市。读它比在各处 `planCities(n).length > 1` 少一次歧义 */
+export function isMultiCity(normalized: NormalizedTravelRequest): boolean {
+  return planCities(normalized).length > 1;
+}
+
+/**
+ * 弹性日期窗口（P9）。缺省等价于「日期固定」。
+ *
+ * 与 `planCities` 同一条理由：存量行没有这个字段，而下游需要一个确定的数。
+ */
+export function planFlexibilityDays(normalized: NormalizedTravelRequest): number {
+  return normalized.date_flexibility?.days ?? 0;
+}
+
+/**
  * 3.1.1 全量标准化。
  *
  * 输入必须是**已通过 schema 校验**的 `TravelRequestUI`。
@@ -159,6 +206,40 @@ export function normalizeTravelRequest(ui: TravelRequestUI): NormalizedTravelReq
   if (ui.pace.level === undefined) {
     assumptions.push(`未指定行程节奏，按「${DEFAULT_PACE_LEVEL}」处理。`);
   }
+
+  const profile = ui.planner_profile;
+
+  /*
+   * 城市序列取问卷答案里的 `destinations`。
+   *
+   * 两者的第一项由 `TravelRequestUISchema` 的 `superRefine` 保证与
+   * `trip.destination` 一致（陷阱 3），因此这里不需要再比一遍 ——
+   * 比第二遍只会在两处口径漂移时产出一个谁都不敢改的分支。
+   */
+  const cities: readonly PlaceRef[] = (profile?.trip?.destinations ?? []).map((place) => ({
+    text: place.text,
+    ...(place.place_id === undefined ? {} : { place_id: place.place_id }),
+  }));
+
+  /*
+   * 「只知道档次 / 暂时没概念」时把估算这件事记进 assumptions。
+   *
+   * 前端按档位表折了一个每人每天区间（见 `apps/web` 的 `TIER_PER_PERSON_PER_DAY`），
+   * 而规范要求「系统替你做了什么决定」对用户可见 —— assumptions 会随计划返回，
+   * 是这条要求在本链路上唯一的落点。不记的话用户会看到一个自己没填过的预算，
+   * 且无从知道它是怎么来的。
+   */
+  const budgetMode = profile?.budget?.mode;
+  if (budgetMode === 'TIER' || budgetMode === 'UNKNOWN') {
+    const tier = profile?.budget?.travel_tier;
+    assumptions.push(
+      `你没有给出具体金额${tier === undefined ? '' : `，只选了「${tier}」档次`}，` +
+        `已按每人每天 ${ui.budget.min}～${ui.budget.max} ${ui.budget.currency} 估算，` +
+        `折合全程 ${totals.total_min}～${totals.total_max}。`,
+    );
+  }
+
+  const derived = deriveConstraints(profile);
 
   return {
     schema_version: SCHEMA_VERSIONS.normalizedTravelRequest,
@@ -206,6 +287,35 @@ export function normalizeTravelRequest(ui: TravelRequestUI): NormalizedTravelReq
     custom_text: custom.text,
     output_preferences: ui.output_preferences,
     assumptions,
+
+    /*
+     * 四个 P9 字段**只在真有内容时才写**。
+     *
+     * 一律写（哪怕是空数组）会让每一行 `normalized_request` 都长出四个
+     * 空字段并一路存进库。更要紧的是它抹掉了「客户端有没有发问卷」这条信息：
+     * `constraints: []` 既可能是 P8 客户端（压根没有问卷），
+     * 也可能是 V2 客户端上用户什么都没填 —— 而下游要能区分。
+     */
+    /*
+     * 三处 `[...]`：`z.infer` 推出的是**可变**数组，而本模块内部一律用
+     * `readonly`（防的是「某个下游就地 push 一条约束」）。展开一次而不是把
+     * 内部类型改成可变 —— 后者会让整条派生链路都失去那道保护。
+     */
+    ...(cities.length === 0 ? {} : { cities: [...cities] }),
+    ...(ui.trip.dates.flexibility_days === 0
+      ? {}
+      : {
+          date_flexibility: {
+            days: ui.trip.dates.flexibility_days,
+            ...(profile?.trip?.date_flexibility === undefined
+              ? {}
+              : { mode: profile.trip.date_flexibility }),
+          },
+        }),
+    ...(derived.constraints.length === 0
+      ? {}
+      : { constraints: [...sortConstraints(derived.constraints)] }),
+    ...(derived.verify_items.length === 0 ? {} : { verify_items: [...derived.verify_items] }),
   };
 }
 
