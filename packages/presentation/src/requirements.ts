@@ -75,11 +75,43 @@ export interface DayRequirementsInput {
   readonly limits: ContentLimits;
 }
 
+/**
+ * 这一天的取材城市。
+ *
+ * `place_id` **只在城市名与 plan 级目的地相同时**才带上：多城行程里
+ * `TravelPlanDay` 只有 `city: string`（没有 place_id），而把东京的 place_id
+ * 配上「京都」这个名字比不带 place_id 更糟 —— 素材检索会按 place_id 命中
+ * 东京的图，然后以为那就是京都。
+ *
+ * 单城行程（含全部存量计划）走的仍是原来那条路径：名字相同，place_id 照带。
+ */
+function daySubjectCity(
+  plan: TravelPlan,
+  day: TravelPlanDay,
+): { readonly name: string; readonly place_id?: string | null } {
+  const destination = plan.destination;
+  if (day.city === destination.name) {
+    return { name: destination.name, place_id: destination.place_id };
+  }
+  return { name: day.city };
+}
+
 /** 生成单日的全部槽位（顺序固定：hero → route_map → food → photo_spot） */
 export function requirementsForDay(input: DayRequirementsInput): AssetRequirementItem[] {
   const { plan, day, limits } = input;
   const dayNumber = day.day_number;
-  const destination = plan.destination;
+  /*
+   * P9：每日配图按 `day.city`，不是按 `plan.destination.name`。
+   *
+   * 多城行程里两者不同 —— 一份「东京 3 天 + 京都 2 天」的行程，
+   * 用 plan 级目的地会让京都那两天的 hero 图、美食图与机位图全部按东京取材，
+   * 而图片本身看起来完全正常（都是日本城市），因此这类错配几乎不会被发现。
+   *
+   * 缓存键也含目的地段（见 `@tps/assets` 的 `destinationSegment`），
+   * 因此不改的话京都的图会与东京的图共用缓存键 —— 命中一次之后，
+   * 两个城市永远拿到同一张图。
+   */
+  const dayCity = daySubjectCity(plan, day);
 
   const items: AssetRequirementItem[] = [
     {
@@ -89,8 +121,8 @@ export function requirementsForDay(input: DayRequirementsInput): AssetRequiremen
       asset_type: 'AI_ILLUSTRATION',
       required: true,
       subject: {
-        destination: destination.name,
-        destination_place_id: destination.place_id,
+        destination: dayCity.name,
+        destination_place_id: dayCity.place_id,
         // Hero 没有 entity_name —— 它表达主题而非具体地点（10.1 因此按 0.5 中性值计入）
         theme: day.theme,
         entities: day.schedule.map((item) => item.location.name),
@@ -129,8 +161,8 @@ export function requirementsForDay(input: DayRequirementsInput): AssetRequiremen
       asset_type: 'PHOTO_OR_AI',
       required: false,
       subject: {
-        destination: destination.name,
-        destination_place_id: destination.place_id,
+        destination: dayCity.name,
+        destination_place_id: dayCity.place_id,
         entity_name: food.name,
       },
       visual_constraints: FOOD_CONSTRAINTS,
@@ -151,8 +183,8 @@ export function requirementsForDay(input: DayRequirementsInput): AssetRequiremen
       asset_type: 'REAL_PHOTO_PREFERRED',
       required: false,
       subject: {
-        destination: destination.name,
-        destination_place_id: destination.place_id,
+        destination: dayCity.name,
+        destination_place_id: dayCity.place_id,
         entity_name: spot.entity_name,
         entity_place_id: placeIdFor(day, spot.entity_name),
       },

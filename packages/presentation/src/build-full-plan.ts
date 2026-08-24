@@ -1,5 +1,6 @@
 import type { FullPlanViewModelShape, TemplateId, TravelPlan } from '@tps/schemas';
 import { buildDailyPoster, EMPTY_ASSET_LOOKUP, type AssetLookup } from './build-view-model.js';
+import { destinationLabel } from './cities.js';
 import { FULL_PLAN_CONTENT_LIMITS } from './content-limits.js';
 import { CURRENCY_SYMBOL } from './derive.js';
 
@@ -98,7 +99,12 @@ export function buildFullPlan(input: BuildFullPlanInput): BuildFullPlanResult {
       overview: {
         title: plan.title,
         summary: plan.summary,
-        destination: plan.destination.name,
+        /*
+         * P9：完整页覆盖整趟行程，因此显示聚合后的城市标签。
+         * 用 plan 级目的地会让一份有两天在京都的行程写着「东京 · 5 天」——
+         * 那不是排版问题，那是一份说错了自己是什么的文档。
+         */
+        destination: destinationLabel(plan),
         total_days: plan.total_days,
         date_range_text: dateRangeText(plan.start_date, plan.end_date),
         traveler_text: travelerText(plan.traveler_count),

@@ -163,7 +163,18 @@ export function buildDailyPoster(input: BuildDailyPosterInput): BuildResult {
     day_number: dayNumber,
 
     header: {
-      destination: plan.destination.name,
+      /*
+       * P9：单日海报显示**这一天所在的城市**，不是 plan 级目的地。
+       *
+       * 多城行程里两者不同。单日海报是一张「第 4 天在哪、做什么」的图，
+       * 上面写着东京而当天在京都是直接的错误信息 —— 而这一页的其余内容
+       * （行程、美食、机位）全部来自京都，因此错的只有标题那一个词，
+       * 最不容易被发现。
+       *
+       * 单城行程（含全部存量计划）里 `day.city === plan.destination.name`，
+       * 因此这一改动对它们完全无影响 —— 视觉基线不受影响。
+       */
+      destination: day.city,
       total_days: plan.total_days,
       day_label: dayLabel(dayNumber),
       title: day.theme,

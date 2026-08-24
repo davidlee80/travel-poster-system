@@ -1,5 +1,6 @@
 import type { NormalizedTravelRequest, TravelPlanContent, ViolationSeverity } from '@tps/schemas';
 
+import { planCities } from './normalize.js';
 import { collectAmountSlots, collectCurrencySlots, collectStringSlots } from './plan-slots.js';
 import {
   ANGLE_BRACKET_PATTERN,
@@ -86,7 +87,8 @@ export const PLAN_RULES: Record<PlanRuleId, PlanRuleSpec> = {
   'V-01': { severity: 'BLOCKING', title: '天数与请求一致' },
   'V-02': { severity: 'BLOCKING', title: 'day_number 从 1 连续递增无重复' },
   'V-03': { severity: 'BLOCKING', title: '日期锚定到请求的出发日期' },
-  'V-04': { severity: 'REPAIRABLE', title: '每日城市与目的地一致' },
+  /* P9：从「与目的地一致」改为「属于城市序列」。单城时集合退化成等值 */
+  'V-04': { severity: 'REPAIRABLE', title: '每日城市属于城市序列' },
   'V-05': { severity: 'BLOCKING', title: '每日至少一条行程' },
   'V-06': { severity: 'REPAIRABLE', title: '行程按时间升序且不重叠' },
   'V-07': { severity: 'REPAIRABLE', title: '结束时间与时长自洽' },
@@ -394,15 +396,33 @@ const RULE_CHECKS: Record<PlanRuleId, RuleCheck> = {
     return out;
   },
 
+  /**
+   * V-04：每日城市 **∈ 城市序列**（P9 从等值校验改为集合校验）。
+   *
+   * ## 为什么是集合而不是等值
+   *
+   * 规范 7 支持 1～5 个城市的多城行程，而原来这条规则要求每日 city 等于
+   * `destination_name`（单个）。不改的话每一个多城行程的第 2～5 城的所有日子
+   * 都会被判违规，然后被 V-04 的修复覆写成第一个城市 —— 一份「东京 + 京都」
+   * 的行程会变成全程东京，而修复动作看起来完全正常。
+   *
+   * ## 单城行程的行为一字不变
+   *
+   * `planCities` 对没有 `cities` 的存量行退化成单元素序列，因此集合校验
+   * 自动退化成原来的等值校验（见 `normalize.ts` 的 helper）。
+   * 这条规则因此不需要区分「单城」与「多城」两个分支。
+   */
   'V-04': (plan, { normalized }) => {
     const out: PlanViolation[] = [];
+    const cities = planCities(normalized);
+    const allowed = new Set(cities.map((city) => city.text));
     plan.days.forEach((day, index) => {
-      if (day.city !== normalized.destination_name) {
+      if (!allowed.has(day.city)) {
         out.push(
           violation(
             'V-04',
             `days[${index}].city`,
-            `城市为 ${day.city}，目的地为 ${normalized.destination_name}`,
+            `城市为 ${day.city}，不在城市序列 ${[...allowed].join(' → ')} 之内`,
           ),
         );
       }

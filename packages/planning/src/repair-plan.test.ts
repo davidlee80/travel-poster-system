@@ -692,3 +692,67 @@ describe('逐条修复行为', () => {
     expect(plan.constraint_report.assumptions.some((a) => a.text.includes('第 2 天'))).toBe(true);
   });
 });
+
+/**
+ * V-04 修复策略：从「覆写为目的地」改为「继承前一日」（P9）。
+ *
+ * 一律覆写成第一个城市会把多城行程压成一城：一份「东京 3 天 + 京都 2 天」
+ * 若第 4 天的 city 拼错，覆写会让它变成东京 —— 京都只剩 1 天，
+ * 而修复动作看起来完全正常。
+ */
+describe('V-04 修复：继承前一日的城市（P9）', () => {
+  const twoCityContext = () => {
+    const base = makeValidContext();
+    return {
+      ...base,
+      normalized: {
+        ...base.normalized,
+        cities: [{ text: base.normalized.destination_name }, { text: '苏州' }],
+      },
+    };
+  };
+
+  it('中间一天非法时继承前一日，而不是压回第一城', () => {
+    const plan = makeValidPlan();
+    const home = plan.days[0]!.city;
+    plan.days[1]!.city = '苏州';
+    plan.days[2]!.city = '南京';
+
+    const result = repairPlan(plan, twoCityContext());
+    expect(result.plan.days[1]!.city).toBe('苏州');
+    /* 关键：第 3 天继承第 2 天的「苏州」，而不是回到第一城 */
+    expect(result.plan.days[2]!.city).toBe('苏州');
+    expect(result.plan.days[0]!.city).toBe(home);
+  });
+
+  it('首日非法时取城市序列的第一个 —— 它没有前一日', () => {
+    const plan = makeValidPlan();
+    plan.days[0]!.city = '南京';
+    const result = repairPlan(plan, twoCityContext());
+    expect(result.plan.days[0]!.city).toBe(makeValidContext().normalized.destination_name);
+  });
+
+  it('每次覆写都记入 assumptions —— 规则保持 REPAIRABLE 而不是静默修正', () => {
+    /*
+     * 这是「继承前一日」那条风险的护栏：模型给的 city 整体乱序时会一路继承
+     * 下去，最终仍然把整趟压成一城。assumptions 随计划返回给用户，
+     * 因此那种情况至少是可见的。
+     */
+    const plan = makeValidPlan();
+    plan.days[1]!.city = '南京';
+    const result = repairPlan(plan, twoCityContext());
+    const cityAssumption = result.plan.constraint_report.assumptions.find(
+      (entry) => entry.code === 'CITY_ALIGNED',
+    );
+    expect(cityAssumption).toBeDefined();
+    expect(cityAssumption?.text).toContain('前一天');
+  });
+
+  it('单城行程的修复行为不变', () => {
+    const plan = makeValidPlan();
+    const home = plan.days[0]!.city;
+    plan.days[1]!.city = '苏州';
+    const result = repairPlan(plan, makeValidContext());
+    expect(result.plan.days[1]!.city).toBe(home);
+  });
+});

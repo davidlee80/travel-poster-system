@@ -763,3 +763,51 @@ describe('派生量', () => {
     expect(latestEndTime(ctx)).toBe('21:00');
   });
 });
+
+/**
+ * V-04 从等值校验改为集合校验（P9，规范 7 的多城市）。
+ *
+ * 不改的话每一个多城行程的第 2～5 城的所有日子都会被判违规，然后被 V-04 的
+ * 修复覆写成第一个城市 —— 一份「东京 + 京都」的行程会变成全程东京，
+ * 而修复动作看起来完全正常。
+ */
+describe('V-04 每日城市属于城市序列（P9）', () => {
+  const multiCityContext = () => {
+    const base = makeValidContext();
+    return {
+      ...base,
+      normalized: {
+        ...base.normalized,
+        cities: [{ text: base.normalized.destination_name }, { text: '苏州' }],
+      },
+    };
+  };
+
+  it('多城时第二城的日子不再违规', () => {
+    const plan = makeValidPlan();
+    plan.days[1]!.city = '苏州';
+    expect(validatePlan(plan, multiCityContext()).map((v) => v.rule)).not.toContain('V-04');
+  });
+
+  it('序列外的城市仍然违规，且错误消息列出序列', () => {
+    const plan = makeValidPlan();
+    plan.days[1]!.city = '南京';
+    const violations = validatePlan(plan, multiCityContext()).filter((v) => v.rule === 'V-04');
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.path).toBe('days[1].city');
+    expect(violations[0]?.detail).toContain('苏州');
+  });
+
+  it('单城行程的行为一字不变 —— 集合退化成等值', () => {
+    /*
+     * `planCities` 对没有 `cities` 的存量行退化成单元素序列，
+     * 因此这条规则不需要区分「单城」与「多城」两个分支。
+     */
+    const plan = makeValidPlan();
+    plan.days[0]!.city = '苏州';
+    expect(validatePlan(plan, makeValidContext()).map((v) => v.rule)).toContain('V-04');
+
+    const clean = makeValidPlan();
+    expect(validatePlan(clean, makeValidContext()).map((v) => v.rule)).not.toContain('V-04');
+  });
+});

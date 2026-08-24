@@ -47,6 +47,14 @@ export {
 
 export { MODULE_ICON_PATHS, moduleIcons } from './icons.js';
 
+export {
+  CITY_LABEL_SEPARATOR,
+  MAX_LISTED_CITIES,
+  destinationLabel,
+  isMultiCityPlan,
+  planCityNames,
+} from './cities.js';
+
 export { foodSlotId, heroSlotId, photoSpotSlotId, routeMapSlotId } from './slots.js';
 
 export {

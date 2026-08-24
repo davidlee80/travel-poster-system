@@ -19,6 +19,7 @@ import {
   type PlanValidationContext,
   type PlanViolation,
 } from './plan-rules.js';
+import { planCities } from './normalize.js';
 import { collectAmountSlots, collectCurrencySlots, collectStringSlots } from './plan-slots.js';
 import { normalizeText } from './plan-text.js';
 import { dateForDay, minutesToTime, timeToMinutes } from './plan-time.js';
@@ -94,7 +95,11 @@ interface AssumptionTemplate {
 const ASSUMPTION_TEMPLATES: Partial<Record<PlanRuleId, AssumptionTemplate>> = {
   'V-04': {
     code: 'CITY_ALIGNED',
-    text: (where) => `${where}的城市已按你选择的目的地修正。`,
+    /*
+     * P9 改了文案：多城行程里「按你选择的目的地修正」是错的说法 ——
+     * 修复取的是前一日的城市，而目的地有好几个。
+     */
+    text: (where) => `${where}的城市不在你给的城市序列里，已按前一天所在城市修正。`,
   },
   'V-10': {
     // 只有「低于下限」会走到这里：超上限已经被删减修复，不留假设
@@ -234,9 +239,35 @@ function repairStructure(
       day.date = expected;
       actions.push(`V-03 重算 days[${index}].date`);
     }
-    if (day.city !== normalized.destination_name) {
-      day.city = normalized.destination_name;
-      actions.push(`V-04 覆写 days[${index}].city`);
+    /*
+     * V-04 修复（P9 从「覆写为目的地」改为「继承前一日」）。
+     *
+     * ## 为什么不能再一律覆写成第一个城市
+     *
+     * 多城行程里那样做会把整趟压成一城：一份「东京 3 天 + 京都 2 天」的行程
+     * 若第 4 天的 city 拼错了，覆写会让它变成东京 —— 于是京都只剩 1 天，
+     * 而修复动作看起来完全正常。
+     *
+     * ## 继承前一日，首日取首城
+     *
+     * 这是在「只知道每日 city 非法」这一点信息下最保守的选择：多城行程的
+     * 相邻两天大概率在同一城（换城是少数），因此继承前一日的错误代价最小。
+     * 首日没有前一日，取城市序列的第一个 —— 那是行程的起点城市。
+     *
+     * ## 风险与它的护栏
+     *
+     * 模型给的 city 整体乱序时，「继承前一日」会一路继承下去，最终仍然把整趟
+     * 压成一城。护栏是两条：V-04 保持 REPAIRABLE（不是静默修正，
+     * 每次覆写都记入 `assumptions` 随计划返回给用户），且 Prompt 里显式给出
+     * 城市序列与「同一城市的日子要连续」以降低触发率。
+     */
+    const cities = planCities(normalized);
+    const allowed = new Set(cities.map((city) => city.text));
+    if (!allowed.has(day.city)) {
+      const previous = index > 0 ? plan.days[index - 1]?.city : undefined;
+      const fallback = cities[0]?.text ?? normalized.destination_name;
+      day.city = previous !== undefined && allowed.has(previous) ? previous : fallback;
+      actions.push(`V-04 覆写 days[${index}].city → ${day.city}`);
       recordRepairAssumption(plan, 'V-04', `days[${index}].city`, actions);
     }
   });
