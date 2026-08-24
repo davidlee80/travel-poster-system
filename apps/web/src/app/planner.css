@@ -691,6 +691,83 @@
   background: var(--consent);
 }
 
+/* ── 顶栏的自动保存状态（规范 6）───────────────────────────── */
+
+/*
+ * 它是 `<button>` 而不是 `<span>`：失败态下要能点击重试。
+ * 非失败态 disabled，因此下面把 disabled 的默认灰化关掉 ——
+ * 「已自动保存」不该看起来像一个坏掉的按钮。
+ */
+.planner-save-state {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  color: rgb(255 255 255 / 82%);
+  background: transparent;
+  font-size: 12px;
+}
+
+.planner-save-state:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.planner-save-state__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.planner-save-state__dot--saving {
+  background: #fff;
+}
+
+.planner-save-state__dot--idle {
+  background: rgb(255 255 255 / 55%);
+}
+
+.planner-save-state__dot--failed {
+  background: var(--danger);
+}
+
+/* ── Dev Mode 字段徽标（规范 21.1）────────────────────────── */
+
+/*
+ * 只在 `?dev=1` 下渲染，因此不追求排版精细，但要**可读到底** ——
+ * QA 要靠它逐字段核对 API Key 与触发来源，截断成省略号会让它失去作用。
+ */
+.planner-dev {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 4px 12px;
+  margin: 9px 0 0;
+  padding: 9px 10px;
+  border: 1px dashed #cbd3df;
+  border-radius: 10px;
+  background: #fafbfc;
+  font-family: var(--tps-font-numeric, monospace);
+  font-size: 10px;
+}
+
+.planner-dev > div {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.planner-dev dt {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.planner-dev dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 /* ── 主栏：分页与页头 ─────────────────────────────────────── */
 
 .planner-main {
@@ -1535,6 +1612,36 @@
   .planner-left__copy,
   .planner-legend {
     display: none;
+  }
+
+  /*
+   * 汉堡按钮打开的是同一个左栏，只是把它抬成覆盖层。
+   * 不做第二份 DOM —— 两份步骤导航会让「点了抽屉里的第 5 步，
+   * 横向步骤条没跟着高亮」这类不一致有地方发生。
+   */
+  .planner-left--open {
+    position: fixed;
+    top: 58px;
+    left: 0;
+    z-index: 56;
+    width: min(280px, 88vw);
+    max-height: calc(100vh - 58px);
+    border-radius: 0;
+    overflow: auto;
+  }
+
+  .planner-left--open .planner-steps {
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .planner-left--open .planner-step {
+    display: grid;
+    text-align: left;
+  }
+
+  .planner-left--open .planner-step__name {
+    display: block;
   }
 
   .planner-steps {
