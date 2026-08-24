@@ -29,6 +29,26 @@
   --warning-light: #fff5e4;
   --danger: #c73d3d;
   --danger-light: #fff0f0;
+
+  /*
+   * P9 新增的两个令牌。除这两个之外，本块的色值一个不改 ——
+   * 用户要求保留 `preview/planner.html` 的配色，而 V2.1 规范 4 章的类型语义表
+   * 需要两种这份色板里没有的语义色：
+   *
+   *   LOCKED  「锁/深色」—— 已购买、不可随意移动的订单。用深墨色而不是用户版
+   *           设计稿里的金色：金色与 VERIFY 的琥珀（--warning）在小尺寸 chip 上
+   *           几乎分不开，而这两者一个是「不可违反」、一个是「还没核实」。
+   *   CONSENT 「紫」—— 授权。它必须与 PREFER 的蓝拉开距离，因为「同意处理信息」
+   *           不是一种偏好；同色系会让用户以为可以像偏好那样被系统权衡。
+   *
+   * 明度与饱和度对齐既有四色（success / warning / danger / primary）：
+   * 都是可直接作为白底前景文字的深色，配套的 `-light` 是同色相的浅底。
+   */
+  --locked: #2f3a4e;
+  --locked-light: #eef1f6;
+  --consent: #6b46b8;
+  --consent-light: #f3eefc;
+
   --ink: #172033;
   --muted: #687386;
   --line: #e2e7ef;
@@ -407,15 +427,34 @@
 .planner-menu-button {
   display: none;
 }
+/* ══ 以下为 Planner V2.1 的三栏骨架（P9-2）══════════════════
+ *
+ * 版式取自《Planner V2.1 页面交互规范》3.1/3.2 与最终用户版 HTML，
+ * **配色沿用上面那份令牌一个色值不改**（用户要求保留 preview/planner.html 的
+ * 配色）。因此用户版设计里的灰蓝（--navy #173a63 / --brand #245f9d）与金色
+ * （--gold #b27b2b）在这里都不出现：
+ *
+ *   用户版 --navy / --brand / --brand-soft  →  --primary-dark / --primary / --primary-light
+ *   用户版 --ok / --warn / --danger          →  --success / --warning / --danger
+ *   用户版 --gold（Top 3 排序徽标）          →  --primary 系（金色会与 VERIFY 的琥珀撞语义）
+ *   用户版 --violet（授权）                  →  --consent（本轮新增令牌）
+ *   用户版 .locked 的金色卡片                →  --locked（本轮新增令牌，规范 4 章要求「锁/深色」）
+ */
 
-/* ── 三栏布局 ─────────────────────────────────────────────── */
+/* ── 三栏布局（规范 3.1）──────────────────────────────────── */
 
+/*
+ * 中栏 `minmax(0, 860px)` 而不是 `minmax(760px, 860px)`：
+ * 规范给的 760–860px 是**阅读宽度**的建议区间，不是最小宽度。写成最小值会让
+ * 1200px 断点上三栏之和（250 + 760 + 340 + 间距）超过视口，于是右栏被挤出屏幕
+ * —— 而 sticky 元素被挤出时不会出现横向滚动条，表现是「画像栏不见了」。
+ */
 .planner-workspace {
   display: grid;
-  grid-template-columns: 225px minmax(560px, 1fr) 330px;
+  grid-template-columns: 240px minmax(0, 860px) 330px;
   gap: 18px;
-  max-width: 1600px;
-  min-height: calc(100vh - 68px);
+  align-items: start;
+  max-width: 1560px;
   margin: 0 auto;
   padding: 18px;
 }
@@ -427,230 +466,392 @@
   box-shadow: var(--shadow);
 }
 
-.planner-left,
-.planner-right {
+/* ── 左栏：步骤导航与三个指标 ─────────────────────────────── */
+
+/*
+ * `top` 与 `max-height` 里的 68px 是顶栏高度（见上面 .planner-topbar 的
+ * min-height）。不写死 90px 那种「顶栏高度 + 目测间距」的数：顶栏改高之后
+ * 左栏会被顶栏盖住一截，而那种偏移在滚动到顶部时才看得见。
+ */
+.planner-left {
   position: sticky;
-  top: 86px;
-  align-self: start;
-  max-height: calc(100vh - 104px);
+  top: calc(68px + 18px);
+  max-height: calc(100vh - 68px - 36px);
+  padding: 16px;
   overflow: auto;
 }
 
-.planner-left {
-  padding: 14px;
-}
-
-.planner-main {
-  display: grid;
-  min-width: 0;
-  gap: 16px;
-}
-
-.planner-card {
-  padding: 22px;
-  scroll-margin-top: 88px;
-}
-
-/* ── 左栏：步骤与完成度 ───────────────────────────────────── */
-
 .planner-left__heading {
-  padding: 8px 9px 14px;
+  margin: 0 0 3px;
+  font-size: 14px;
+  font-weight: 800;
 }
 
-.planner-left__heading strong {
-  font-size: 15px;
-}
-
-.planner-left__heading p {
-  margin: 5px 0 0;
+.planner-left__copy {
+  margin: 0 0 14px;
   color: var(--muted);
   font-size: 12px;
-  line-height: 1.55;
 }
 
 .planner-steps {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 5px;
 }
 
-.planner-steps button {
-  position: relative;
-  display: flex;
+.planner-step {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 9px;
   align-items: center;
   width: 100%;
-  min-height: 46px;
-  padding: 0 11px;
+  padding: 9px;
   border: 0;
-  border-radius: 11px;
-  color: #586375;
+  border-radius: var(--radius-md);
+  color: #4f5968;
   background: transparent;
   text-align: left;
 }
 
-.planner-steps button:hover,
-.planner-steps button.is-active {
-  color: var(--primary);
+.planner-step:hover {
+  background: #f6f8fc;
+}
+
+.planner-step--active {
+  color: var(--primary-dark);
   background: var(--primary-light);
+  font-weight: 800;
 }
 
-.planner-steps button.is-active {
-  font-weight: 750;
-}
-
-.planner-steps__index {
+.planner-step__num {
   display: grid;
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  margin-right: 9px;
+  width: 28px;
+  height: 28px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: 9px;
   background: #edf0f5;
-  font-size: 12px;
-  font-weight: 750;
+  font-size: 11px;
+  font-weight: 800;
 }
 
-.planner-steps button.is-active .planner-steps__index {
+.planner-step--active .planner-step__num {
   color: #fff;
   background: var(--primary);
 }
 
-.planner-steps__dot {
-  position: relative;
-  flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
-  margin-left: auto;
-  border: 1px solid #cbd3df;
+.planner-step__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * 步骤状态点。规范 5.2 的四态 + 20 章的「状态不能只依赖颜色」——
+ * 因此每个点同时带 `title` 与 `aria-label`（见 StepNav.tsx），
+ * 且 needs-attention 用**方形**而不只是换颜色，色盲用户也能分辨。
+ */
+.planner-step__status {
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background: transparent;
-  opacity: 0;
-  transition: 0.2s ease;
+  background: #cbd3df;
 }
 
-.planner-steps button.is-edited .planner-steps__dot {
-  border-color: var(--primary);
+.planner-step__status--progress {
   background: var(--primary);
-  opacity: 1;
-  box-shadow: 0 0 0 4px rgb(36 107 253 / 10%);
 }
 
-.planner-steps button.is-complete .planner-steps__dot {
-  width: 16px;
-  height: 16px;
-  border-color: var(--success);
+.planner-step__status--complete {
   background: var(--success);
-  opacity: 1;
-  box-shadow: 0 0 0 4px rgb(19 134 87 / 10%);
 }
 
-.planner-steps button.is-complete .planner-steps__dot::after {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  content: '✓';
-  font-size: 10px;
-  font-weight: 900;
+.planner-step__status--attention {
+  border-radius: 2px;
+  background: var(--danger);
 }
 
+/*
+ * 三个指标必须分开显示（规范 17.1）：完整度是百分比、可生成状态是枚举、
+ * 待核验是两个计数。合成一个数字的做法被规范明确否掉 ——
+ * 「不得仅显示完成度百分比」。
+ */
 .planner-progress {
-  margin-top: 18px;
-  padding: 13px;
-  border-radius: 12px;
-  background: #f7f9fc;
+  margin-top: 17px;
+  padding-top: 15px;
+  border-top: 1px solid var(--line);
 }
 
-.planner-progress__head {
+.planner-progress__row {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  color: var(--muted);
   font-size: 12px;
 }
 
-.planner-progress__head strong {
-  color: var(--primary);
+.planner-progress__row strong {
+  font-size: 13px;
 }
 
 .planner-progress__track {
-  height: 8px;
-  margin: 9px 0;
-  overflow: hidden;
+  height: 7px;
+  margin: 8px 0;
   border-radius: 99px;
-  background: #e4e9f1;
+  background: #edf0f4;
+  overflow: hidden;
 }
 
-.planner-progress__value {
+.planner-progress__fill {
+  display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--primary), #73a4ff);
-  transition: width 0.3s ease;
+  background: linear-gradient(90deg, var(--primary-dark), var(--primary));
+  transition: width 0.25s ease;
 }
 
-.planner-progress__value.is-complete {
-  background: linear-gradient(90deg, var(--success), #5bca94);
+.planner-progress__state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 9px 0 0;
+  font-size: 11px;
+  font-weight: 700;
 }
 
-.planner-progress__hint,
-.planner-progress__detail {
-  margin: 0;
+.planner-progress__state--ready {
+  color: var(--success);
+}
+
+.planner-progress__state--research {
+  color: var(--warning);
+}
+
+.planner-progress__state--blocked {
+  color: var(--danger);
+}
+
+.planner-progress__state--draft {
+  color: var(--muted);
+}
+
+.planner-progress__verify {
+  margin: 5px 0 0;
   color: var(--muted);
   font-size: 11px;
-  line-height: 1.5;
 }
 
-.planner-progress__detail {
-  margin-top: 7px;
-  font-size: 10px;
+/*
+ * 条件类型图例（规范 4 章的七种语义 + LOCKED / CONSENT）。
+ *
+ * 它存在的理由不是装饰：右栏 chip 与主栏徽标都靠颜色 + 文字区分类型，
+ * 而「绿色是必须满足还是已完成」在没有图例时只能猜。
+ */
+.planner-legend {
+  display: grid;
+  gap: 6px;
+  margin-top: 13px;
 }
 
-/* ── 卡片与表单 ───────────────────────────────────────────── */
-
-.planner-card__head {
+.planner-legend__item {
   display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.planner-legend__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background: #8b94a4;
+}
+
+.planner-legend__item--locked .planner-legend__swatch {
+  background: var(--locked);
+}
+
+.planner-legend__item--hard .planner-legend__swatch {
+  background: var(--success);
+}
+
+.planner-legend__item--prefer .planner-legend__swatch {
+  background: var(--primary);
+}
+
+.planner-legend__item--exclude .planner-legend__swatch {
+  background: var(--danger);
+}
+
+.planner-legend__item--verify .planner-legend__swatch {
+  background: var(--warning);
+}
+
+.planner-legend__item--consent .planner-legend__swatch {
+  background: var(--consent);
+}
+
+/* ── 主栏：分页与页头 ─────────────────────────────────────── */
+
+.planner-main {
+  min-width: 0;
+}
+
+.planner-intro {
+  margin-bottom: 14px;
+  padding: 21px 23px;
+  background: linear-gradient(145deg, #fff, #f2f5f9);
+}
+
+.planner-intro__line {
+  display: flex;
+  gap: 20px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+}
+
+.planner-intro__title {
+  margin: 0 0 5px;
+  color: var(--primary-dark);
+  font-family: var(--tps-font-serif, Georgia, serif);
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.planner-intro__desc {
+  margin: 0;
+  color: var(--muted);
+}
+
+.planner-intro__note {
+  min-width: 210px;
+  padding: 11px 13px;
+  border: 1px solid #dfe6f2;
+  border-radius: 13px;
+  background: #fff;
+  color: #586375;
+  font-size: 12px;
+}
+
+.planner-intro__note strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--primary-dark);
+}
+
+.planner-micros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.planner-micro {
+  padding: 4px 8px;
+  border: 1px solid #dce2eb;
+  border-radius: 999px;
+  background: #fff;
+  color: #586375;
+  font-size: 11px;
+}
+
+/*
+ * 一次只显示一个步骤（规范 3.2 的 Sticky Action + 上一页/下一步）。
+ *
+ * 未激活页用 `display: none` 而不是 `visibility` / 绝对定位隐藏：
+ * 后两者会让隐藏页里的表单控件仍然参与 Tab 键序，于是键盘用户从最后一个
+ * 可见控件按 Tab 会跳进一个看不见的页面（规范 20 要求键盘可完成全部操作，
+ * 而「焦点跑到不可见处」是它最常见的破法）。
+ */
+.planner-step-page {
+  display: none;
+  padding: 23px;
+}
+
+.planner-step-page--active {
+  display: block;
+}
+
+.planner-page-head {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: space-between;
   margin-bottom: 20px;
 }
 
-.planner-card__title {
-  margin: 0;
-  font-size: 20px;
-  line-height: 1.3;
-}
-
-.planner-card__desc {
-  margin: 7px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.65;
-}
-
-.planner-card__badge {
-  flex: 0 0 auto;
-  padding: 6px 10px;
-  border-radius: 99px;
+.planner-page-head__eyebrow {
   color: var(--primary);
-  background: var(--primary-light);
-  font-size: 12px;
-  font-weight: 750;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.planner-page-head__title {
+  margin: 4px 0 6px;
+  color: var(--primary-dark);
+  font-family: var(--tps-font-serif, Georgia, serif);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.28;
+}
+
+.planner-page-head__desc {
+  max-width: 620px;
+  margin: 0;
+  color: var(--muted);
+}
+
+.planner-page-head__badge {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f2f5f9;
+  color: #586375;
+  font-size: 11px;
   white-space: nowrap;
+}
+
+/* ── 区块与表单基元 ───────────────────────────────────────── */
+
+.planner-section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px dashed #dfe4ec;
+}
+
+.planner-section:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.planner-section__head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.planner-section__title {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.planner-section__meta {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .planner-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 13px;
 }
 
 .planner-grid--three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.planner-field {
-  min-width: 0;
 }
 
 .planner-field--full {
@@ -658,17 +859,19 @@
 }
 
 .planner-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-  font-size: 13px;
-  font-weight: 750;
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
+/*
+ * 「可选」用中性灰而不是红色必填星号（规范 6 的「下一步」规则：
+ * 非阻塞可选字段留空**不显示红色错误**，只显示中性「可选补充」，
+ * 不制造完成焦虑）。
+ */
 .planner-label__opt {
   color: #98a1af;
-  font-size: 11px;
   font-weight: 500;
 }
 
@@ -676,697 +879,381 @@
 .planner-select,
 .planner-textarea {
   width: 100%;
+  padding: 11px 12px;
   border: 1px solid #dce2eb;
-  border-radius: 10px;
-  color: var(--ink);
+  border-radius: 11px;
   background: #fff;
-}
-
-.planner-input,
-.planner-select {
-  height: 44px;
-  padding: 0 12px;
-}
-
-.planner-input:disabled,
-.planner-select:disabled {
-  color: #9aa2ae;
-  background: #f5f7fa;
-  cursor: not-allowed;
-}
-
-.planner-textarea {
-  min-height: 112px;
-  padding: 12px;
-  line-height: 1.7;
-  resize: vertical;
+  outline: 0;
 }
 
 .planner-input:focus,
 .planner-select:focus,
 .planner-textarea:focus {
-  border-color: var(--primary);
+  border-color: #8eacec;
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.planner-textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.planner-hint {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.planner-error {
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 11px;
+}
+
+.planner-field--invalid .planner-input,
+.planner-field--invalid .planner-select,
+.planner-field--invalid .planner-textarea {
+  border-color: #e5a1a1;
+  background: var(--danger-light);
 }
 
 .planner-route {
   display: grid;
-  grid-template-columns: 1fr 36px 1fr;
+  grid-template-columns: 1fr 32px 1fr;
+  gap: 6px;
   align-items: center;
-  gap: 8px;
 }
 
 .planner-route__arrow {
-  color: var(--primary);
-  text-align: center;
-  font-size: 20px;
-}
-
-.planner-checks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 18px;
-  margin-top: 12px;
-}
-
-.planner-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: #505b6c;
-  font-size: 13px;
-}
-
-.planner-check input {
-  accent-color: var(--primary);
-}
-
-.planner-check--disabled {
   color: #9aa2ae;
+  font-size: 18px;
+  text-align: center;
 }
 
-.planner-v2 {
-  padding: 2px 6px;
-  border: 1px solid #d7deea;
-  border-radius: 6px;
-  color: #8b94a4;
-  background: #f4f6fa;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.planner-hint {
-  margin: 10px 0 0;
+.planner-char-count {
+  margin-top: 4px;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.6;
+  font-size: 10px;
+  text-align: right;
 }
 
-.planner-subsection {
+.planner-char-count--over {
+  color: var(--danger);
+}
+
+/* ── 步骤底部动作条（规范 3.2 的 Sticky Action）─────────────── */
+
+.planner-actions {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  justify-content: space-between;
   margin-top: 22px;
-  padding-top: 20px;
+  padding-top: 16px;
   border-top: 1px solid var(--line);
 }
 
-.planner-subsection__title {
-  margin: 0 0 13px;
-  font-size: 15px;
-}
-
-.planner-subsection__head {
+.planner-actions__left,
+.planner-actions__right {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.planner-subsection__head strong {
-  font-size: 14px;
-}
-
-.planner-subsection__head span {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.planner-subpanel {
-  margin-top: 14px;
-  padding: 14px;
-  border-radius: 12px;
-  background: #f8faff;
-}
-
-/* ── 三态标签 ─────────────────────────────────────────────── */
-
-.planner-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 9px;
-}
-
-.planner-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 36px;
-  padding: 0 13px;
-  border: 1px solid #dfe4ec;
-  border-radius: 99px;
-  color: #4f5968;
-  background: #fff;
-  font-size: 13px;
-  transition: 0.15s ease;
-}
-
-.planner-tag:hover {
-  color: var(--primary);
-  border-color: #9ab8f8;
-  background: #f8faff;
-}
-
-.planner-tag.planner-tag--prefer {
-  color: var(--primary);
-  border-color: #9ab8f8;
-  background: var(--primary-light);
-  font-weight: 700;
-  box-shadow: inset 0 0 0 1px rgb(36 105 231 / 10%);
-}
-
-.planner-tag.planner-tag--require {
-  color: var(--success);
-  border-color: #86c9aa;
-  background: var(--success-light);
-  font-weight: 700;
-  box-shadow: inset 0 0 0 1px rgb(29 146 91 / 10%);
-}
-
-.planner-tag.planner-tag--exclude {
-  color: var(--danger);
-  border-color: #e5a1a1;
-  background: var(--danger-light);
-  font-weight: 700;
-  box-shadow: inset 0 0 0 1px rgb(201 68 68 / 10%);
-  text-decoration: line-through;
-  text-decoration-thickness: 1.5px;
-  text-decoration-color: currentcolor;
-}
-
-.planner-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.planner-legend__item {
-  padding: 6px 10px;
-  border-radius: 8px;
-  font-size: 11px;
-}
-
-.planner-legend__item--prefer {
-  color: var(--primary);
-  background: var(--primary-light);
-}
-
-.planner-legend__item--require {
-  color: var(--success);
-  background: var(--success-light);
-}
-
-.planner-legend__item--exclude {
-  color: var(--danger);
-  background: var(--danger-light);
-}
-
-/* ── 同行人计数 ───────────────────────────────────────────── */
-
-.planner-travelers {
-  display: grid;
-  gap: 10px;
-}
-
-.planner-traveler {
-  display: grid;
-  grid-template-columns: minmax(160px, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 13px 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-
-.planner-traveler__info {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-}
-
-.planner-traveler__icon {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border-radius: 11px;
-  background: var(--primary-light);
-  font-size: 18px;
-}
-
-.planner-traveler__info strong,
-.planner-traveler__info small {
-  display: block;
-}
-
-.planner-traveler__info small {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.planner-counter {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.planner-counter button {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  color: var(--primary);
-  background: #fff;
-  font-size: 18px;
-}
-
-.planner-counter span {
-  min-width: 22px;
-  text-align: center;
-  font-weight: 750;
-}
-
-/* ── 预算 ─────────────────────────────────────────────────── */
-
-.planner-tiers {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.planner-tier {
-  position: relative;
-  display: flex;
-  min-height: 170px;
-  padding: 15px 10px;
-  flex-direction: column;
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  color: var(--ink);
-  background: #fff;
-  text-align: center;
-  transition: 0.18s ease;
-}
-
-.planner-tier:hover {
-  border-color: #9ab8f8;
-  background: #f8faff;
-  transform: translateY(-2px);
-}
-
-.planner-tier.is-active {
-  color: var(--primary);
-  border: 2px solid var(--primary);
-  background: var(--primary-light);
-}
-
-.planner-tier.is-active::after {
-  position: absolute;
-  top: 9px;
-  right: 9px;
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  border-radius: 50%;
-  color: #fff;
-  background: var(--primary);
-  content: '✓';
-  font-size: 11px;
-}
-
-.planner-tier--custom {
-  border-style: dashed;
-}
-
-.planner-tier__icon {
-  margin-bottom: 8px;
-  font-size: 24px;
-}
-
-.planner-tier__name,
-.planner-tier__price {
-  font-weight: 800;
-}
-
-.planner-tier__price {
-  margin-top: 7px;
-  color: var(--primary);
-  font-size: 14px;
-}
-
-.planner-tier__unit,
-.planner-tier__desc {
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.planner-tier__desc {
-  margin-top: 9px;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.planner-budget-summary {
-  display: grid;
-  grid-template-columns: 0.9fr 1.3fr;
-  gap: 17px;
-  margin-top: 20px;
-  padding: 18px;
-  border-radius: 14px;
-  background: #f7f9fd;
-}
-
-.planner-budget-summary__label {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.planner-budget-summary__value {
-  display: block;
-  margin-top: 6px;
-  color: var(--primary-dark);
-  font-size: 23px;
-}
-
-.planner-budget-summary__badge {
-  display: inline-block;
-  margin-top: 8px;
-  padding: 5px 9px;
-  border-radius: 99px;
-  color: var(--primary);
-  background: #fff;
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.planner-budget-total {
-  display: grid;
-  grid-template-columns: 0.7fr 0.7fr 1.3fr;
   gap: 8px;
 }
 
-.planner-budget-total > div {
-  display: flex;
-  padding: 13px;
-  flex-direction: column;
-  justify-content: center;
-  border-radius: 11px;
-  background: #fff;
-}
-
-.planner-budget-total span {
+.planner-actions__note {
   color: var(--muted);
   font-size: 11px;
 }
 
-.planner-budget-total strong {
-  margin-top: 6px;
-  font-size: 15px;
-}
-
-.planner-budget-total > div:last-child strong {
-  color: var(--primary);
-}
-
-.planner-budget-custom {
-  margin-top: 18px;
-  padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-}
-
-.planner-range {
-  width: 100%;
-  margin-top: 10px;
-  accent-color: var(--primary);
-}
-
-/* ── 节奏与路线 ───────────────────────────────────────────── */
-
-.planner-pace__head,
-.planner-pace__scale {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.planner-pace__head strong {
-  color: var(--ink);
-}
-
-.planner-pace__scale {
-  margin-top: 4px;
-  font-size: 10px;
-}
-
-.planner-routes {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.planner-route-card {
-  padding: 13px 8px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  color: var(--ink);
-  background: #fff;
-  font-size: 13px;
-  text-align: center;
-}
-
-.planner-route-card:hover,
-.planner-route-card.is-active {
-  color: var(--primary);
-  border-color: #9ab8f8;
-  background: var(--primary-light);
-}
-
-.planner-route-card__glyph {
-  display: block;
-  min-height: 27px;
-  margin-bottom: 6px;
-  font-size: 18px;
-}
-
-/* ── 第 8 步 ──────────────────────────────────────────────── */
-
-.planner-custom__foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.planner-count {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.planner-count--over {
-  color: var(--warning);
-  font-weight: 700;
-}
-
-/* ── 右栏：摘要 ───────────────────────────────────────────── */
+/* ── 右栏：旅行画像（规范 17）──────────────────────────────── */
 
 .planner-right {
-  padding: 17px;
+  position: sticky;
+  top: calc(68px + 18px);
+  max-height: calc(100vh - 68px - 36px);
+  padding: 16px;
+  overflow: auto;
 }
 
 .planner-right__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 12px;
 }
 
-.planner-right__head h2 {
+.planner-right__title {
   margin: 0;
-  font-size: 16px;
+  font-family: var(--tps-font-serif, Georgia, serif);
+  font-size: 17px;
+  font-weight: 700;
 }
 
 .planner-right__count {
-  padding: 4px 8px;
-  border-radius: 99px;
-  color: var(--primary);
-  background: var(--primary-light);
-  font-size: 11px;
-}
-
-.planner-condition-group {
-  margin-top: 16px;
-}
-
-.planner-condition-group__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  font-size: 13px;
-}
-
-.planner-condition-group__head span {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.planner-condition-list {
-  display: grid;
-  gap: 7px;
-}
-
-.planner-condition {
-  display: grid;
-  grid-template-columns: 8px 1fr auto;
-  align-items: start;
-  gap: 8px;
-  padding: 9px;
-  border: 1px solid #edf0f4;
-  border-radius: 10px;
-  background: #fbfcfe;
-}
-
-.planner-condition__dot {
-  width: 7px;
-  height: 7px;
-  margin-top: 6px;
-  border-radius: 50%;
-  background: var(--primary);
-}
-
-.planner-condition--require .planner-condition__dot {
-  background: var(--success);
-}
-
-.planner-condition--exclude .planner-condition__dot {
-  background: var(--danger);
-}
-
-.planner-condition__text {
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.planner-condition__remove {
-  border: 0;
-  color: #a1a8b4;
-  background: transparent;
-}
-
-.planner-condition-empty {
-  margin: 0;
-  padding: 10px;
-  border-radius: 9px;
-  color: #9aa2ae;
-  background: #fafbfc;
-  font-size: 12px;
-  text-align: center;
-}
-
-.planner-conflict {
-  margin-top: 17px;
-  padding: 12px;
-  border: 1px solid #f1ce9b;
-  border-radius: 11px;
-  background: var(--warning-light);
-}
-
-.planner-conflict__title {
-  color: var(--warning);
-  font-size: 13px;
-  font-weight: 750;
-}
-
-.planner-conflict p {
-  margin: 6px 0 0;
-  color: #7e6749;
-  font-size: 11px;
-  line-height: 1.6;
-}
-
-.planner-estimate {
-  margin-top: 17px;
-  padding: 14px;
-  border-radius: 13px;
-  background: #f6f8fc;
-}
-
-.planner-estimate h3 {
-  margin: 0 0 10px;
-  font-size: 14px;
-}
-
-.planner-estimate__grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-}
-
-.planner-estimate__grid > div {
-  padding: 10px;
-  border-radius: 9px;
-  background: #fff;
-}
-
-.planner-estimate__grid strong,
-.planner-estimate__grid span {
-  display: block;
-}
-
-.planner-estimate__grid strong {
-  color: var(--primary-dark);
-  font-size: 13px;
-}
-
-.planner-estimate__grid span {
-  margin-top: 3px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #f2f5f9;
   color: var(--muted);
   font-size: 10px;
 }
 
-.planner-right__actions {
-  display: grid;
-  gap: 9px;
-  margin-top: 16px;
+.planner-snapshot {
+  margin-bottom: 9px;
+  padding: 10px;
+  border: 1px solid #e4e9f1;
+  border-radius: 13px;
 }
 
-.planner-right__note {
-  margin: 0;
+/* 「还需要确认」始终可见且描边加重（规范 17：blocking 项高亮） */
+.planner-snapshot--verify {
+  border-color: #f1ce9b;
+}
+
+.planner-snapshot__head {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 7px;
   color: var(--muted);
   font-size: 11px;
-  line-height: 1.6;
+  font-weight: 700;
+}
+
+.planner-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
 }
 
 /*
- * 提示里那两个可点的东西（「去注册或登录」「去第 1 步填写」）。
- * 加粗且用主色 —— 它们是各自那段文字里唯一能点的部分。
- *
- * `--primary` 而不是 `--brand`：后者不存在（`.planner` 只定义了 `--primary`
- * 那一套）。写错的变量不报错，只是让 `color` 声明整条失效 ——
- * 表现是链接只有下划线、颜色跟正文一样灰。
+ * 摘要 chip 是**按钮**而不是标签：规范 17.2 要求点击回跳来源 Step、
+ * 滚动到字段并聚焦。做成 span 的话键盘用户无法触发那个回跳。
  */
-.planner-right__auth-link,
-.planner-right__jump {
-  color: var(--primary);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-/* 它是 button 而不是 a（要触发 jump 以便同时高亮左栏），因此得清掉按钮外观 */
-.planner-right__jump {
-  padding: 0;
+.planner-chip {
+  padding: 5px 7px;
   border: 0;
-  background: none;
-  font-size: inherit;
-  text-decoration: underline;
+  border-radius: 8px;
+  background: #f2f5f9;
+  color: #586375;
+  font-size: 10px;
+  text-align: left;
 }
 
+.planner-chip:hover {
+  box-shadow: 0 0 0 1px #cbd3df;
+}
+
+.planner-chip--locked {
+  background: var(--locked-light);
+  color: var(--locked);
+  font-weight: 700;
+}
+
+.planner-chip--must {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.planner-chip--prefer {
+  background: var(--primary-light);
+  color: var(--primary-dark);
+}
+
+.planner-chip--exclude {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.planner-chip--verify {
+  background: var(--warning-light);
+  color: var(--warning);
+}
+
+.planner-chip--consent {
+  background: var(--consent-light);
+  color: var(--consent);
+}
+
+/*
+ * 图标与文字都要有，不能只靠颜色（规范 17.2 与 20）。
+ * `::before` 里的字符由类名决定，因此屏读器读到的是 aria-label 而不是这个符号。
+ */
+.planner-chip--locked::before {
+  content: '🔒 ';
+}
+
+.planner-chip--verify::before {
+  content: '⚠ ';
+}
+
+.planner-chip__empty {
+  margin: 0;
+  color: #9aa2ae;
+  font-size: 10px;
+}
+
+.planner-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin: 10px 0;
+}
+
+.planner-metric {
+  padding: 9px;
+  border-radius: 11px;
+  background: #f7f9fd;
+}
+
+.planner-metric strong {
+  display: block;
+  font-size: 13px;
+}
+
+.planner-metric span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.planner-right__actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.planner-right__note {
+  margin: 8px 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+/*
+ * 「系统自动研究，不要求你填写」清单。
+ *
+ * 这不是营销文案：规范 1.1 的第一条原则是「只问用户才知道的事」，
+ * 而用户判断「为什么不问我签证」的唯一途径就是看到这一栏。
+ */
+.planner-research {
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+}
+
+.planner-research strong {
+  font-size: 11px;
+}
+
+.planner-research ul {
+  margin: 7px 0 0;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 10px;
+  columns: 2;
+}
+
+/* ── 移动端唤出按钮与抽屉 ─────────────────────────────────── */
+
+.planner-mobile-summary {
+  display: none;
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 60;
+}
+
+/*
+ * 窄屏下左栏与右栏变抽屉。`--open` 由 React state 加，不用 `:target`
+ * 或 checkbox hack —— 抽屉的开合状态要与「点 chip 回跳后自动收起」联动，
+ * 而纯 CSS 状态在 JS 里读不到。
+ */
+.planner-drawer-scrim {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgb(14 25 38 / 45%);
+}
+
+.planner-drawer-scrim--open {
+  display: block;
+}
+
+/* ── 通用覆盖层（生成前确认 / 行前准备中心 / 画像抽屉）────── */
+
+.planner-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgb(14 25 38 / 45%);
+}
+
+.planner-overlay--open {
+  display: flex;
+}
+
+.planner-modal {
+  width: min(680px, 100%);
+  max-height: 90vh;
+  padding: 22px;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgb(14 25 38 / 25%);
+  overflow: auto;
+}
+
+.planner-modal__title {
+  margin: 0 0 6px;
+  font-family: var(--tps-font-serif, Georgia, serif);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.planner-modal__desc {
+  margin: 0 0 14px;
+  color: var(--muted);
+}
+
+.planner-modal__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/*
+ * 自动保存提示。
+ *
+ * 规范 6 要求 Topbar 显示「正在保存 / 已保存 / 保存失败」，而 toast 承担的是
+ * 另一件事：**失败时的可重试入口**。因此它不自动消失于失败态 ——
+ * 一个 2 秒后消失的「保存失败」等于没有提示。
+ */
+.planner-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  z-index: 200;
+  padding: 9px 14px;
+  border-radius: 999px;
+  color: #fff;
+  background: #172033;
+  font-size: 11px;
+  transform: translate(-50%, 20px);
+  opacity: 0;
+  pointer-events: none;
+  transition: 0.18s ease;
+}
+
+.planner-toast--show {
+  transform: translate(-50%, 0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.planner-toast--error {
+  background: var(--danger);
+}
 /* ── 生成等待弹层 ─────────────────────────────────────────── */
 
 /*
@@ -1565,55 +1452,58 @@
   margin-top: 20px;
   text-decoration: none;
 }
+/* ── 断点。三档与规范 19 一致 ──────────────────────────────── */
 
-.planner-mobile-summary {
-  display: none;
-}
+/*
+ * 规范 19 只给三档：≥1200 三栏并列、768–1199 左栏窄栏 + 右栏 drawer、
+ * <768 单列 + 底部 sticky 导航 + 画像底部抽屉。
+ *
+ * 下面另有 680 / 480 两档，**只调顶栏登录区**（AuthPanel 的 popover 与
+ * 头像元信息）。它们不是规范 19 的断点，而是那个弹层自身的排版下限 ——
+ * 在 480px 上不收窄头像区会把「重新开始」按钮挤出屏幕。
+ */
 
-/* ── 断点。四档与原型一致 ─────────────────────────────────── */
-
-@media (width <= 1250px) {
+@media (width <= 1199px) {
   .planner-workspace {
-    grid-template-columns: 210px minmax(520px, 1fr);
+    grid-template-columns: 200px minmax(0, 1fr);
   }
 
+  /*
+   * 右栏收成抽屉：默认不在文档流里，由 .planner-mobile-summary 唤出。
+   *
+   * 用 `position: fixed` 而不是把它移到主栏下方：规范 17 要求画像
+   * 「始终可见」，而追加在四千像素长表单末尾的面板等于不可见。
+   */
   .planner-right {
+    display: none;
+  }
+
+  .planner-right--open {
+    display: block;
     position: fixed;
     top: 0;
     right: 0;
-    z-index: 70;
-    width: min(380px, 94vw);
-    height: 100vh;
-    max-height: 100vh;
-    border-radius: 18px 0 0 18px;
-    transform: translateX(105%);
-    transition: 0.24s;
+    bottom: 0;
+    z-index: 56;
+    width: min(340px, 92vw);
+    max-height: none;
+    border-radius: 0;
+    overflow: auto;
   }
 
-  .planner-right.is-open {
-    transform: none;
+  .planner-intro__note {
+    display: none;
   }
 
   .planner-mobile-summary {
-    position: fixed;
-    right: 18px;
-    bottom: 18px;
-    z-index: 60;
     display: inline-flex;
-  }
-
-  .planner-tiers {
-    grid-template-columns: repeat(3, 1fr);
-  }
-
-  .planner-budget-summary {
-    grid-template-columns: 1fr;
   }
 }
 
-@media (width <= 860px) {
+@media (width <= 767px) {
   .planner-topbar {
-    padding: 0 12px;
+    min-height: 58px;
+    padding: 0 13px;
   }
 
   .planner-brand small {
@@ -1626,18 +1516,71 @@
 
   .planner-workspace {
     display: block;
+    padding: 10px;
+  }
+
+  /*
+   * 左栏在 <768 变成横向滚动的步骤条（规范 19：「顶部显示当前步骤 + 保存状态」）。
+   * 保留它而不是折进汉堡菜单：九步问卷里「我在第几步、还有几步」是用户唯一的
+   * 进度感来源，藏起来之后每一步都像最后一步。
+   */
+  .planner-left {
+    position: static;
+    max-height: none;
+    margin-bottom: 10px;
     padding: 12px;
   }
 
-  .planner-left {
-    position: static;
+  .planner-left__heading,
+  .planner-left__copy,
+  .planner-legend {
     display: none;
-    max-height: none;
-    margin-bottom: 12px;
   }
 
-  .planner-left.is-open {
+  .planner-steps {
+    flex-direction: row;
+    padding-bottom: 2px;
+    overflow: auto;
+  }
+
+  .planner-step {
     display: block;
+    min-width: 62px;
+    padding: 7px;
+    text-align: center;
+  }
+
+  .planner-step__name {
+    display: none;
+  }
+
+  .planner-step__status {
+    margin: 4px auto 0;
+  }
+
+  .planner-progress {
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+
+  .planner-intro {
+    padding: 16px;
+  }
+
+  .planner-intro__title {
+    font-size: 19px;
+  }
+
+  .planner-step-page {
+    padding: 16px;
+  }
+
+  .planner-page-head__title {
+    font-size: 21px;
+  }
+
+  .planner-page-head__badge {
+    display: none;
   }
 
   .planner-grid,
@@ -1645,12 +1588,26 @@
     grid-template-columns: 1fr;
   }
 
-  .planner-routes {
-    grid-template-columns: repeat(2, 1fr);
+  /*
+   * 动作条吸底。负 margin 抵消 .planner-step-page 的 16px 内边距，
+   * 让它撑满卡片宽度 —— 留着内边距会在吸底条两侧露出两条白边，
+   * 而那两条白边下面是滚动的内容，看起来像渲染错误。
+   */
+  .planner-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    margin: 20px -16px -16px;
+    padding: 10px 16px;
+    background: rgb(255 255 255 / 96%);
   }
 
-  .planner-main {
-    gap: 12px;
+  .planner-actions__note {
+    display: none;
+  }
+
+  .planner-research ul {
+    columns: 1;
   }
 }
 
@@ -1661,30 +1618,13 @@
 
   .planner-user__popover {
     position: fixed;
-    top: 76px;
+    top: 66px;
     right: 12px;
     width: calc(100vw - 24px);
   }
 
   .planner-user__popover::before {
     display: none;
-  }
-
-  .planner-tiers {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .planner-budget-total {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .planner-budget-total > div:last-child {
-    grid-column: 1 / -1;
-  }
-
-  .planner-custom__foot {
-    flex-direction: column;
-    align-items: flex-start;
   }
 }
 
@@ -1704,9 +1644,5 @@
 
   .planner-route__arrow {
     transform: rotate(90deg);
-  }
-
-  .planner-tiers {
-    grid-template-columns: 1fr;
   }
 }
