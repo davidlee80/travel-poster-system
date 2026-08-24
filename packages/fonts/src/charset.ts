@@ -98,8 +98,12 @@ export function gb2312Symbols(): string[] {
  * 先让测试报出缺哪个字，再补。
  */
 export const EXTRA_CHARACTERS = [
-  // GB 2312 只有全角「￥」。LLM 产出的预算文案里半角 ¥ 很常见（8.1 的 currency
-  // 枚举 V1 只有 CNY，所以不收其它币种符号 —— 收了也没有用它的路径）
+  // GB 2312 只有全角「￥」。LLM 产出的预算文案里半角 ¥ 很常见
+  //
+  // P9 把 currency 从「仅 CNY」扩到 6 种（见 @tps/schemas 的 CURRENCY_VALUES），
+  // 但**这里不需要补新符号**：$ 在 ASCII 区，而 € 与 £ 已在 GB 2312 的符号区内
+  // （由本文件的「每一个都确实不在 GB 2312 与 ASCII 之内」那条测试证明 ——
+  // 试着把它们加进来会红）
   '¥',
   // 短破折号：日期区间「3–5 天」在 LLM 输出里比全角「—」更常见
   '–',

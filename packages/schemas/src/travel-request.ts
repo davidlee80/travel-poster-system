@@ -13,6 +13,7 @@ import {
   type BudgetIncludedItem,
 } from './enums.js';
 import { TravelConditionSchema } from './conditions.js';
+import { PlannerProfileSchema } from './planner-profile.js';
 import { DateStringSchema, NonEmptyStringSchema, TimeStringSchema } from './primitives.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
@@ -268,6 +269,32 @@ export const TravelRequestUISchema = z.object({
   conditions: z.array(TravelConditionSchema).max(200).default([]),
   custom_requirements: CustomRequirementsSchema.prefault({}),
   output_preferences: OutputPreferencesSchema.prefault({}),
+
+  /**
+   * P9：Planner V2.1 的 76 字段问卷答案。
+   *
+   * ## 为什么是一个新块而不是就地扩展上面几块
+   *
+   * 完整推导见 `planner-profile.ts` 的文件头。一句话：就地扩展会造出
+   * 「同一概念两个路径」（`budget.travel_tier` 与 P8 的 `budget.tier` 等四对），
+   * 而新块让「76 个字段的载荷路径 === `planner_profile.` + api_key」成为一条
+   * 可被测试穷举的规则。
+   *
+   * ## 为什么是 optional 而不是 prefault({})
+   *
+   * `prefault({})` 会让**每一个**请求（包括只带 11 个必填字段的最小请求）
+   * 都长出一个 19 个空子块的对象，落进 `travel_requests.raw_request` 一路存下去。
+   * 而「客户端没发问卷」与「客户端发了但全空」在语义上不同：前者是 P8 及之前的
+   * 客户端，后者是 V2 客户端上用户什么都没填。下游要能区分 —— 见 normalize 的
+   * 回退逻辑。
+   *
+   * ## 它不改变必填集
+   *
+   * 契约的必填集仍是 P8 的 11 个字段，`travel_request_ui_v1` 不升版本
+   * （见 versions.ts 的递增规则：可选字段新增不递增）。照旧发全量字段的
+   * 客户端一行不改。
+   */
+  planner_profile: PlannerProfileSchema.optional(),
 });
 
 /**

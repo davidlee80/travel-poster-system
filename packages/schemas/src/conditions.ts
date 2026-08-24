@@ -93,6 +93,21 @@ export const CONDITION_CODE_VALUES = [
   // transport（P8 新增）
   'transport.cycling',
   'transport.rail',
+  /*
+   * transport（P9 新增）：补全 V2 字段表的跨城与当地交通两组三态标签。
+   *
+   * 跨城 5 项（飞机 / 高铁 / 长途巴士 / 轮渡 / 自驾）里 `rail` 与 `self_drive`
+   * 已有；当地 6 项（公共交通 / 步行 / 打车 / 包车 / 骑行 / 自驾）里
+   * `public_transit`、`walking_first`、`cycling`、`self_drive` 已有。
+   *
+   * `flight` 与既有的 `avoid_transfer` 不重复：前者是「用不用飞机」，
+   * 后者是「能不能接受转机」。同时表达是合理输入。
+   */
+  'transport.flight',
+  'transport.coach',
+  'transport.ferry',
+  'transport.ride_hailing',
+  'transport.private_car',
   // accommodation
   'accommodation.elevator',
   'accommodation.near_transit',
@@ -113,10 +128,27 @@ export const CONDITION_CODE_VALUES = [
   'accommodation.kitchen',
   'accommodation.shared_dorm',
   'accommodation.single_base',
+  /*
+   * accommodation（P9 新增）：V2 字段表的设施三态标签有 10 项，
+   * P8 只覆盖了电梯 / 独立卫浴 / 早餐 / 厨房 四项。
+   */
+  'accommodation.laundry',
+  'accommodation.bathtub',
+  'accommodation.gym',
+  'accommodation.pool',
+  'accommodation.workspace',
+  'accommodation.front_desk_24h',
   // budget（P8 新增域）
   'budget.lodging_quality',
   'budget.unique_experience',
   'budget.transport_convenience',
+  /*
+   * budget（P9 新增）：字段表的「愿意多花」四项里「直飞」没有对应码。
+   *
+   * 它与 `transport.flight_constraints`（HARD，只接受直飞/最多 1 次转机）
+   * 不同：这里是「愿意为直飞多付钱」的消费取向，那里是硬约束。
+   */
+  'budget.direct_flight',
   // accessibility
   'accessibility.wheelchair',
   'accessibility.stroller',
@@ -132,6 +164,26 @@ export const CONDITION_CODE_VALUES = [
   'diet.halal',
   'diet.no_spicy',
   'diet.allergy_seafood',
+  /*
+   * diet（P9 新增）：字段表的饮食方式有 6 项（+「其他」+「无」），
+   * P8 覆盖了素食 / 清真 / 不吃辣 三项。
+   *
+   * `vegan` 与 `vegetarian` 分开而不是用 value 表达程度：纯素排除蛋奶，
+   * 而「素食 + value:false」读作「不要素食」—— 命名约定 1 只允许用
+   * `value: false` 表达否定，表达不了「更严格的同类要求」。
+   */
+  'diet.vegan',
+  'diet.kosher',
+  /*
+   * 「不饮酒」写成 `alcohol_free` 而不是 `no_alcohol`：命名约定 1 要求正向命名，
+   * 而 `alcohol_free`（无酒精的）本身就是餐厅的一个正向属性，
+   * 因此不必像 `diet.no_spicy` 那样进历史例外白名单。
+   *
+   * 也不写成 `diet.alcohol` + `value: false`：同一组饮食要求里 `no_spicy` 是
+   * `value: true`，两个选项一个用 true 一个用 false 会让前端投影逻辑出现
+   * 按 code 分支的特例 —— 而漏掉那个特例的表现是「勾了不饮酒，发出去是要酒」。
+   */
+  'diet.alcohol_free',
   // schedule
   'schedule.no_late_night',
   // schedule（P8 新增）
@@ -141,11 +193,20 @@ export const CONDITION_CODE_VALUES = [
 /**
  * 冻结的条目数。写成常量供测试断言，防止无意增删。
  *
- * 它同时是 `TravelRequestUISchema.conditions` 的数组上限 —— 两者本来就该
- * 相等（一个 code 勾一次），分开写死会让下一次扩字典静默变成
- * 「最多只能勾前 N 个」。
+ * 5.1 原为 24；P8 扩到 46（R-55）；P9 扩到 61 —— 为 Planner V2 字段表里
+ * 那些没有落点的三态标签选项补码（交通 5 个、住宿设施 6 个、消费重点 1 个、
+ * 饮食 3 个）。全部落在既有 7 个域内，因此不触发 5.1 的「新增域必须同时
+ * 更新 Prompt 模板」条款。
+ *
+ * ## 加码之后必须做的第二件事
+ *
+ * `apps/api` 在有已发布 planner config 时用**配置里的码集合替换**内置白名单
+ * （`conflicts.ts` 的 `allowedConditionCodes?.has(code) ?? isKnownConditionCode(code)`
+ * 是 `??` 而不是并集）。因此新码必须同时注册进 `planner_config_options`
+ * 并发布新版本，否则在装了配置中心的环境里它们会被 N-08 拒 ——
+ * 而界面上那个标签看起来完全正常。见 P9 实施计划的「陷阱 1」。
  */
-export const CONDITION_CODE_COUNT = 46;
+export const CONDITION_CODE_COUNT = 61;
 
 export type ConditionCode = (typeof CONDITION_CODE_VALUES)[number];
 

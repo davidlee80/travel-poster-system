@@ -21,6 +21,8 @@ export { SCHEMA_VERSIONS, type SchemaVersion, type SchemaVersionKey } from './ve
 export * from './enums.js';
 export * from './primitives.js';
 export * from './conditions.js';
+export * from './planner-fields.js';
+export * from './planner-profile.js';
 export * from './travel-request.js';
 export * from './error-codes.js';
 export * from './travel-plan.js';

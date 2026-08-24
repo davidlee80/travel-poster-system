@@ -111,8 +111,24 @@ export function durationText(minutes: number): string {
 
 // ── 金额文案 ────────────────────────────────────────────────
 
-const CURRENCY_SYMBOL: Record<Currency, string> = {
+/**
+ * 币种符号。
+ *
+ * `Record<Currency, string>` 而不是带兜底的查表：P9 把 `CURRENCY_VALUES` 从
+ * 1 种扩到 6 种，而少填一个成员在这里是**编译错误** —— 有兜底的写法会让漏填
+ * 表现为「金额前面显示 undefined」。
+ *
+ * 港币用 `HK$`、日元用 `JP¥` 而不是共用 `$` / `¥`：同符号会让「800」被读成
+ * 另一个币种的 800，而港币与美元差约 8 倍、日元与人民币差约 20 倍。
+ * CNY 保持裸 `¥` —— 12.1 的金额文案范例（`约 ¥105 / 人`）与视觉基线都按它拍的。
+ */
+export const CURRENCY_SYMBOL: Record<Currency, string> = {
   CNY: '¥',
+  JPY: 'JP¥',
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  HKD: 'HK$',
 };
 
 /**

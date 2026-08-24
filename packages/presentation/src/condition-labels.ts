@@ -37,6 +37,18 @@ export const CONDITION_LABEL: Record<ConditionCode, string> = {
   // P8 新增
   'transport.cycling': '单车出行',
   'transport.rail': '铁路出行',
+  /*
+   * P9 新增：V2 字段表的跨城 5 项与当地 6 项。
+   *
+   * 「包车」与「打车 / 网约车」分开而不是合成「用车」：前者按天计价、司机全程
+   * 随行，会改变每日路线的可达半径；后者是按次的点到点。合成一个会让
+   * 「必须包车」被当成「必须打车」而排出一份需要频繁自行叫车的行程。
+   */
+  'transport.flight': '飞机出行',
+  'transport.coach': '长途巴士',
+  'transport.ferry': '轮渡',
+  'transport.ride_hailing': '打车或网约车',
+  'transport.private_car': '包车',
 
   'accommodation.elevator': '住宿有电梯',
   'accommodation.near_transit': '住宿靠近地铁或车站',
@@ -54,11 +66,24 @@ export const CONDITION_LABEL: Record<ConditionCode, string> = {
   'accommodation.shared_dorm': '合住多人间',
   // P8 新增：稳定性 1 项
   'accommodation.single_base': '全程固定一处住宿',
+  // P9 新增：V2 字段表的设施 10 项里 P8 未覆盖的 6 项
+  'accommodation.laundry': '可洗衣',
+  'accommodation.bathtub': '有浴缸',
+  'accommodation.gym': '有健身房',
+  'accommodation.pool': '有泳池',
+  'accommodation.workspace': '有工作区',
+  'accommodation.front_desk_24h': '24 小时前台',
 
   // P8 新增域：愿意把钱花在哪
   'budget.lodging_quality': '预算侧重住宿品质',
   'budget.unique_experience': '预算侧重特色体验',
   'budget.transport_convenience': '预算侧重交通便利',
+  /*
+   * P9 新增。措辞是「愿为直飞多花」而不是「直飞」：后者与
+   * `transport.flight_constraints` 的硬约束「只接受直飞」只差一个字，
+   * 而两者在生成时的地位完全不同（这条可权衡，那条不可违反）。
+   */
+  'budget.direct_flight': '愿为直飞多花',
 
   'accessibility.wheelchair': '需轮椅通行',
   'accessibility.stroller': '需推车通行',
@@ -70,6 +95,10 @@ export const CONDITION_LABEL: Record<ConditionCode, string> = {
   'diet.halal': '清真',
   'diet.no_spicy': '不吃辣',
   'diet.allergy_seafood': '海鲜过敏',
+  // P9 新增：V2 字段表的饮食方式 6 项里 P8 未覆盖的 3 项
+  'diet.vegan': '纯素',
+  'diet.kosher': '犹太洁食',
+  'diet.alcohol_free': '不饮酒',
 
   'schedule.no_late_night': '不安排太晚的行程',
   // P8 新增

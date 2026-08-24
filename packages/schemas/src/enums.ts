@@ -81,8 +81,26 @@ export const BUDGET_BASIS_VALUES = ['PER_PERSON_PER_DAY', 'TOTAL'] as const;
 export const BudgetBasisSchema = z.enum(BUDGET_BASIS_VALUES);
 export type BudgetBasis = (typeof BUDGET_BASIS_VALUES)[number];
 
-/** V1 仅 CNY（设计稿 5.1） */
-export const CURRENCY_VALUES = ['CNY'] as const;
+/**
+ * 币种。
+ *
+ * ## P9 从「仅 CNY」扩到 6 种
+ *
+ * 设计稿 5.1 冻结的是 CNY 一种，而 Planner V2 的字段表把 `budget.currency`
+ * 列成 ISO 4217 且必填 —— 一个只能选人民币的币种下拉框没有存在意义。
+ *
+ * 扩容牵动三处，都已同步（漏掉任何一处都不报错，只会静默出错）：
+ *
+ *   1. `@tps/presentation` 的 `CURRENCY_SYMBOL` 是 `Record<Currency, string>`，
+ *      少一个成员是编译错误 —— 这一处是安全的；
+ *   2. `@tps/fonts` 的 `EXTRA_CHARACTERS` 必须含新符号。字体子集用
+ *      `font-display: block`，缺字形时**一个字都不画**，而 `€` 不在 GB 2312 里；
+ *   3. N-12 的「50 元/人/天」下限是按 CNY 定的。50 日元/人/天是荒谬的下限，
+ *      因此 `@tps/planning` 的 conflicts 按币种查阈值表（P9-6）。
+ *
+ * V-23（币种全文一致）不受影响：它比较的是计划内部是否自洽，与有几个合法值无关。
+ */
+export const CURRENCY_VALUES = ['CNY', 'JPY', 'USD', 'EUR', 'GBP', 'HKD'] as const;
 export const CurrencySchema = z.enum(CURRENCY_VALUES);
 export type Currency = (typeof CURRENCY_VALUES)[number];
 

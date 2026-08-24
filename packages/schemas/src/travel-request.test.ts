@@ -174,9 +174,14 @@ describe('schema 该拦的结构错误', () => {
       },
     ],
     [
+      /*
+       * P9 把 currency 从「仅 CNY」扩到 6 种（CNY/JPY/USD/EUR/GBP/HKD），
+       * 因此这里从 `USD` 换成 `AUD` —— 前者现在是合法值。
+       * 保留这条用例是因为「枚举外的币种被拒」这条行为本身没有变。
+       */
       'currency 不在枚举内',
       (input: Record<string, any>) => {
-        (input['budget'] as { currency: string }).currency = 'USD';
+        (input['budget'] as { currency: string }).currency = 'AUD';
       },
     ],
     [
@@ -192,9 +197,17 @@ describe('schema 该拦的结构错误', () => {
       },
     ],
     [
-      '条件 code 不在字典内',
+      /*
+       * schema 层只校验**域前缀**：七个既有域下的未知 code 是合法输入，
+       * 因为配置中心可以发布新码（见 conditions.ts 的 ConditionCodeSchema）。
+       * 「域内但未发布」由 N-08 拦，那里能给出 REQ_CONDITION_CODE_UNKNOWN。
+       *
+       * P9 之前这条用例用的是 `diet.kosher` —— 它现在是字典内的正式 code
+       * （V2 字段表的「犹太洁食」），因此换成一个域前缀本身就不合法的值。
+       */
+      '条件 code 的域前缀不合法',
       (input: Record<string, any>) => {
-        input['conditions'] = [{ code: 'diet.kosher', mode: 'MUST', value: true }];
+        input['conditions'] = [{ code: 'nutrition.kosher', mode: 'MUST', value: true }];
       },
     ],
     [

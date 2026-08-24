@@ -56,25 +56,26 @@ describe('条件字典（5.1）', () => {
     }
   });
 
-  it('分域条目数逐行正确（5.1 + P8 的 R-55）', () => {
+  it('分域条目数逐行正确（5.1 + P8 的 R-55 + P9）', () => {
     /*
      * 逐域断言而不只断言总数：把一个 code 从 interest 挪到 transport 时
      * 总数不变，而 Prompt 的分域注入与素材检索的按域取偏好都会跟着变。
      *
-     * 括号里是 P8 新增数（合计 +22，见 R-55）。
+     * 括号里是「5.1 冻结数 + P8 新增 + P9 新增」。P9 合计 +15，
+     * 全部落在既有域内，因此域集合仍是 7 个。
      */
     expect(
       Object.fromEntries(
         CONDITION_DOMAIN_VALUES.map((d) => [d, CONDITION_CODES_BY_DOMAIN[d].length]),
       ),
     ).toEqual({
-      interest: 14, // 8 + 6
-      transport: 6, // 4 + 2
-      accommodation: 13, // 4 + 9
-      budget: 3, // P8 新增域
-      accessibility: 4, // 3 + 1
-      diet: 4,
-      schedule: 2, // 1 + 1
+      interest: 14, // 8 + 6 + 0
+      transport: 11, // 4 + 2 + 5
+      accommodation: 19, // 4 + 9 + 6
+      budget: 4, // 0 + 3 + 1
+      accessibility: 4, // 3 + 1 + 0
+      diet: 7, // 4 + 0 + 3
+      schedule: 2, // 1 + 1 + 0
     });
   });
 
@@ -132,9 +133,9 @@ describe('TravelConditionSchema', () => {
 // ── P8：条件字典扩容（R-55）─────────────────────────────────
 
 describe('P8：条件字典扩容（R-55）', () => {
-  it('冻结数量为 46', () => {
+  it('冻结数量与常量一致', () => {
     expect(CONDITION_CODE_VALUES).toHaveLength(CONDITION_CODE_COUNT);
-    expect(CONDITION_CODE_COUNT).toBe(46);
+    // 具体数字由下面 P9 那一节按「24 + 22 + 15」逐段断言
   });
 
   it('新增 budget 域，且七个域都非空', () => {
@@ -151,7 +152,7 @@ describe('P8：条件字典扩容（R-55）', () => {
     }
   });
 
-  it('P8 新增的 code 采用正向命名，否定语义走 value:false', () => {
+  it('P8 与 P9 新增的 code 采用正向命名，否定语义走 value:false', () => {
     /*
      * 反向命名的 code 与 `value: false` 组合会产生双重否定
      * （「不要（不要多人间）」），而 5.1 的 value 是 boolean ——
@@ -203,8 +204,6 @@ describe('P8：条件字典扩容（R-55）', () => {
     for (const code of expected) {
       expect(isKnownConditionCode(code), `${code} 不在字典内`).toBe(true);
     }
-    // 24 个既有 + 22 个新增
-    expect(CONDITION_CODE_COUNT).toBe(24 + expected.length);
   });
 
   it('刻意不建的两个 code 确实不在字典里', () => {
@@ -215,5 +214,67 @@ describe('P8：条件字典扩容（R-55）', () => {
      */
     expect(isKnownConditionCode('transport.mixed')).toBe(false);
     expect(isKnownConditionCode('accommodation.no_shared_dorm')).toBe(false);
+  });
+});
+
+// ── P9：Planner V2.1 三态标签补码 ───────────────────────────
+
+describe('P9：Planner V2.1 三态标签补码', () => {
+  /**
+   * V2 字段表里有四组三态标签的选项在 P8 的字典里没有落点。
+   *
+   * 逐条列出而不只断言总数：这 15 个码存在的唯一理由是「界面上那个标签有结构化
+   * 落点」，而落进 `conditions` 的诉求受 V-30 硬约束校验保护、落进自由文本的不受。
+   * 少一个的表现是「用户点了『必须包车』，生成的计划里全程打车，而校验通过」。
+   */
+  const P9_CODES = [
+    // 跨城交通 5 项里缺的 3 个（rail / self_drive 已有）
+    'transport.flight',
+    'transport.coach',
+    'transport.ferry',
+    // 当地交通 6 项里缺的 2 个（public_transit / walking_first / cycling / self_drive 已有）
+    'transport.ride_hailing',
+    'transport.private_car',
+    // 住宿设施 10 项里缺的 6 个（电梯 / 独立卫浴 / 早餐 / 厨房 已有）
+    'accommodation.laundry',
+    'accommodation.bathtub',
+    'accommodation.gym',
+    'accommodation.pool',
+    'accommodation.workspace',
+    'accommodation.front_desk_24h',
+    // 「愿意多花」4 项里缺的 1 个
+    'budget.direct_flight',
+    // 饮食方式 6 项里缺的 3 个（素食 / 清真 / 不吃辣 已有）
+    'diet.vegan',
+    'diet.kosher',
+    'diet.alcohol_free',
+  ] as const;
+
+  it('15 个新码全部在字典内', () => {
+    expect(P9_CODES).toHaveLength(15);
+    for (const code of P9_CODES) {
+      expect(isKnownConditionCode(code), `${code} 不在字典内`).toBe(true);
+    }
+  });
+
+  it('总数是 24（5.1 冻结）+ 22（P8 R-55）+ 15（P9）', () => {
+    expect(CONDITION_CODE_COUNT).toBe(24 + 22 + 15);
+    expect(CONDITION_CODE_VALUES).toHaveLength(61);
+  });
+
+  it('没有新增域 —— 因此 5.1 的「新增域须改 Prompt 模板」条款不适用', () => {
+    expect(CONDITION_DOMAIN_VALUES).toHaveLength(7);
+    for (const code of P9_CODES) {
+      expect(CONDITION_DOMAIN_VALUES, `${code} 引入了新域`).toContain(conditionDomain(code));
+    }
+  });
+
+  it('「不饮酒」用 alcohol_free 而不是 no_alcohol', () => {
+    /*
+     * 命名约定 1 要求正向命名。`alcohol_free` 是餐厅的正向属性，
+     * 因此与 `diet.no_spicy` 那批历史例外不同 —— 它不需要进白名单。
+     */
+    expect(isKnownConditionCode('diet.alcohol_free')).toBe(true);
+    expect(isKnownConditionCode('diet.no_alcohol')).toBe(false);
   });
 });

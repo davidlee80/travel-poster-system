@@ -1,6 +1,7 @@
 import type { FullPlanViewModelShape, TemplateId, TravelPlan } from '@tps/schemas';
 import { buildDailyPoster, EMPTY_ASSET_LOOKUP, type AssetLookup } from './build-view-model.js';
 import { FULL_PLAN_CONTENT_LIMITS } from './content-limits.js';
+import { CURRENCY_SYMBOL } from './derive.js';
 
 /**
  * 完整计划页 ViewModel（TP-1-06，设计稿 3.3.1 的 FULL_PLAN）。
@@ -78,7 +79,12 @@ export function buildFullPlan(input: BuildFullPlanInput): BuildFullPlanResult {
   );
 
   const budget = plan.total_budget;
-  const symbol = budget.currency === 'CNY' ? '¥' : budget.currency;
+  /*
+   * 与 `amountText` / `totalText` 共用一张符号表。P9 之前这里是
+   * `currency === 'CNY' ? '¥' : currency` —— 币种只有 CNY 时两种写法等价，
+   * 扩到 6 种之后它会在完整页显示「JPY 12000」而单日页显示「JP¥12000」。
+   */
+  const symbol = CURRENCY_SYMBOL[budget.currency];
 
   return {
     viewModel: {
