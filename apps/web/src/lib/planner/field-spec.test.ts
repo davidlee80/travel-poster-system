@@ -6,6 +6,7 @@ import {
   BUDGET_SCOPE_ITEM_VALUES,
   CABIN_CLASS_VALUES,
   CAR_TYPE_VALUES,
+  CHANGEABILITY_VALUES,
   CHILD_NEED_VALUES,
   CONNECTIVITY_PREFERENCE_VALUES,
   CORE_ACTIVITIES_VALUES,
@@ -47,6 +48,7 @@ import {
   TOP_GOAL_VALUES,
   TRANSFER_TOLERANCE_VALUES,
   TRAVEL_TIER_VALUES,
+  TRAVELER_RELATION_VALUES,
   TRIP_PURPOSE_VALUES,
   TRISTATE_ANSWER_VALUES,
   VISA_STATUS_VALUES,
@@ -70,6 +72,15 @@ const EXPECTED: Record<string, readonly string[]> = {
   'trip.destination_status': DESTINATION_STATUS_VALUES,
   'trip.date_flexibility': DATE_FLEXIBILITY_VALUES,
   'trip.locked_order_types': LOCKED_ORDER_TYPE_VALUES,
+  'trip.locked_orders': [...LOCKED_ORDER_TYPE_VALUES, ...CHANGEABILITY_VALUES],
+  /*
+   * 同行关系与年龄段共用一个 api_key 下的文案表，且 `CHILD` 是两者的公共成员。
+   * `Set` 去重后再比较 —— 不去重会让「每个枚举值都有文案」这条断言
+   * 把同一个 `CHILD` 查两次（无害），但让「没有死文案」那条把它算成
+   * 一个只出现一次的键对两个来源（也无害）。写成显式的并集是为了让
+   * 下一个读这里的人不必推理这件事。
+   */
+  'travelers.profiles': [...new Set([...TRAVELER_RELATION_VALUES, ...AGE_BAND_VALUES])],
   'profile.trip_purposes': TRIP_PURPOSE_VALUES,
   'profile.top_goals': TOP_GOAL_VALUES,
   'travelers.minor_guardianship': MINOR_GUARDIANSHIP_VALUES,
@@ -206,12 +217,5 @@ describe('敏感字段的抽象摘要', () => {
       return spec === undefined || spec.sensitivity !== 'HIGH' || spec.summary_group === 'HIDDEN';
     });
     expect(overreach).toEqual([]);
-  });
-});
-
-/** `AGE_BAND_VALUES` 目前只在旅行者卡片里用，文案随那个复合控件一起落地（P9-4b）*/
-describe('待落地的复合控件', () => {
-  it('年龄段枚举已在契约里就位', () => {
-    expect(AGE_BAND_VALUES.length).toBeGreaterThan(0);
   });
 });

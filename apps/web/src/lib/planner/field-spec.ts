@@ -71,7 +71,44 @@ export const OPTION_LABEL: Record<string, Record<string, string>> = {
     OTHER: '其他',
   },
 
+  'trip.locked_orders': {
+    /*
+     * 订单类型在这里再出现一次（`trip.locked_order_types` 也有）。
+     *
+     * 不复用那一份：两处的语境不同 —— 那里是「已经有哪些不可变的预订」的
+     * 复选卡片，这里是订单卡上的「类型」下拉。文案现在恰好相同，
+     * 但把它们指向同一份表意味着将来改一处会静默改掉另一处。
+     */
+    INTERCITY_TRANSPORT: '往返交通',
+    LODGING: '酒店',
+    TICKETS: '门票 / 活动',
+    RESTAURANT: '餐厅',
+    TRANSFER: '接送',
+    CHANGEABLE: '可改可退',
+    NON_REFUNDABLE: '不可改退',
+    /* 「不清楚」按不可改退处理（规范 7），但仍与上一项分开存 —— 后台核实后要能区分 */
+    UNKNOWN: '不清楚',
+  },
+
   // ── 02 同行伙伴 ──
+  'travelers.profiles': {
+    SELF: '本人',
+    PARTNER: '伴侣',
+    FRIEND: '朋友',
+    CHILD: '孩子',
+    PARENT: '父母',
+    OTHER: '其他',
+    INFANT: '婴幼儿',
+    /*
+     * `CHILD` 同时是同行关系与年龄段的成员，两者在这个字段里都会出现。
+     * 值相同意味着一份表放不下两个文案 —— 而「孩子」在两处读起来都对，
+     * 因此不拆。若将来两处需要不同文案（如年龄段要写「儿童 3–11 岁」），
+     * 必须把年龄段挪到独立的 api_key 键下，而不是在这里二选一。
+     */
+    TEEN: '少年',
+    ADULT: '成人',
+    SENIOR: '长者',
+  },
   'travelers.minor_guardianship': {
     BOTH_PARENTS: '双亲陪同',
     SINGLE_PARENT: '单亲陪同',

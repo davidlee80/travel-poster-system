@@ -1018,6 +1018,410 @@
   color: var(--danger);
 }
 
+/* ── 区块分组（规范各章的「页面区块顺序」）───────────────────── */
+
+.planner-block {
+  margin-top: 26px;
+}
+
+.planner-block:first-of-type {
+  margin-top: 0;
+}
+
+.planner-block__title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.planner-block__intro {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/*
+ * 组内第一个字段不画分隔线 —— 组标题已经是分隔。
+ * `.planner-section:first-of-type` 只覆盖了页面里的第一个，
+ * 而现在每一组的第一个都需要同样的处理。
+ */
+.planner-block > .planner-section:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* ── 字段容器与类型徽标 ─────────────────────────────────────── */
+
+.planner-field {
+  margin-top: 10px;
+}
+
+.planner-field:first-of-type {
+  margin-top: 0;
+}
+
+/*
+ * 运行时类型徽标（规范 4 章的类型语义表）。
+ *
+ * 九个类型九种底色，且**文字本身就写着类型名** —— 规范 20 要求任何状态
+ * 不能只依赖颜色。因此这里的颜色是冗余信息而不是唯一信息，
+ * 色觉障碍用户读文字即可。
+ */
+.planner-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.planner-badge--fact,
+.planner-badge--info {
+  color: var(--muted);
+  background: #f0f2f6;
+}
+
+.planner-badge--hard {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+.planner-badge--prefer,
+.planner-badge--prefer_exclude {
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.planner-badge--exclude {
+  color: var(--locked);
+  background: var(--locked-light);
+}
+
+.planner-badge--verify_blocking,
+.planner-badge--verify_nonblocking {
+  color: var(--warning);
+  background: var(--warning-light);
+}
+
+.planner-badge--consent {
+  color: var(--consent);
+  background: var(--consent-light);
+}
+
+.planner-section__meta {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* 触发原因与普通说明用同一号字，但左侧加一条线以示「这是在解释为什么问你」 */
+.planner-hint--reason {
+  padding-left: 9px;
+  border-left: 2px solid var(--primary-light);
+  color: #5a6478;
+}
+
+/* ── 单选卡片与多选 ─────────────────────────────────────────── */
+
+.planner-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.planner-choices--compact .planner-choice {
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.planner-choice {
+  padding: 9px 13px;
+  border: 1px solid #dce2eb;
+  border-radius: 11px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: left;
+}
+
+.planner-choice:hover {
+  border-color: #8eacec;
+}
+
+/*
+ * 选中态：底色 + 边框 + 左侧对勾。三重编码是刻意的 ——
+ * 打印、高对比度模式与色觉障碍下至少有一种还在（规范 20）。
+ */
+.planner-choice--on {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-weight: 700;
+}
+
+.planner-choice--check.planner-choice--on::before {
+  content: '✓ ';
+}
+
+/* ── 三态标签（规范 4.2）───────────────────────────────────── */
+
+.planner-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.planner-tag {
+  padding: 8px 12px;
+  border: 1px solid #dce2eb;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.planner-tag__mark {
+  margin-right: 4px;
+  font-size: 11px;
+}
+
+.planner-tag__state {
+  font-weight: 700;
+}
+
+.planner-tag--prefer {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary-dark);
+}
+
+.planner-tag--require {
+  border-color: var(--danger);
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+/*
+ * 「不要」用深墨色 + 删除线，而不是第三种彩色：它与「必须」是一对反义，
+ * 而两个饱和色并列时用户要靠记忆区分哪个是哪个 —— 规范 19 明确反对
+ * 「依赖颜色记忆」。删除线是这一态的语义图形。
+ */
+.planner-tag--exclude {
+  border-color: var(--locked);
+  background: var(--locked-light);
+  color: var(--locked);
+  text-decoration: line-through;
+}
+
+/* ── 排序多选 ───────────────────────────────────────────────── */
+
+.planner-rank {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.planner-rank__item {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-bottom: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--primary-light);
+  border-radius: 11px;
+  background: var(--primary-light);
+}
+
+.planner-rank__num {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  place-items: center;
+}
+
+.planner-rank__label {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.planner-rank__actions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.planner-icon-button {
+  width: 26px;
+  height: 26px;
+  border: 1px solid #dce2eb;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.planner-icon-button:hover:not(:disabled) {
+  border-color: #8eacec;
+}
+
+.planner-icon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 计数器与滑块 ───────────────────────────────────────────── */
+
+.planner-counter {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.planner-counter__value {
+  min-width: 34px;
+  font-size: 15px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.planner-slider__input {
+  width: 100%;
+  accent-color: var(--primary);
+}
+
+.planner-slider__scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.planner-slider__value {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ── 区间、时间与紧凑输入 ───────────────────────────────────── */
+
+.planner-range {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.planner-range__sep {
+  color: #9aa2ae;
+  font-size: 12px;
+}
+
+.planner-input--number,
+.planner-input--time,
+.planner-input--date {
+  max-width: 190px;
+}
+
+.planner-input--country {
+  max-width: 170px;
+}
+
+.planner-input--inline {
+  margin-top: 8px;
+}
+
+.planner-place {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ── 列表行与 Repeater ──────────────────────────────────────── */
+
+.planner-list-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.planner-list-row--place {
+  align-items: flex-start;
+}
+
+.planner-list-row__num {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  margin-top: 10px;
+  border-radius: 999px;
+  background: #f0f2f6;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  place-items: center;
+}
+
+.planner-repeater {
+  margin: 0 0 10px;
+  padding: 12px;
+  border: 1px solid #e6eaf1;
+  border-radius: var(--radius-md);
+  background: #fafbfe;
+}
+
+.planner-repeater__legend {
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.planner-repeater__field {
+  margin-top: 10px;
+}
+
+.planner-repeater__field:first-of-type {
+  margin-top: 0;
+}
+
+.planner-repeater__remove {
+  margin-top: 12px;
+}
+
+/* ── 开关 ───────────────────────────────────────────────────── */
+
+.planner-switch {
+  display: inline-flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.planner-switch input {
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  flex: 0 0 16px;
+  accent-color: var(--primary);
+}
+
+.planner-switch__label {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* ── 步骤底部动作条（规范 3.2 的 Sticky Action）─────────────── */
 
 .planner-actions {

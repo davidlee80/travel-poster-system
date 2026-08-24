@@ -158,8 +158,9 @@ export function Planner(): React.ReactElement {
               key={step}
               step={step}
               active={step === state.activeStep}
+              state={state}
               snapshot={snapshot}
-              devMode={state.devMode}
+              dispatch={dispatch}
               onPrev={prevStep === undefined ? null : () => goToStep(prevStep)}
               onNext={nextStep === undefined ? null : () => goToStep(nextStep)}
               nextLabel={nextMeta === undefined ? null : `下一步 · ${nextMeta.nav} →`}
