@@ -368,9 +368,7 @@ export const PlannerBudgetSchema = z.object({
    * 用 `{ enabled, amount? }` 而不是 `amount?: number`：开关关掉时要保留已填数值
    * （规范 6 的「值保留」），而 `undefined` 表达不了「填过但现在不生效」。
    */
-  hard_cap: z
-    .object({ enabled: z.boolean(), amount: z.number().min(0).optional() })
-    .optional(),
+  hard_cap: z.object({ enabled: z.boolean(), amount: z.number().min(0).optional() }).optional(),
   /**
    * PV2-03-006。两部分：预算口径包含哪些项 + 愿意多花在哪。
    *
@@ -396,7 +394,13 @@ export const WALKING_TOLERANCE_VALUES = [
 export const WalkingToleranceSchema = z.enum(WALKING_TOLERANCE_VALUES);
 export type WalkingTolerance = (typeof WALKING_TOLERANCE_VALUES)[number];
 
-export const CORE_ACTIVITIES_VALUES = ['ONE', 'TWO_TO_THREE', 'FOUR_TO_FIVE', 'AS_MANY', 'SYSTEM'] as const;
+export const CORE_ACTIVITIES_VALUES = [
+  'ONE',
+  'TWO_TO_THREE',
+  'FOUR_TO_FIVE',
+  'AS_MANY',
+  'SYSTEM',
+] as const;
 export const CoreActivitiesSchema = z.enum(CORE_ACTIVITIES_VALUES);
 export type CoreActivities = (typeof CORE_ACTIVITIES_VALUES)[number];
 
@@ -438,9 +442,7 @@ export const PlannerPaceSchema = z.object({
   /** PV2-04-005 */
   free_time: FreeTimeSchema.optional(),
   /** PV2-04-006。`enabled` 的理由同 `budget.hard_cap` */
-  rest_window: z
-    .object({ enabled: z.boolean(), window: TimeRangeSchema.optional() })
-    .optional(),
+  rest_window: z.object({ enabled: z.boolean(), window: TimeRangeSchema.optional() }).optional(),
   /** PV2-04-007。规范 10：这是「换几次酒店」，由后台推导路线结构，不要求用户懂术语 */
   hotel_change_tolerance: HotelChangeToleranceSchema.optional(),
 });
@@ -469,7 +471,12 @@ export const SEAT_PREFERENCE_VALUES = ['WINDOW', 'AISLE', 'TOGETHER'] as const;
 export const SeatPreferenceSchema = z.enum(SEAT_PREFERENCE_VALUES);
 export type SeatPreference = (typeof SEAT_PREFERENCE_VALUES)[number];
 
-export const DEPARTURE_WINDOW_VALUES = ['EARLY_MORNING', 'MORNING', 'AFTERNOON', 'EVENING'] as const;
+export const DEPARTURE_WINDOW_VALUES = [
+  'EARLY_MORNING',
+  'MORNING',
+  'AFTERNOON',
+  'EVENING',
+] as const;
 export const DepartureWindowSchema = z.enum(DEPARTURE_WINDOW_VALUES);
 export type DepartureWindow = (typeof DEPARTURE_WINDOW_VALUES)[number];
 
@@ -486,7 +493,13 @@ export const CAR_TYPE_VALUES = ['SEDAN', 'SUV', 'VAN_7', 'WITH_CHILD_SEAT'] as c
 export const CarTypeSchema = z.enum(CAR_TYPE_VALUES);
 export type CarType = (typeof CAR_TYPE_VALUES)[number];
 
-export const LARGE_LUGGAGE_VALUES = ['NONE', 'STROLLER', 'CAMERA_GEAR', 'SPORTS_GEAR', 'OTHER'] as const;
+export const LARGE_LUGGAGE_VALUES = [
+  'NONE',
+  'STROLLER',
+  'CAMERA_GEAR',
+  'SPORTS_GEAR',
+  'OTHER',
+] as const;
 export const LargeLuggageSchema = z.enum(LARGE_LUGGAGE_VALUES);
 export type LargeLuggage = (typeof LARGE_LUGGAGE_VALUES)[number];
 
@@ -649,7 +662,8 @@ export const DIETARY_REQUIREMENT_VALUES = [
   'HALAL',
   'KOSHER',
   'NO_SPICY',
-  'NO_ALCOHOL',
+  /* 与条件码 `diet.alcohol_free` 同名同义。两处不同名会让投影逻辑多一条特例映射 */
+  'ALCOHOL_FREE',
   'OTHER',
 ] as const;
 export const DietaryRequirementSchema = z.enum(DIETARY_REQUIREMENT_VALUES);

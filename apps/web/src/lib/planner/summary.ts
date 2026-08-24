@@ -64,14 +64,14 @@ export interface SummarySection {
  * 而不是空串 —— 调用方据此**不产出 chip**，而一个空 chip 会让用户以为
  * 自己填的东西丢了。
  */
-export function formatAnswer(value: unknown): string | null {
+export function formatAnswer(value: unknown, apiKey?: string): string | null {
   if (value === undefined || value === null) return null;
-  if (typeof value === 'string') return value.trim().length > 0 ? optionLabel(value) : null;
+  if (typeof value === 'string') return value.trim().length > 0 ? optionLabel(value, apiKey) : null;
   if (typeof value === 'number') return String(value);
   if (typeof value === 'boolean') return value ? '是' : '否';
 
   if (Array.isArray(value)) {
-    const parts = value.map((entry) => formatAnswer(entry)).filter((part) => part !== null);
+    const parts = value.map((entry) => formatAnswer(entry, apiKey)).filter((part) => part !== null);
     return parts.length === 0 ? null : parts.join('、');
   }
 
@@ -80,13 +80,13 @@ export function formatAnswer(value: unknown): string | null {
 
   /* 三态标签：显示「标签 · 态」，因为「必须公共交通」与「不要公共交通」是两件事 */
   if (typeof record['code'] === 'string' && typeof record['stance'] === 'string') {
-    return `${optionLabel(record['code'])}${STANCE_SUFFIX[record['stance']] ?? ''}`;
+    return `${optionLabel(record['code'], apiKey)}${STANCE_SUFFIX[record['stance']] ?? ''}`;
   }
 
-  if ('user_reported' in record) return formatAnswer(record['user_reported']);
+  if ('user_reported' in record) return formatAnswer(record['user_reported'], apiKey);
 
   if ('values' in record) {
-    const values = formatAnswer(record['values']);
+    const values = formatAnswer(record['values'], apiKey);
     const other = typeof record['other_text'] === 'string' ? record['other_text'].trim() : '';
     if (values === null) return other.length > 0 ? other : null;
     return other.length > 0 ? `${values}、${other}` : values;
@@ -95,7 +95,7 @@ export function formatAnswer(value: unknown): string | null {
   if ('enabled' in record) {
     if (record['enabled'] !== true) return null;
     const rest = Object.entries(record).filter(([key]) => key !== 'enabled');
-    const detail = formatAnswer(Object.fromEntries(rest));
+    const detail = formatAnswer(Object.fromEntries(rest), apiKey);
     return detail === null ? '已开启' : detail;
   }
 
@@ -109,7 +109,7 @@ export function formatAnswer(value: unknown): string | null {
   }
 
   const parts = Object.values(record)
-    .map((entry) => formatAnswer(entry))
+    .map((entry) => formatAnswer(entry, apiKey))
     .filter((part) => part !== null);
   return parts.length === 0 ? null : parts.join('、');
 }
@@ -189,7 +189,7 @@ function chipText(state: PlannerState, fieldId: PlannerFieldId): string | null {
      */
     return ABSTRACT_SUMMARY[fieldId] ?? null;
   }
-  const value = formatAnswer(readAnswer(state.answers, spec.api_key));
+  const value = formatAnswer(readAnswer(state.answers, spec.api_key), spec.api_key);
   return value === null ? null : `${shortQuestion(spec.question)}：${value}`;
 }
 
