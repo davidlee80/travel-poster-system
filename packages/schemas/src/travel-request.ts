@@ -295,6 +295,59 @@ export const TravelRequestUISchema = z.object({
    * 客户端一行不改。
    */
   planner_profile: PlannerProfileSchema.optional(),
+}).superRefine((request, ctx) => {
+  /*
+   * 目的地在两处出现，必须一致。
+   *
+   * ## 为什么两处都要发
+   *
+   * `travel_requests` 表有 `destination_name VARCHAR(200) NOT NULL` 与
+   * `destination_place_id` 两个**提取列**，若干 CHECK 约束依赖它们，
+   * 因此 `trip.destination` 是单个地点、不能变成数组。而多城序列必须能表达，
+   * 它落在 `planner_profile.trip.destinations`（1～5 个，顺序即行程顺序）。
+   *
+   * ## 为什么要在契约层断言，而不是取其一
+   *
+   * 静默取其一有两种走法，两种都很糟：取 `trip.destination` 会让多城行程的
+   * 第 2～5 个城市凭空消失，而生成出的计划看起来完全正常；取
+   * `destinations[0]` 会让提取列与请求体不一致，于是数据库里那一行的
+   * 目的地与用户看到的不是同一个地方。
+   *
+   * 这是本文件里**唯一**一条跨字段校验。它不违反「schema 只做结构校验」那条
+   * 原则：不一致的两处目的地不是「业务上不可行」（那类判断归 N-xx），
+   * 而是**客户端构造错误** —— 与模板 ID 写错同类，因此
+   * `REQ_SCHEMA_INVALID` 是正确的错误码，而 `path` 指向具体那一处。
+   */
+  const destinations = request.planner_profile?.trip?.destinations;
+  if (destinations === undefined || destinations.length === 0) return;
+
+  const primary = destinations[0];
+  if (primary === undefined) return;
+
+  if (primary.text !== request.trip.destination.text) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['planner_profile', 'trip', 'destinations', 0, 'text'],
+      message: `与 trip.destination.text（${request.trip.destination.text}）不一致`,
+    });
+  }
+
+  /*
+   * `place_id` 只在两边都有时比较。
+   *
+   * 单边有值是合法的：`planner_profile` 的地点可能来自地点服务而
+   * `trip.destination` 由前端投影时省略了它（`PlaceRefSchema.place_id` 可缺省）。
+   * 要求两边同时有值会把「还没接地点服务」变成一个提交错误。
+   */
+  const primaryId = primary.place_id;
+  const tripId = request.trip.destination.place_id;
+  if (primaryId !== undefined && tripId !== undefined && primaryId !== tripId) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['planner_profile', 'trip', 'destinations', 0, 'place_id'],
+      message: `与 trip.destination.place_id（${tripId}）不一致`,
+    });
+  }
 });
 
 /**

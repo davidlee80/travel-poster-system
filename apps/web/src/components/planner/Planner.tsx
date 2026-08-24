@@ -3,8 +3,11 @@
 import { PLANNER_STEPS, type PlannerFieldId, type PlannerStepId } from '@tps/schemas';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
+import { generatePlan, getJobStatus } from '@/lib/api-client';
+import type { GenerationPhase } from '@/lib/generation-dialog';
+import { buildPlannerRequest } from '@/lib/planner/request';
 import { buildSummary } from '@/lib/planner/summary';
-import { buildSnapshot } from '@/lib/planner/step-state';
+import { buildSnapshot, generateButtonLabel } from '@/lib/planner/step-state';
 import {
   INITIAL_PLANNER_STATE,
   plannerReducer,
@@ -12,7 +15,11 @@ import {
   type PlannerState,
 } from '@/lib/planner/state';
 import { clearDraft, loadDraft, saveDraft, type SaveState } from '@/lib/planner/persistence';
+import { browserTimezone, newClientRequestId } from '@/lib/travel-request-form';
 import { AuthPanel } from '../AuthPanel';
+import { useSession } from '../SessionProvider';
+import { GenerationDialog } from './GenerationDialog';
+import { BlockerList, ReviewPanel } from './ReviewBoard';
 import { StepPage } from './StepPage';
 import { StepNav } from './shell/StepNav';
 import { SummaryRail } from './shell/SummaryRail';
@@ -25,6 +32,8 @@ import { TopBar } from './shell/TopBar';
  * 状态全部在这里，向下传 props —— 快照要在左右两栏同时用，
  * 下沉到步骤组件里就得靠 context 或重复计算，而重复计算会让
  * 「左栏说这步完成了，生成按钮说还有缺项」。
+ *
+ * 生成与轮询沿用 P2 的逻辑（13.1 提交 → 13.2 轮询）。
  */
 
 /** 主问卷的九步。第 10 步是生成之后的行前准备中心（规范 16），不在导航里 */
@@ -43,8 +52,53 @@ const MAIN_STEPS: readonly PlannerStepId[] = PLANNER_STEPS.filter((step) => step
  */
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
+/** 轮询间隔。21.2 的 T1 目标是 75 秒内出文字版计划，2 秒足够跟上进度条 */
+const POLL_INTERVAL_MS = 2_000;
+/** 16.3：整个生成任务上限 300 秒。轮询上限略高于它，避免比服务端先放弃 */
+const POLL_TIMEOUT_MS = 320_000;
+
+/**
+ * 计划已可读的状态。
+ *
+ * 判断依据是「到达 SAVING_PLAN」而不是 COMPLETED：后者要等渲染与导出走完，
+ * 而文字版计划在存库那一刻就能看了 —— 让用户多等 40 秒没有收益。
+ */
+const READABLE_STATUSES = new Set([
+  'SAVING_PLAN',
+  'BUILDING_PRESENTATION',
+  'RESOLVING_ASSETS',
+  'GENERATING_ASSETS',
+  'RENDERING_HTML',
+  'EXPORTING_PNG',
+  'EXPORTING_PDF',
+  'COMPLETED',
+]);
+
 export function Planner(): React.ReactElement {
+  const { status, refresh } = useSession();
+  /*
+   * 只有拿到身份才允许提交（P7 之后必须是注册用户）。
+   * `loading` 也算未就绪：首屏禁用比「先允许点、再发现不行」好 ——
+   * 后者会让访客填完九步再被拒。
+   */
+  const signedIn = status.kind === 'ready';
+
+  /**
+   * 任何 401 都意味着服务端已经不认这个会话了 —— 重新解析一次身份。
+   *
+   * 不做这件事的表现是**界面卡死**：`SessionProvider` 只在挂载时与登出后取
+   * 身份，于是会话过期之后右上角仍然显示「已登录」、提交按钮仍然可点，
+   * 而后端回的「登录状态已失效，请重新登录。」在屏幕上找不到可以登录的地方。
+   */
+  const reauthOn401 = useCallback(
+    (httpStatus: number): void => {
+      if (httpStatus === 401) void refresh();
+    },
+    [refresh],
+  );
+
   const [state, dispatch] = useReducer(plannerReducer, INITIAL_PLANNER_STATE);
+  const [phase, setPhase] = useState<GenerationPhase>({ kind: 'idle' });
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [menuOpen, setMenuOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -52,6 +106,10 @@ export function Planner(): React.ReactElement {
   const fieldNodes = useRef(new Map<PlannerFieldId, HTMLElement>());
   /** 首次挂载时不写草稿 —— 那会把一份空状态盖掉刚读出来的草稿 */
   const hydrated = useRef(false);
+  /** 防止组件卸载后仍在轮询并 setState */
+  const cancelled = useRef(false);
+
+  const timezone = useMemo(() => browserTimezone(), []);
 
   /*
    * 草稿恢复只在挂载时做一次。
@@ -86,6 +144,14 @@ export function Planner(): React.ReactElement {
     return () => clearTimeout(timer);
   }, [state]);
 
+  /* 卸载后停止轮询。不做的话 `setPhase` 会作用在一个已经不存在的组件上 */
+  useEffect(
+    () => () => {
+      cancelled.current = true;
+    },
+    [],
+  );
+
   const snapshot = useMemo(() => buildSnapshot(state), [state]);
   const sections = useMemo(() => buildSummary(state, snapshot), [state, snapshot]);
   const metrics = useMemo(() => buildMetrics(state), [state]);
@@ -119,10 +185,152 @@ export function Planner(): React.ReactElement {
     }, 0);
   }, []);
 
+  async function poll(jobId: string, planId: string): Promise<void> {
+    const deadline = Date.now() + POLL_TIMEOUT_MS;
+
+    while (!cancelled.current && Date.now() < deadline) {
+      const result = await getJobStatus(jobId);
+      if (!result.ok) {
+        // 轮询途中会话失效也要重新解析 —— 生成要跑一分多钟，够 Cookie 过期
+        reauthOn401(result.status);
+        setPhase({
+          kind: 'error',
+          message: result.message,
+          retryable: result.retryable,
+          needsAuth: result.status === 401,
+        });
+        return;
+      }
+      if (result.data.status === 'FAILED') {
+        /*
+         * 13.2 的 message 在 FAILED 时就是错误码对应的用户文案，直接展示 ——
+         * 前端自己拼一句「生成失败」会盖掉「请放宽部分条件后重试」这种
+         * 唯一有用的指引。
+         */
+        setPhase({ kind: 'error', message: result.data.message, retryable: false });
+        return;
+      }
+      if (READABLE_STATUSES.has(result.data.status)) {
+        setPhase({ kind: 'ready', planId });
+        return;
+      }
+
+      setPhase({
+        kind: 'generating',
+        progress: result.data.progress,
+        message: result.data.message,
+      });
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+
+    if (!cancelled.current) {
+      setPhase({
+        kind: 'error',
+        message: '生成用时过长，请稍后在历史记录里查看。',
+        retryable: true,
+      });
+    }
+  }
+
+  /**
+   * 生成入口（规范 18 的三态）。
+   *
+   * `blocked` 时**不发请求**而是把用户送到第 9 步的问题清单 —— 规范原文：
+   * 「按钮可点击但进入问题定位，不建议纯 disabled；避免用户不知道为何不能生成」。
+   * 一个灰掉的按钮不解释任何事，而用户唯一能做的是把每一步再翻一遍。
+   *
+   * `draft` 同样送到第 9 步：那一页会列出还缺哪几项必答，
+   * 比在右栏弹一句「请先完善画像」有用。
+   */
+  async function submit(): Promise<void> {
+    if (snapshot.tripState === 'blocked' || snapshot.tripState === 'draft') {
+      goToStep('09');
+      setSummaryOpen(false);
+      return;
+    }
+
+    setPhase({ kind: 'submitting' });
+    setSummaryOpen(false);
+
+    /*
+     * 整段包在 try 里，是因为等待弹层在 `submitting` / `generating` 期间
+     * **不允许关闭**（关掉了用户就再也看不到结果）。这意味着任何未捕获的
+     * 异常都会把用户永久困在一个不动的弹层后面 —— 而在这之前同一个异常
+     * 只表现为「点了按钮没反应」，用户至少还能重试。
+     *
+     * 实际撞到过一次：`crypto.randomUUID` 在明文 HTTP 下不存在，
+     * `newClientRequestId()` 抛 TypeError，请求压根没发出（见那个函数的注释）。
+     */
+    try {
+      const stamp = new Date();
+      // 13.8：每次提交换新 client_request_id，否则会拿回上一次的结果
+      const body = buildPlannerRequest(state, {
+        clientRequestId: newClientRequestId(),
+        timezone,
+        today: stamp.toISOString().slice(0, 10),
+        now: stamp.toISOString(),
+      });
+
+      const result = await generatePlan(body);
+      if (!result.ok) {
+        reauthOn401(result.status);
+        setPhase({
+          kind: 'error',
+          message: result.message,
+          retryable: result.retryable,
+          needsAuth: result.status === 401,
+        });
+        return;
+      }
+
+      cancelled.current = false;
+      await poll(result.data.job_id, result.data.plan_id);
+    } catch (error) {
+      /*
+       * 原始信息带上去而不是只说「出错了」：这条路径上的异常都是浏览器环境
+       * 问题（缺 API、被扩展拦掉），而那类问题只有原文能给出排查方向。
+       */
+      setPhase({
+        kind: 'error',
+        message: `提交时出错：${error instanceof Error ? error.message : String(error)}`,
+        retryable: true,
+      });
+    }
+  }
+
+  const busy = phase.kind === 'submitting' || phase.kind === 'generating';
   const activeIndex = MAIN_STEPS.indexOf(state.activeStep);
   const prevStep = activeIndex > 0 ? MAIN_STEPS[activeIndex - 1] : undefined;
   const nextStep = activeIndex >= 0 ? MAIN_STEPS[activeIndex + 1] : undefined;
   const nextMeta = PLANNER_STEPS.find((step) => step.step === nextStep);
+
+  /**
+   * 第 9 步的两个元字段由复核面板承载。
+   *
+   * 通过 `slots` 注入而不是让 `StepPage` 认识第 9 步：`StepPage` 的职责是
+   * 「按区块表渲染这一步的字段」，让它 `if (step === '09')` 会让第 9 步的
+   * 特殊性散进一个通用组件里，而下一个特殊步骤（第 10 步的行前准备中心）
+   * 又要加一个 if。
+   */
+  const reviewSlots = {
+    'PV2-09-001': (
+      <ReviewPanel
+        state={state}
+        snapshot={snapshot}
+        dispatch={dispatch}
+        onJumpToField={jumpToField}
+      />
+    ),
+    'PV2-09-002': (
+      <BlockerList
+        state={state}
+        snapshot={snapshot}
+        dispatch={dispatch}
+        onJumpToField={jumpToField}
+        registerField={registerField}
+      />
+    ),
+  } as const;
 
   return (
     <div className="planner">
@@ -165,6 +373,7 @@ export function Planner(): React.ReactElement {
               onNext={nextStep === undefined ? null : () => goToStep(nextStep)}
               nextLabel={nextMeta === undefined ? null : `下一步 · ${nextMeta.nav} →`}
               registerField={registerField}
+              {...(step === '09' ? { slots: reviewSlots, actions: generateButton() } : {})}
             />
           ))}
         </main>
@@ -175,15 +384,17 @@ export function Planner(): React.ReactElement {
           metrics={metrics}
           onJumpToField={jumpToField}
           /*
-           * 生成入口现在把用户送到第 9 步。
+           * 右栏的生成入口与第 9 步底部那个是**同一个动作**。
            *
-           * 那一页承载「确认 + 精准补问 + 授权 + 生成」（规范 15），提交与
-           * blocker 定位都在那里 —— 在右栏直接发请求会绕过授权勾选，
-           * 而 CONSENT 是运行时优先级第二高的约束（4.1）。
+           * 曾经它只是「跳到第 9 步」，因为提交要先过授权勾选。现在
+           * `submit()` 自己判断：`blocked` / `draft` 时跳第 9 步，
+           * 其余情况直接提交 —— 而 CONSENT 未勾选正是让 tripState 变成
+           * `blocked` 的原因之一（见 `computeTripState`），因此授权
+           * 绕不过去，同时已经填完的用户也不必多点一次。
            */
-          onGenerate={() => goToStep('09')}
+          onGenerate={() => void submit()}
           onJumpToVerify={() => goToStep('09')}
-          generateDisabled={false}
+          generateDisabled={busy || !signedIn}
           open={summaryOpen}
         />
       </div>
@@ -205,8 +416,28 @@ export function Planner(): React.ReactElement {
         }}
         aria-hidden="true"
       />
+
+      <GenerationDialog phase={phase} onClose={() => setPhase({ kind: 'idle' })} />
     </div>
   );
+
+  function generateButton(): React.ReactElement {
+    return (
+      <>
+        <button
+          type="button"
+          className="planner-button planner-button--primary planner-button--large"
+          onClick={() => void submit()}
+          disabled={busy || !signedIn}
+        >
+          {generateButtonLabel(snapshot.tripState, snapshot.verifyCount)}
+        </button>
+        {signedIn ? null : (
+          <span className="planner-actions__note">登录后才能生成 —— 右上角可以登录或注册。</span>
+        )}
+      </>
+    );
+  }
 }
 
 /**

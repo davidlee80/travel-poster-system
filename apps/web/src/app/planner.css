@@ -1422,6 +1422,118 @@
   line-height: 1.5;
 }
 
+/* ── 第 9 步的复核面板与阻塞项（规范 15、18）────────────────── */
+
+.planner-review__conflicts {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #e5a1a1;
+  border-radius: var(--radius-md);
+  background: var(--danger-light);
+}
+
+.planner-review__conflicts-title {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.planner-review__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.planner-review__list > li {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 6px 0;
+}
+
+.planner-review__where {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.planner-review__what {
+  flex: 1;
+  font-size: 12px;
+}
+
+.planner-review__group {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed #dfe4ec;
+}
+
+.planner-review__group-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.planner-review__group-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+/*
+ * 三个指标并排，且各带自己的标题。
+ *
+ * 规范 17.1 要求它们**分开**呈现：完整度高不代表可以生成，可以生成也不代表
+ * 没有待核验项。合成一个进度条会让用户无法判断自己该做什么。
+ */
+.planner-review__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.planner-review__metrics dt {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.planner-review__metrics dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.planner-blockers__item {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--warning-light);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius-md);
+  background: #fffdf8;
+}
+
+.planner-blockers__from {
+  margin: 0 0 8px;
+  color: var(--warning);
+  font-size: 11px;
+}
+
+.planner-blockers__verify {
+  padding: 12px;
+  border: 1px dashed #d9c39a;
+  border-radius: var(--radius-md);
+  background: var(--warning-light);
+}
+
+.planner-blockers__verify > strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
 /* ── 步骤底部动作条（规范 3.2 的 Sticky Action）─────────────── */
 
 .planner-actions {

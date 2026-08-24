@@ -216,7 +216,8 @@ describe('挂到 TravelRequestUI 之后的向后兼容', () => {
     const result = TravelRequestUISchema.safeParse({
       ...minimal,
       planner_profile: {
-        trip: { destinations: [{ text: '东京' }, { text: '京都' }], date_flexibility: 'PLUS_MINUS_3' },
+        /* 首个目的地必须与 `trip.destination.text` 一致，见下面那组断言 */
+        trip: { destinations: [{ text: '杭州' }, { text: '苏州' }], date_flexibility: 'PLUS_MINUS_3' },
         privacy: { trip_processing_consent: true, save_preferences: false },
       },
     });
@@ -226,11 +227,85 @@ describe('挂到 TravelRequestUI 之后的向后兼容', () => {
   });
 
   it('目的地上限 5 个（字段表：允许 1~5 个备选）', () => {
-    const six = Array.from({ length: 6 }, (_, i) => ({ text: `城市${i}` }));
+    /* 首个与 `trip.destination` 一致，因此这条只可能因为「超过 5 个」而失败 */
+    const six = ['杭州', ...Array.from({ length: 5 }, (_, i) => `城市${i}`)].map((text) => ({ text }));
     const result = TravelRequestUISchema.safeParse({
       ...minimal,
       planner_profile: { trip: { destinations: six } },
     });
     expect(result.success).toBe(false);
+  });
+});
+
+/**
+ * 陷阱 3：`trip.destination` 是数据库提取列的来源，多城序列在
+ * `planner_profile.trip.destinations` 里，两者必须一致。
+ *
+ * 静默取其一的两种走法都很糟：取前者让第 2～5 个城市凭空消失而计划看起来正常；
+ * 取后者让数据库那一行的目的地与请求体不是同一个地方。
+ */
+describe('目的地两处一致（陷阱 3）', () => {
+  const base = {
+    schema_version: SCHEMA_VERSIONS.travelRequestUi,
+    client_request_id: 'test-2',
+    timezone: 'Asia/Shanghai',
+    trip: {
+      origin: { text: '上海' },
+      destination: { text: '东京', place_id: 'tokyo' },
+      dates: { start_date: '2026-09-01', end_date: '2026-09-03' },
+    },
+    travelers: { adults: 2 },
+    budget: { basis: 'TOTAL', min: 8_000, max: 12_000 },
+  } as const;
+
+  it('首个目的地与 trip.destination 一致时通过', () => {
+    const result = TravelRequestUISchema.safeParse({
+      ...base,
+      planner_profile: {
+        trip: { destinations: [{ text: '东京', place_id: 'tokyo' }, { text: '京都' }] },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('地点名不一致时被拒，且 path 指向具体那一处', () => {
+    const result = TravelRequestUISchema.safeParse({
+      ...base,
+      planner_profile: { trip: { destinations: [{ text: '大阪' }] } },
+    });
+    expect(result.success).toBe(false);
+    /* 13.7 要求请求校验错误带 field，而 field 就是从这个 path 来的 */
+    expect(result.error?.issues[0]?.path).toEqual([
+      'planner_profile',
+      'trip',
+      'destinations',
+      0,
+      'text',
+    ]);
+  });
+
+  it('place_id 不一致时被拒', () => {
+    const result = TravelRequestUISchema.safeParse({
+      ...base,
+      planner_profile: { trip: { destinations: [{ text: '东京', place_id: 'osaka' }] } },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('只有一边有 place_id 时不算不一致 —— 还没接地点服务是受支持的中间态', () => {
+    const result = TravelRequestUISchema.safeParse({
+      ...base,
+      planner_profile: { trip: { destinations: [{ text: '东京' }] } },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('没有 planner_profile 或目的地为空时不参与比较', () => {
+    /* P8 及之前的客户端一行不改仍然合法 —— 这条断言就是那句话的落点 */
+    expect(TravelRequestUISchema.safeParse(base).success).toBe(true);
+    expect(
+      TravelRequestUISchema.safeParse({ ...base, planner_profile: { trip: { destinations: [] } } })
+        .success,
+    ).toBe(true);
   });
 });

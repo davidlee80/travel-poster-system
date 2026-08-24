@@ -107,8 +107,17 @@ async function selfTest() {
       expectValid: false,
     },
     {
-      label: '条件 code 不在字典内',
-      value: { ...minimal, conditions: [{ code: 'diet.kosher', mode: 'MUST', value: true }] },
+      /*
+       * 域前缀不在白名单内。
+       *
+       * 这条反证曾经用 `diet.kosher`，而 P9 把犹太洁食加进了条件字典 ——
+       * 于是「期望非法」变成了错的。换成一个域前缀本身不存在的 code：
+       * `ConditionCodeSchema` 校验的正是域前缀（七个既有域之一），
+       * 而具体 code 在不在字典里由服务端的 N-08 判定（配置中心可以发布新码，
+       * 见 conditions.ts）—— 因此 schema 层唯一能拒的就是域。
+       */
+      label: '条件 code 的域前缀不在白名单内',
+      value: { ...minimal, conditions: [{ code: 'weather.sunny', mode: 'MUST', value: true }] },
       expectValid: false,
     },
     {

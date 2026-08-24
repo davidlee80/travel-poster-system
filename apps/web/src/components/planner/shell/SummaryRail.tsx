@@ -3,7 +3,11 @@
 import type { PlannerFieldId, PlannerStepId } from '@tps/schemas';
 
 import type { SummaryChip, SummarySection } from '@/lib/planner/summary';
-import { TRIP_STATE_LABEL, type PlannerSnapshot } from '@/lib/planner/step-state';
+import {
+  TRIP_STATE_LABEL,
+  generateButtonLabel,
+  type PlannerSnapshot,
+} from '@/lib/planner/step-state';
 
 /**
  * 右栏：旅行画像五组 + 关键数字 + 生成入口（规范 17）。
@@ -111,7 +115,7 @@ export function SummaryRail({
           onClick={onGenerate}
           disabled={generateDisabled}
         >
-          {generateLabel(snapshot)}
+          {generateButtonLabel(snapshot.tripState, snapshot.verifyCount)}
         </button>
         {snapshot.verifyCount > 0 ? (
           <button
@@ -160,12 +164,4 @@ function Chip({
       {chip.text}
     </button>
   );
-}
-
-function generateLabel(snapshot: PlannerSnapshot): string {
-  if (snapshot.tripState === 'research-needed') {
-    return `生成初步方案 · 仍有 ${snapshot.verifyCount} 项待确认`;
-  }
-  if (snapshot.tripState === 'blocked') return '查看待处理的问题';
-  return '生成初步旅行方案';
 }

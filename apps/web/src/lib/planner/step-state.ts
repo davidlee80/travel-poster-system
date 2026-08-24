@@ -215,3 +215,33 @@ export const TRIP_STATE_LABEL: Record<TripState, string> = {
   blocked: '还有问题需要处理',
   'plan-generated': '已生成初步方案',
 };
+
+/**
+ * 生成按钮上的文案（规范 18 的状态表）。
+ *
+ * 与 `TRIP_STATE_LABEL` 分开：那是一句**描述状态**的说明（「还有问题需要处理」），
+ * 这是一句**描述点下去会发生什么**的动作（「查看还有什么问题」）。把两者
+ * 合成一份的话，按钮上会写着一句陈述句而用户不知道点它干什么。
+ *
+ * 右栏与第 9 步底部两处共用这一份 —— 两份文案迟早分叉，
+ * 而分叉的表现是同一个状态下两个按钮说着不同的话。
+ */
+export function generateButtonLabel(tripState: TripState, verifyCount: number): string {
+  switch (tripState) {
+    case 'research-needed':
+      return `生成初步方案 · 仍有 ${verifyCount} 项待确认`;
+    /* 可点击而不是 disabled：点了进入问题定位（规范 18 明确反对纯 disabled）*/
+    case 'blocked':
+      return '查看还有什么问题';
+    case 'draft':
+      return '还差几项必答，去看看';
+    case 'plan-generated':
+      return '重新生成';
+    case 'ready-for-plan':
+      return '生成初步旅行方案';
+    default: {
+      const exhaustive: never = tripState;
+      return exhaustive;
+    }
+  }
+}
