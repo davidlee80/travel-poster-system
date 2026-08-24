@@ -173,6 +173,31 @@ const VALIDATORS: Partial<Record<PlannerFieldId, Validator>> = {
     return incomplete.length > 0 ? '每种过敏原都需要填写严重程度。' : null;
   },
 
+  'PV2-07-008': (s) => {
+    /*
+     * 必去项的日期限制必须落在旅行窗口内（规范 18.1 的第三类冲突）。
+     *
+     * 只查 `must_do[].date_constraint` —— 它是结构化的 `YYYY-MM-DD`。
+     * 已有订单（PV2-01-009）的时间**查不了**：契约里它是自由文本
+     * （`datetime_text`，因为用户手上的凭证形态各异，「10/05 10:00 起飞」），
+     * 从中解析日期需要一个容错的中文日期解析器，而解析错的后果是
+     * 报一个用户看不懂的冲突。那一项由生成侧的 LOCKED 约束在 Prompt 里
+     * 交给模型判断，并在 `assumptions` 里说明。
+     */
+    const dates = asRecord(readAnswer(s.answers, 'trip.dates'));
+    const start = str(dates['start_date']);
+    const end = str(dates['end_date']);
+    if (start.length === 0 || end.length === 0) return null;
+
+    const outside = asArray(readAnswer(s.answers, 'interests.must_do')).filter((entry) => {
+      const date = str(asRecord(entry)['date_constraint']);
+      return date.length > 0 && (date < start || date > end);
+    });
+    return outside.length === 0
+      ? null
+      : `有 ${outside.length} 项的日期不在 ${start} 至 ${end} 之间。`;
+  },
+
   'PV2-07-007': (s) => {
     /* 字段表：Top 3 必须从已选兴趣中选择 */
     const tags = asArray(readAnswer(s.answers, 'interests.tags')).map((t) => str(t));

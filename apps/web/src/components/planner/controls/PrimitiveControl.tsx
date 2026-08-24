@@ -2,6 +2,7 @@
 
 import type { FieldPart } from '@/lib/planner/descriptors';
 import { asList } from '@/lib/planner/field-io';
+import { optionLabel } from '@/lib/planner/field-spec';
 
 import { CheckGroup, ChoiceRow, RankSelect, TriStateTag } from './ChoiceControls';
 import { PlaceList, PlacePicker } from './PlaceControls';
@@ -169,6 +170,16 @@ function ObjectList({
               {part.add_label === undefined ? `第 ${index + 1} 项` : `${part.add_label.replace(/^添加/, '')} ${index + 1}`}
             </legend>
 
+            {/*
+              一行摘要（规范 19 的「Repeater 折叠摘要」）。
+              窄屏上一张五个字段的订单卡要占满一屏，而用户在核对「我填了哪几张」
+              时需要的只是「10/01 15:00 · 东京湾酒店」这一行。
+              CSS 在 ≥768px 隐藏它（桌面端字段本身就都看得见），
+              因此这里恒渲染而不是按屏宽分支 —— 后者要读窗口宽度，
+              而那会让服务端渲染与客户端首次渲染不一致。
+            */}
+            <p className="planner-repeater__summary">{rowSummary(itemParts, row, apiKey, index)}</p>
+
             {itemParts.map((itemPart) => (
               <RowField
                 key={itemPart.key ?? 'self'}
@@ -206,6 +217,32 @@ function ObjectList({
       {rowCount === 0 ? <p className="planner-hint">还没有任何记录。</p> : null}
     </div>
   );
+}
+
+/**
+ * 一行的摘要文案。
+ *
+ * 只取**前两个有值的文本或选项**：更多的话它就不再是摘要而是把整行又写了一遍。
+ * 空行给出「还没填」而不是空串 —— 一个空的摘要行看起来像渲染错误。
+ */
+function rowSummary(
+  itemParts: readonly FieldPart[],
+  row: Record<string, unknown>,
+  apiKey: string,
+  index: number,
+): string {
+  const parts: string[] = [];
+  for (const part of itemParts) {
+    if (part.key === null || parts.length >= 2) continue;
+    const raw = row[part.key];
+    if (typeof raw === 'string' && raw.trim().length > 0) {
+      /* 选项值查文案，自由文本原样 —— `optionLabel` 查不到时回退原值 */
+      parts.push(optionLabel(raw, apiKey));
+    } else if (typeof raw === 'number') {
+      parts.push(String(raw));
+    }
+  }
+  return parts.length === 0 ? `第 ${index + 1} 项还没填` : parts.join(' · ');
 }
 
 /**

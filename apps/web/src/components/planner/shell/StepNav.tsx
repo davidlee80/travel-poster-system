@@ -20,8 +20,9 @@ import { STEP_STATE_LABEL, TRIP_STATE_LABEL, type PlannerSnapshot } from '@/lib/
  * 因此每个点都有 `title` 与 `aria-label`，且 needs-attention 在 CSS 里是**方形**。
  */
 
-/** 第 10 步不在主问卷导航里 —— 它是生成之后的行前准备中心（规范 16）*/
+/** 主问卷的九步。第 10 步只在方案生成之后加进来（规范 16）*/
 const NAV_STEPS = PLANNER_STEPS.filter((step) => step.step !== '10');
+const PREP_STEP = PLANNER_STEPS.find((step) => step.step === '10');
 
 export interface StepNavProps {
   readonly activeStep: PlannerStepId;
@@ -29,9 +30,23 @@ export interface StepNavProps {
   readonly onJump: (step: PlannerStepId) => void;
   /** 窄屏抽屉是否展开 */
   readonly open: boolean;
+  /**
+   * 方案已生成 —— 此时导航末尾多出「行前准备中心」。
+   *
+   * 生成前**不显示**它而不是显示成禁用：规范 16 的原则是「不把你重新拖回
+   * 9 步主问卷」，而一个灰着的第 10 步会让用户以为那是问卷的一部分、
+   * 以为必须填完它才能生成。
+   */
+  readonly planGenerated: boolean;
 }
 
-export function StepNav({ activeStep, snapshot, onJump, open }: StepNavProps): React.ReactElement {
+export function StepNav({
+  activeStep,
+  snapshot,
+  onJump,
+  open,
+  planGenerated,
+}: StepNavProps): React.ReactElement {
   return (
     <aside
       className={`planner-panel planner-left${open ? ' planner-left--open' : ''}`}
@@ -65,6 +80,25 @@ export function StepNav({ activeStep, snapshot, onJump, open }: StepNavProps): R
             </button>
           );
         })}
+
+        {planGenerated && PREP_STEP !== undefined ? (
+          <button
+            type="button"
+            className={`planner-step planner-step--prep${activeStep === '10' ? ' planner-step--active' : ''}`}
+            onClick={() => onJump('10')}
+            aria-current={activeStep === '10' ? 'step' : undefined}
+          >
+            <span className="planner-step__num" aria-hidden="true">
+              10
+            </span>
+            <span className="planner-step__name">{PREP_STEP.nav}</span>
+            {/*
+              这里**不显示状态点**：那六项是任务而不是问卷字段，
+              没有「需要处理」这一态（规范 16 的任务进度语义）。
+              进度在准备中心自己的 header 里（「已完成 2 / 6 项」）。
+            */}
+          </button>
+        ) : null}
       </nav>
 
       <div className="planner-progress">

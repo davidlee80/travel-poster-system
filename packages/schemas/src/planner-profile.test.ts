@@ -309,3 +309,98 @@ describe('目的地两处一致（陷阱 3）', () => {
     ).toBe(true);
   });
 });
+
+/**
+ * 附录 C 的隐私检查项（阻塞发布）：**不采护照号、银行卡号、驾照号**。
+ *
+ * 这组断言扫的是 schema 本身而不是界面：界面上没有输入框只说明现在没在收，
+ * 而契约里有那个字段就意味着**将来某个客户端可以发它**，且它会一路存进
+ * `travel_requests.raw_request`。规范 20 的最小化原则要求的是后者不存在。
+ */
+describe('隐私最小化（附录 C 的阻塞发布项）', () => {
+  /**
+   * schema 的全部叶子路径。
+   *
+   * 复用本文件已有的 `objectShape`（它负责剥 `.optional()` 外壳）——
+   * 在这里再写一份剥壳逻辑会让两份对 Zod 内部结构的假设各自演化，
+   * 而其中一份跟不上 Zod 升级时，这组断言会静默扫到空集然后全部通过。
+   */
+  function leafPaths(schema: z.ZodTypeAny, prefix = ''): readonly string[] {
+    const shape = objectShape(schema);
+    if (shape === null) return prefix === '' ? [] : [prefix];
+    return Object.entries(shape).flatMap(([key, value]) =>
+      leafPaths(value, prefix === '' ? key : `${prefix}.${key}`),
+    );
+  }
+
+  const paths = leafPaths(PlannerProfileSchema);
+
+  it('抽路径本身有效 —— 否则下面的断言全部空转', () => {
+    /*
+     * 没有这一条的话，`objectShape` 哪天认不出 Zod 的结构会让 `paths` 变成
+     * 空数组，而下面每一条「不该有 X」都会通过 —— 一组全绿但什么都没查的断言。
+     */
+    expect(paths.length).toBeGreaterThan(60);
+    expect(paths).toContain('documents.passport_status.user_reported.status');
+  });
+
+  it('没有任何字段叫「号码」类的名字', () => {
+    /*
+     * 逐个禁词而不是一条大正则：红的时候要能一眼看出撞的是哪个词。
+     * `reference`（订单号）不在禁词里 —— 字段表明确允许它且它是可选的，
+     * 那是用户手上的凭证编号，不是支付凭据。
+     */
+    const forbidden = [
+      'passport_number',
+      'passport_no',
+      'card_number',
+      'card_no',
+      'cvv',
+      'license_number',
+      'license_no',
+      'id_number',
+      'id_card',
+      'account',
+      'password',
+      'membership_number',
+    ];
+    const offenders = paths.filter((path) =>
+      forbidden.some((word) => path.toLowerCase().includes(word)),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it('证件三块只收状态与日期', () => {
+    /* 规范 20 与字段表：护照只要到期日与状态，签证只要状态与有效期 */
+    expect(paths.filter((path) => path.startsWith('documents.')).sort()).toEqual([
+      'documents.nationality_residency.nationality',
+      'documents.nationality_residency.residency',
+      'documents.passport_status.reported_on',
+      'documents.passport_status.user_reported.expiry_date',
+      'documents.passport_status.user_reported.status',
+      'documents.visa_status.reported_on',
+      'documents.visa_status.user_reported.status',
+      'documents.visa_status.user_reported.valid_until',
+    ]);
+  });
+
+  it('自驾只收核验条件，不收驾照号', () => {
+    expect(paths.filter((path) => path.startsWith('transport.self_drive.')).sort()).toEqual([
+      'transport.self_drive.reported_on',
+      'transport.self_drive.user_reported.car_type',
+      'transport.self_drive.user_reported.driver_age',
+      'transport.self_drive.user_reported.experience',
+      'transport.self_drive.user_reported.license_status',
+    ]);
+  });
+
+  it('紧急联系人不收位置流水，只收一次授权选择', () => {
+    /* 字段表：「位置共享独立授权」—— 授权是一个枚举，不是一串坐标 */
+    expect(paths.filter((path) => path.startsWith('pretrip.emergency_contact.')).sort()).toEqual([
+      'pretrip.emergency_contact.contact',
+      'pretrip.emergency_contact.location_sharing',
+      'pretrip.emergency_contact.name',
+      'pretrip.emergency_contact.relation',
+    ]);
+  });
+});

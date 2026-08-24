@@ -1399,6 +1399,17 @@
   margin-top: 12px;
 }
 
+/*
+ * 行摘要在桌面端隐藏 —— 那里五个字段本来就都看得见，多一行摘要是重复。
+ * 窄屏由 `@media (width <= 767px)` 打开（规范 19 的「Repeater 折叠摘要」）。
+ */
+.planner-repeater__summary {
+  display: none;
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 /* ── 开关 ───────────────────────────────────────────────────── */
 
 .planner-switch {
@@ -1420,6 +1431,155 @@
 .planner-switch__label {
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* ── 行前准备中心（规范 16 的任务卡）────────────────────────── */
+
+.planner-prep {
+  display: grid;
+  gap: 10px;
+}
+
+.planner-prep__card {
+  border: 1px solid #e6eaf1;
+  border-radius: var(--radius-md);
+  background: #fff;
+  overflow: hidden;
+}
+
+/* 已填的卡片用左侧色条而不是整卡变色 —— 六张卡都填完时整屏变绿会很吵 */
+.planner-prep__card--done {
+  border-left: 3px solid var(--success);
+}
+
+.planner-prep__head {
+  display: flex;
+  width: 100%;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+
+.planner-prep__head:hover {
+  background: #fafbfe;
+}
+
+.planner-prep__title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* 状态同时用文字与图标，不只靠颜色（规范 20）*/
+.planner-prep__state {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.planner-prep__state--done {
+  color: var(--success);
+}
+
+.planner-prep__chevron {
+  flex: 0 0 auto;
+  color: #9aa2ae;
+  font-size: 11px;
+}
+
+.planner-prep__card > div > .planner-section {
+  margin-top: 0;
+  padding: 0 14px 14px;
+  border-top: 0;
+}
+
+.planner-link {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+/* 导航里的第 10 步：与九步之间加一条分隔，表明它不属于问卷 */
+.planner-step--prep {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed #dfe4ec;
+}
+
+/* ── 三态 bottom sheet（规范 19）──────────────────────────── */
+
+.planner-tag-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+/*
+ * 「更多」按钮**只在窄屏出现**。
+ *
+ * 桌面端循环点击很顺手，多一个按钮只是噪声；而移动端「点三次才到不要」
+ * 既慢又要求用户记住顺序 —— 规范 19 明令反对「依赖连续点击或颜色记忆」。
+ */
+.planner-tag__more {
+  display: none;
+  width: 24px;
+  height: 24px;
+  margin-left: -6px;
+  border: 1px solid #dce2eb;
+  border-left: 0;
+  border-radius: 0 999px 999px 0;
+  background: #fff;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.planner-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+}
+
+.planner-sheet__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(15 23 42 / 42%);
+}
+
+.planner-sheet__panel {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 14px 14px 22px;
+  border-radius: 18px 18px 0 0;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.planner-sheet__title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.planner-sheet__option {
+  display: block;
+  width: 100%;
+  padding: 13px 12px;
+  border: 0;
+  border-radius: 11px;
+  background: none;
+  color: var(--ink);
+  font-size: 14px;
+  text-align: left;
+}
+
+.planner-sheet__option--on {
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-weight: 700;
 }
 
 /* ── 第 9 步的复核面板与阻塞项（规范 15、18）────────────────── */
@@ -2231,6 +2391,42 @@
 
   .planner-research ul {
     columns: 1;
+  }
+
+  /* ── 规范 19 的窄屏三条要求 ──────────────────────────────── */
+
+  /* 1. 三态标签给出直接选态的入口，不依赖连续点击或颜色记忆 */
+  .planner-tag__more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* 2. Repeater 折叠摘要 —— 一张五字段的订单卡在窄屏要占满一屏 */
+  .planner-repeater__summary {
+    display: block;
+  }
+
+  /*
+   * 3. 右栏改**底部**抽屉。
+   *
+   * ≥768px 时它是右侧滑出的侧栏（见 1199px 断点），而在手机上侧栏会占掉
+   * 大半屏宽且贴着屏幕边缘 —— 规范 19 给的是底部抽屉。
+   * 高度封到 76vh 并留 `overflow: auto`：五组画像加四个数字会超过一屏，
+   * 而一个撑满全屏的抽屉让人找不到怎么关掉它。
+   */
+  .planner-right--open {
+    top: auto;
+    right: 0;
+    left: 0;
+    width: auto;
+    max-height: 76vh;
+    border-radius: 18px 18px 0 0;
+  }
+
+  /* 三个指标在窄屏挤不下三列 */
+  .planner-review__metrics {
+    grid-template-columns: 1fr;
   }
 }
 

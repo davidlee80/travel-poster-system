@@ -1,6 +1,7 @@
 'use client';
 
 import { PLANNER_STANCE_VALUES, type PlannerStance } from '@tps/schemas';
+import { useEffect, useRef, useState } from 'react';
 
 import { selectedValues } from '@/lib/planner/field-io';
 import { optionLabel } from '@/lib/planner/field-spec';
@@ -183,6 +184,8 @@ export function TriStateTag({
   describedBy,
 }: ControlProps): React.ReactElement {
   const selections = asSelections(value);
+  /** 正在选态的那个 code。移动端的 bottom sheet 靠它显示（规范 19）*/
+  const [sheetCode, setSheetCode] = useState<string | null>(null);
 
   const nextStance = (current: PlannerStance | undefined): PlannerStance | undefined => {
     const index = STANCE_CYCLE.indexOf(current);
@@ -194,6 +197,9 @@ export function TriStateTag({
     const next = stance === undefined ? rest : [...rest, { code, stance }];
     onChange(next.length === 0 ? undefined : next);
   };
+
+  const sheetStance =
+    sheetCode === null ? undefined : selections.find((entry) => entry.code === sheetCode)?.stance;
 
   return (
     <div
@@ -207,29 +213,134 @@ export function TriStateTag({
         const label = optionLabel(code, apiKey);
         const upcoming = nextStance(stance);
         return (
-          <button
-            key={code}
-            type="button"
-            className={`planner-tag${stance === undefined ? '' : ` planner-tag--${stance.toLowerCase()}`}`}
-            aria-label={
-              stance === undefined
-                ? `${label}，未选择。点击设为${STANCE_TEXT[upcoming ?? 'PREFER']}`
-                : `${label}，当前${STANCE_TEXT[stance]}。点击改为${upcoming === undefined ? '未选择' : STANCE_TEXT[upcoming]}`
-            }
-            onClick={() => write(code, upcoming)}
-          >
-            {stance === undefined ? null : (
-              <span className="planner-tag__mark" aria-hidden="true">
-                {STANCE_MARK[stance]}
-              </span>
-            )}
-            {label}
-            {stance === undefined ? null : (
-              <span className="planner-tag__state"> · {STANCE_TEXT[stance]}</span>
-            )}
-          </button>
+          <span className="planner-tag-wrap" key={code}>
+            <button
+              type="button"
+              className={`planner-tag${stance === undefined ? '' : ` planner-tag--${stance.toLowerCase()}`}`}
+              aria-label={
+                stance === undefined
+                  ? `${label}，未选择。点击设为${STANCE_TEXT[upcoming ?? 'PREFER']}`
+                  : `${label}，当前${STANCE_TEXT[stance]}。点击改为${upcoming === undefined ? '未选择' : STANCE_TEXT[upcoming]}`
+              }
+              onClick={() => write(code, upcoming)}
+            >
+              {stance === undefined ? null : (
+                <span className="planner-tag__mark" aria-hidden="true">
+                  {STANCE_MARK[stance]}
+                </span>
+              )}
+              {label}
+              {stance === undefined ? null : (
+                <span className="planner-tag__state"> · {STANCE_TEXT[stance]}</span>
+              )}
+            </button>
+
+            {/*
+              「更多」按钮：直接选态，不必循环点击（规范 19）。
+              CSS 只在 <768px 显示它 —— 桌面端循环点击很顺手，
+              而移动端「点三次才到不要」既慢又要求用户记住顺序。
+            */}
+            <button
+              type="button"
+              className="planner-tag__more"
+              aria-label={`${label}：直接选择偏好、必须或不要`}
+              aria-haspopup="dialog"
+              onClick={() => setSheetCode(code)}
+            >
+              ⋯
+            </button>
+          </span>
         );
       })}
+
+      {sheetCode === null ? null : (
+        <StanceSheet
+          label={optionLabel(sheetCode, apiKey)}
+          current={sheetStance}
+          onPick={(stance) => {
+            write(sheetCode, stance);
+            setSheetCode(null);
+          }}
+          onClose={() => setSheetCode(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 三态选择的 bottom sheet（规范 19：「不依赖连续点击或颜色记忆」）。
+ *
+ * 四个选项各占一行，当前态带勾。这是循环点击之外的**第二条**路径 ——
+ * 循环点击在桌面端很顺手，但在移动端它要求用户记住「点第三次是不要」，
+ * 而那正是规范 19 明令反对的。
+ *
+ * ## 为什么不用 `<dialog>`
+ *
+ * `showModal()` 需要 effect 或 ref 去调用，而 Esc 关闭、焦点陷阱、
+ * 滚动锁定这些行为在这里都不需要（它是一个四项的选择器，不是表单）。
+ * 一个带 `role="dialog"` 的 div 加 Esc 监听更小且行为可预测。
+ */
+function StanceSheet({
+  label,
+  current,
+  onPick,
+  onClose,
+}: {
+  readonly label: string;
+  readonly current: PlannerStance | undefined;
+  readonly onPick: (stance: PlannerStance | undefined) => void;
+  readonly onClose: () => void;
+}): React.ReactElement {
+  const panel = useRef<HTMLDivElement>(null);
+
+  /* 打开时把焦点移进来 —— 否则键盘用户按 Tab 会走到被遮住的页面里 */
+  useEffect(() => {
+    panel.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const choices: readonly { readonly stance: PlannerStance | undefined; readonly text: string }[] = [
+    { stance: 'PREFER', text: STANCE_TEXT.PREFER },
+    { stance: 'REQUIRE', text: STANCE_TEXT.REQUIRE },
+    { stance: 'EXCLUDE', text: STANCE_TEXT.EXCLUDE },
+    { stance: undefined, text: '不选' },
+  ];
+
+  return (
+    <div className="planner-sheet" role="presentation">
+      <div className="planner-sheet__scrim" onClick={onClose} aria-hidden="true" />
+      <div
+        className="planner-sheet__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${label}：选择态度`}
+        tabIndex={-1}
+        ref={panel}
+      >
+        <p className="planner-sheet__title">{label}</p>
+        {choices.map((choice) => {
+          const on = choice.stance === current;
+          return (
+            <button
+              key={choice.text}
+              type="button"
+              className={`planner-sheet__option${on ? ' planner-sheet__option--on' : ''}`}
+              aria-pressed={on}
+              onClick={() => onPick(choice.stance)}
+            >
+              <span aria-hidden="true">{on ? '✓' : '　'}</span> {choice.text}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

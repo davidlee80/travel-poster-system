@@ -523,7 +523,7 @@ async function writeReadme(planVersionId) {
 
 | 文件 | 是什么 |
 | --- | --- |
-| \`planner.html\` | 首页：需求采集工作台（三栏八步） |
+| \`planner.html\` | 首页：需求采集工作台（三栏九步 + 生成后的行前准备中心） |
 | \`legal.html\` | 用户协议与隐私政策 |
 | \`full.html\` | 完整计划信息图（长图版） |
 | \`day1.html\` | 单日信息图（第 1 天） |

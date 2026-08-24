@@ -1,10 +1,17 @@
-import { PLANNER_FIELDS, PLANNER_STEP_IDS, type PlannerFieldId, type PlannerStepId } from '@tps/schemas';
+import {
+  PLANNER_FIELDS,
+  PLANNER_FIELD_COUNT,
+  PLANNER_STEP_IDS,
+  type PlannerFieldId,
+  type PlannerStepId,
+} from '@tps/schemas';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { INITIAL_PLANNER_STATE, fieldsOfStep, type PlannerState } from '@/lib/planner/state';
 import { buildSnapshot } from '@/lib/planner/step-state';
 
+import { PrepCenter } from '../PrepCenter';
 import { StepPage } from '../StepPage';
 import { STEP_SECTIONS } from './sections';
 
@@ -123,6 +130,33 @@ function renderScenario(state: PlannerState): readonly string[] {
   return found;
 }
 
+/**
+ * 渲染行前准备中心，返回出现过的 field_id。
+ *
+ * 六张卡全部收起 —— 收起状态用 `hidden` 而不是不渲染，因此 `data_field`
+ * 仍在 DOM 里。这正是那个设计的理由：规范 21.1 要求 76 个绑定**可被识别**，
+ * 而一个折叠起来就消失的绑定过不了那道门槛。
+ */
+function prepMarkup(): string {
+  return renderToStaticMarkup(
+    <PrepCenter
+      state={RICH}
+      snapshot={buildSnapshot(RICH, { planGenerated: true })}
+      dispatch={() => undefined}
+      registerField={() => undefined}
+      openCards={[]}
+      onToggleCard={() => undefined}
+      planId="plan_test"
+    />,
+  );
+}
+
+function renderPrepCenter(): readonly string[] {
+  return [...prepMarkup().matchAll(/data-field="([^"]+)"/g)].flatMap((match) =>
+    match[1] === undefined ? [] : [match[1]],
+  );
+}
+
 describe('区块表与元数据表一致', () => {
   it('每一步的各区块拼起来逐个等于该步的字段（顺序、数量、内容都不许差）', () => {
     /*
@@ -184,6 +218,30 @@ describe('九步渲染出全部主问卷字段', () => {
       const found = renderScenario(scenario.state);
       expect(found.filter((id) => id.startsWith('PV2-10-')), scenario.name).toEqual([]);
     }
+  });
+
+  it('加上行前准备中心之后，76 个 Field ID 全部可被识别（规范 21.1）', () => {
+    /*
+     * 这是规范 21.1 那条**阻塞发布**门槛的完整落点：
+     * 「V2.1 必须能识别 76 个唯一 Field ID」。
+     *
+     * 九步覆盖 70 个（非 POST_PLAN），行前准备中心覆盖余下 6 个。
+     * 分两处渲染是规范 16 的要求（不把用户拖回主问卷），因此断言也分两段 ——
+     * 但**并集必须是 76**，且不能有任何一个 id 出现在两边。
+     */
+    const inSteps = new Set<string>();
+    for (const scenario of SCENARIOS) {
+      for (const id of renderScenario(scenario.state)) inSteps.add(id);
+    }
+    const inPrep = new Set(renderPrepCenter());
+
+    const overlap = [...inPrep].filter((id) => inSteps.has(id));
+    expect(overlap).toEqual([]);
+
+    const all = new Set([...inSteps, ...inPrep]);
+    const expected = PLANNER_FIELDS.map((spec) => spec.field_id);
+    expect(expected.filter((id) => !all.has(id))).toEqual([]);
+    expect(all.size).toBe(PLANNER_FIELD_COUNT);
   });
 
   it('互斥的预算分支各自只在自己的场景里出现', () => {
@@ -291,5 +349,86 @@ describe('控件真的渲染出来了', () => {
       expect(html).toContain(label);
     }
     expect(html).toContain('planner_profile.trip.origin');
+  });
+});
+
+/**
+ * 附录 C 的可访问性检查项（阻塞发布）：**键盘 / ARIA / 状态文本**。
+ *
+ * 这里只做能自动化的那一半。手工那一半（用键盘从第 1 步走到第 9 步、
+ * 用屏读器听一遍状态）不在单测的能力范围内，而自动化能覆盖的三件事
+ * 恰好是最容易在改版中回退的三件：无名按钮、没有 label 的控件、
+ * 只用颜色表达的状态。
+ */
+describe('可访问性的可自动化部分（附录 C）', () => {
+  /** 渲染全部九步 + 准备中心，拿到一份完整的标记 */
+  function allMarkup(): string {
+    const snapshot = buildSnapshot(RICH, { planGenerated: true });
+    const pages = MAIN_STEPS.map((step) =>
+      renderToStaticMarkup(
+        <StepPage
+          step={step}
+          active
+          state={RICH}
+          snapshot={snapshot}
+          dispatch={() => undefined}
+          onPrev={null}
+          onNext={null}
+          nextLabel={null}
+          registerField={() => undefined}
+        />,
+      ),
+    );
+    return [...pages, prepMarkup()].join('\n');
+  }
+
+  it('每个按钮都有可读的名字（文字或 aria-label）', () => {
+    /*
+     * 一个只有图标的按钮（↑ ↓ ✕ ⋯）在屏读器里念作「按钮」——
+     * 而排序控件正好全是这种。因此这条断言盯的是：按钮内要么有非符号文字，
+     * 要么有 aria-label。
+     */
+    const nameless: string[] = [];
+    for (const match of allMarkup().matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
+      const attrs = match[1] ?? '';
+      const inner = (match[2] ?? '').replace(/<[^>]*>/g, '').trim();
+      if (attrs.includes('aria-label=')) continue;
+      /* 去掉纯符号后还剩内容才算有名字 */
+      const words = inner.replace(/[↑↓✕＋−×✓○▴▾⋯·／/\s]/g, '');
+      if (words.length === 0) nameless.push(match[0].slice(0, 90));
+    }
+    expect(nameless).toEqual([]);
+  });
+
+  it('每个 label 都指向一个真实存在的控件 id', () => {
+    /*
+     * `htmlFor` 指向一个不存在的 id 等于没有 label —— 而它看起来完全正常
+     * （文字照样显示、点击照样不聚焦，而「点标签不聚焦」很少有人试）。
+     */
+    const markup = allMarkup();
+    const ids = new Set([...markup.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
+    const dangling = [...markup.matchAll(/<label[^>]*\sfor="([^"]+)"/g)]
+      .map((m) => m[1])
+      .filter((target) => target !== undefined && !ids.has(target));
+    expect(dangling).toEqual([]);
+  });
+
+  it('状态不只靠颜色：三态标签与类型徽标都带文字', () => {
+    const markup = allMarkup();
+    /* 三态：选中的标签把态写在文字里 */
+    expect(markup).toMatch(/planner-tag__state[^>]*> · (偏好|必须|不要)/);
+    /* 类型徽标：文字 + aria-label */
+    expect(markup).toMatch(/planner-badge[^>]*aria-label="[^"]+"/);
+  });
+
+  it('折叠区用 aria-expanded 而不是只换一个图标', () => {
+    expect(prepMarkup()).toMatch(/aria-expanded="(true|false)"/);
+  });
+
+  it('计数器与滑块的当前值可被朗读', () => {
+    /* 按了加号没有任何朗读反馈时，屏读用户无法确认自己改到了几 */
+    const markup = allMarkup();
+    expect(markup).toMatch(/<output[^>]*aria-live="polite"/);
+    expect(markup).toMatch(/aria-valuetext="[^"]+"/);
   });
 });

@@ -19,6 +19,7 @@ import { browserTimezone, newClientRequestId } from '@/lib/travel-request-form';
 import { AuthPanel } from '../AuthPanel';
 import { useSession } from '../SessionProvider';
 import { GenerationDialog } from './GenerationDialog';
+import { PrepCenter } from './PrepCenter';
 import { BlockerList, ReviewPanel } from './ReviewBoard';
 import { StepPage } from './StepPage';
 import { StepNav } from './shell/StepNav';
@@ -36,7 +37,7 @@ import { TopBar } from './shell/TopBar';
  * 生成与轮询沿用 P2 的逻辑（13.1 提交 → 13.2 轮询）。
  */
 
-/** 主问卷的九步。第 10 步是生成之后的行前准备中心（规范 16），不在导航里 */
+/** 主问卷的九步。第 10 步是生成之后的行前准备中心（规范 16）*/
 const MAIN_STEPS: readonly PlannerStepId[] = PLANNER_STEPS.filter((step) => step.step !== '10').map(
   (step) => step.step,
 );
@@ -102,6 +103,16 @@ export function Planner(): React.ReactElement {
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [menuOpen, setMenuOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
+  /**
+   * 已生成的计划。
+   *
+   * 它同时是「行前准备中心是否可用」的开关（规范 16：**初步方案生成后**）。
+   * 单独一个 state 而不是从 `phase` 推：`phase` 会被关闭弹层重置成 `idle`，
+   * 而那时计划已经生成了 —— 用 phase 推会让准备中心在关掉弹层后消失。
+   */
+  const [planId, setPlanId] = useState<string | null>(null);
+  /** 准备中心里展开的卡片。放在这里而不是 PrepCenter 内部 —— 切走再回来要保留 */
+  const [openPrepCards, setOpenPrepCards] = useState<readonly PlannerFieldId[]>([]);
 
   const fieldNodes = useRef(new Map<PlannerFieldId, HTMLElement>());
   /** 首次挂载时不写草稿 —— 那会把一份空状态盖掉刚读出来的草稿 */
@@ -152,7 +163,15 @@ export function Planner(): React.ReactElement {
     [],
   );
 
-  const snapshot = useMemo(() => buildSnapshot(state), [state]);
+  const snapshot = useMemo(
+    /*
+     * `planGenerated` 让 `tripState` 落到 `plan-generated`（规范 5.3）。
+     * 不传的话生成完成之后右栏仍然写着「可以生成初步方案」——
+     * 而用户已经拿到方案了。
+     */
+    () => buildSnapshot(state, { planGenerated: planId !== null }),
+    [state, planId],
+  );
   const sections = useMemo(() => buildSummary(state, snapshot), [state, snapshot]);
   const metrics = useMemo(() => buildMetrics(state), [state]);
 
@@ -185,7 +204,7 @@ export function Planner(): React.ReactElement {
     }, 0);
   }, []);
 
-  async function poll(jobId: string, planId: string): Promise<void> {
+  async function poll(jobId: string, generatedPlanId: string): Promise<void> {
     const deadline = Date.now() + POLL_TIMEOUT_MS;
 
     while (!cancelled.current && Date.now() < deadline) {
@@ -211,7 +230,9 @@ export function Planner(): React.ReactElement {
         return;
       }
       if (READABLE_STATUSES.has(result.data.status)) {
-        setPhase({ kind: 'ready', planId });
+        setPhase({ kind: 'ready', planId: generatedPlanId });
+        /* 计划可读之后开放行前准备中心（规范 16）*/
+        setPlanId(generatedPlanId);
         return;
       }
 
@@ -358,6 +379,7 @@ export function Planner(): React.ReactElement {
           snapshot={snapshot}
           onJump={goToStep}
           open={menuOpen}
+          planGenerated={planId !== null}
         />
 
         <main className="planner-main">
@@ -376,6 +398,30 @@ export function Planner(): React.ReactElement {
               {...(step === '09' ? { slots: reviewSlots, actions: generateButton() } : {})}
             />
           ))}
+
+          {/*
+            行前准备中心只在方案生成之后出现（规范 16）。
+            它不是 `StepPage` 的一个 step —— 组织方式是任务卡而不是表单区块，
+            底部也没有「上一步 / 下一步」。硬塞进 StepPage 会让那个组件
+            长出一个只服务于第 10 步的分支。
+          */}
+          {planId !== null && state.activeStep === '10' ? (
+            <PrepCenter
+              state={state}
+              snapshot={snapshot}
+              dispatch={dispatch}
+              registerField={registerField}
+              openCards={openPrepCards}
+              onToggleCard={(fieldId) =>
+                setOpenPrepCards((open) =>
+                  open.includes(fieldId)
+                    ? open.filter((entry) => entry !== fieldId)
+                    : [...open, fieldId],
+                )
+              }
+              planId={planId}
+            />
+          ) : null}
         </main>
 
         <SummaryRail
