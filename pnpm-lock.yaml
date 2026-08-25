@@ -99,6 +99,9 @@ importers:
       '@tps/assets':
         specifier: workspace:*
         version: link:../../packages/assets
+      '@tps/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@tps/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -280,6 +283,28 @@ importers:
       '@tps/schemas':
         specifier: workspace:*
         version: link:../schemas
+    devDependencies:
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.13.3
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(yaml@2.9.0)
+
+  packages/billing:
+    dependencies:
+      '@tps/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@tps/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+      '@tps/shared':
+        specifier: workspace:*
+        version: link:../shared
     devDependencies:
       '@types/node':
         specifier: ^24.10.1
