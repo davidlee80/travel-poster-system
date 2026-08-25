@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@tps/assets": "workspace:*",
+    "@tps/billing": "workspace:*",
     "@tps/db": "workspace:*",
     "@tps/observability": "workspace:*",
     "@tps/planning": "workspace:*",

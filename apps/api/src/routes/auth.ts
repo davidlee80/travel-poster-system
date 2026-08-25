@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { COOKIE_NAMES, type QuotaGuard } from '@tps/shared';
 import { buildErrorBody, errorDefinition, type ErrorCode } from '../errors/codes.js';
+import type { CreditsService } from '../credits/service.js';
 import { recordIdentityEvent, recordIdentityType } from '../identity/metrics.js';
 import type { Identity, IdentityService } from '../identity/service.js';
 import type { PhoneVerificationService } from '../identity/phone-verification.js';
@@ -75,6 +76,8 @@ export interface AuthRoutesDeps {
   readonly quota: QuotaGuard;
   readonly secureCookies: boolean;
   readonly phoneVerification?: PhoneVerificationService;
+  /** CR 钱包（C-3）。未提供时会话响应里没有 `wallet` 字段 */
+  readonly credits?: CreditsService;
 }
 
 function fail(
@@ -109,10 +112,29 @@ interface SessionResponse {
   readonly phone: string | null;
   readonly has_password: boolean;
   readonly display_name: string | null;
+  /**
+   * 次数配额。
+   *
+   * C-3 之后它**不再是产品概念** —— 用户看到的是 CR（见 `wallet`），
+   * 而这几个数被提到很高的兜底值，只用于防滥用。字段保留不动：
+   * 删它是破坏性契约变更，而 13.x 明确邀请第三方替换呈现层。
+   */
   readonly quota: {
     readonly daily_remaining: number;
     readonly monthly_remaining: number;
     readonly reset_at: string;
+  };
+  /**
+   * CR 钱包（C-3）。**只在装配了计费、且身份是注册用户时出现。**
+   *
+   * 匿名身份不进货币体系（产品决策：必须注册才能使用），给它一个
+   * `balance_cr: 0` 会让前端渲染一个永远不够用的钱包，而用户无从知道
+   * 该去注册。字段缺席让前端只有一种判断：有钱包才画钱包。
+   */
+  readonly wallet?: {
+    readonly balance_cr: number;
+    readonly held_cr: number;
+    readonly balance_cny: string;
   };
 }
 
@@ -127,6 +149,12 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       monthlyQuotaOverride: id.monthlyQuota,
     });
 
+    const credits = deps.credits;
+    const wallet =
+      credits === undefined || id.userType === 'ANONYMOUS'
+        ? null
+        : await credits.balance(id.userId);
+
     return {
       user_type: id.userType,
       // 仅供问题反馈，不作为任何鉴权凭据（13.9.1）
@@ -140,6 +168,15 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
         monthly_remaining: remaining.monthlyRemaining,
         reset_at: remaining.resetAt,
       },
+      ...(wallet === null || credits === undefined
+        ? {}
+        : {
+            wallet: {
+              balance_cr: wallet.balanceCr,
+              held_cr: wallet.heldCr,
+              balance_cny: credits.cnyText(wallet.balanceCr),
+            },
+          }),
     };
   }
 

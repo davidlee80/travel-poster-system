@@ -33,6 +33,7 @@ import {
   type ErrorCode,
 } from '../errors/codes.js';
 import { ALL_FEATURES_ON, featureGateTotal } from '../feature-gate.js';
+import type { CreditsService } from '../credits/service.js';
 import { resolveIdentity, type IdentityContextDeps } from './identity-context.js';
 
 /**
@@ -74,13 +75,19 @@ export interface ExportRoutesDeps extends IdentityContextDeps {
   readonly storage: Pick<ExportStorage, 'presign'>;
   /** 灰度开关（TP-5-10）。缺省视为全开，理由见 feature-gate.ts */
   readonly featureFlags?: FeatureFlags;
+  /** CR 计费（C-3）。未提供时导出不计费，理由见 travel-plans.ts 的同名字段 */
+  readonly credits?: CreditsService;
 }
 
 function fail(
   request: FastifyRequest,
   reply: FastifyReply,
   code: ErrorCode,
-  extra?: { readonly field?: string; readonly retryAfterSeconds?: number | null },
+  extra?: {
+    readonly field?: string;
+    readonly retryAfterSeconds?: number | null;
+    readonly details?: Readonly<Record<string, number>>;
+  },
 ): FastifyReply {
   const definition = errorDefinition(code);
   if (extra?.retryAfterSeconds != null) {
@@ -91,6 +98,7 @@ function fail(
       requestId: request.id,
       traceId: 'unavailable',
       ...(extra?.field === undefined ? {} : { field: extra.field }),
+      ...(extra?.details === undefined ? {} : { details: extra.details }),
     }),
   );
 }
@@ -234,6 +242,36 @@ export function registerExportRoutes(app: FastifyInstance, deps: ExportRoutesDep
       }
 
       const exportId = randomUUID();
+
+      /*
+       * ── CR 扣费（C-3）──
+       *
+       * 导出**不做预留/结算往返**：成本是几秒 Chromium CPU + 存储，
+       * 量级比生成小三个数量级，且与内容无关 —— 定价固定，因此没有
+       * 「估多估少」的问题，两阶段只是多两次写库。
+       *
+       * 在建行**之前**扣：反过来的话余额不足时会留下一行永远不会渲染的
+       * 导出任务，而它占着幂等键 —— 用户充值后重试会拿到那一行。
+       *
+       * 幂等键复用导出自己的幂等键（`export:<key>`），因此同一份导出
+       * 重复请求、并发请求都只扣一次。
+       */
+      let chargedCr = 0;
+      if (deps.credits !== undefined) {
+        const charged = await deps.credits.chargeExport({
+          userId: resolved.identity.userId,
+          exportId,
+          format: body.format,
+          exportIdempotencyKey: idempotencyKey,
+        });
+        if (charged.kind === 'insufficient') {
+          return fail(request, reply, 'AUTH_INSUFFICIENT_CREDITS', {
+            details: { required_cr: charged.requiredCr, balance_cr: charged.balanceCr },
+          });
+        }
+        if (charged.kind === 'charged') chargedCr = charged.amountCr;
+      }
+
       let created: ExportRow;
       try {
         created = await repository.create({
@@ -248,7 +286,25 @@ export function registerExportRoutes(app: FastifyInstance, deps: ExportRoutesDep
           idempotencyKey,
         });
       } catch (error) {
-        if (!(error instanceof UniqueViolationError)) throw error;
+        if (!(error instanceof UniqueViolationError)) {
+          /*
+           * 建行失败而钱已经扣了（数据库瞬时故障等）。退回去 ——
+           * 不退的话用户为一份根本不存在的导出付了钱，而他看到的是一个 500，
+           * 不会想到去查流水。
+           *
+           * 并发撞唯一索引不走这里：那种情形下扣费是幂等的（同一个键），
+           * 而胜出的那个请求真的产出了导出任务，钱该收。
+           */
+          if (deps.credits !== undefined && chargedCr > 0) {
+            await deps.credits.refundExport({
+              userId: resolved.identity.userId,
+              amountCr: chargedCr,
+              exportId,
+              exportIdempotencyKey: idempotencyKey,
+            });
+          }
+          throw error;
+        }
         /*
          * 唯一索引兜住并发：两个请求同时走到这里，一个成功、一个冲突。
          * 冲突方回查既有任务并返回它 —— 与 13.8 的生成幂等同一手法。

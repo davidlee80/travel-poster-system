@@ -32,6 +32,7 @@ import {
   type ErrorCode,
 } from '../errors/codes.js';
 import { ALL_FEATURES_ON, featureGateTotal } from '../feature-gate.js';
+import type { CreditsService, JobCreditCheck } from '../credits/service.js';
 import { resolveIdentity, type IdentityContextDeps } from './identity-context.js';
 
 /**
@@ -126,13 +127,25 @@ export interface TravelPlanRoutesDeps extends IdentityContextDeps {
   readonly now: () => Date;
   /** 提供时，条件机器码必须存在于当前发布配置；测试缺省仍用内置字典。 */
   readonly plannerConfig?: PlannerConfigRepository;
+  /**
+   * CR 计费（C-3）。**未提供时生成完全不计费** —— 这是刻意的：
+   * `CREDIT_BILLING_ENABLED` 关闭、或库还没迁到 0013 的部署里，
+   * 钱包表不存在，任何一次读它都会 500。
+   *
+   * 也让本文件的既有测试不必全部装配钱包：它们测的是幂等编排，与钱无关。
+   */
+  readonly credits?: CreditsService;
 }
 
 function fail(
   request: FastifyRequest,
   reply: FastifyReply,
   code: ErrorCode,
-  extra?: { readonly field?: string; readonly retryAfterSeconds?: number | null },
+  extra?: {
+    readonly field?: string;
+    readonly retryAfterSeconds?: number | null;
+    readonly details?: Readonly<Record<string, number>>;
+  },
 ): FastifyReply {
   const definition = errorDefinition(code);
   if (extra?.retryAfterSeconds != null) {
@@ -143,6 +156,7 @@ function fail(
       requestId: request.id,
       traceId: 'unavailable',
       ...(extra?.field === undefined ? {} : { field: extra.field }),
+      ...(extra?.details === undefined ? {} : { details: extra.details }),
     }),
   );
 }
@@ -319,6 +333,36 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
       });
     }
 
+    /*
+     * ── CR 预检（C-3）──
+     *
+     * 位置有两条讲究：
+     *
+     * **在配额之后。** 反过来的话，一个余额为 0 的账号可以无限次触发
+     * 「解析 + 校验 + 读价目 + 读余额」，因为拦住它的那两层（每分钟 3 次、
+     * 每 IP 每日）都在配额里。代价是一次 402 会消耗一格日配额 ——
+     * 可以接受：CR 才是产品意义上的限额，次数配额已被提到很高的兜底值。
+     *
+     * **在建任务行之前。** 这一步只是预检，真正的闸门是下面那次原子预留；
+     * 但把绝大多数「余额不够」挡在这里，是为了不留下垃圾：建了行之后再拒，
+     * 会留下一条 QUEUED 任务和一个被占用的幂等键，而用户充值后拿同一份
+     * 表单重试会命中那个幂等键，拿到一个永远不会跑的任务。
+     */
+    /* `null` = 未装配计费。用 null 而不是一个假的 `free`，免得读的人去找那个理由 */
+    const credits = deps.credits ?? null;
+    let creditCheck: JobCreditCheck | null = null;
+    if (credits !== null) {
+      creditCheck = await credits.checkJob({
+        userId: resolved.identity.userId,
+        totalDays: normalized.total_days,
+      });
+      if (creditCheck.kind === 'insufficient') {
+        return fail(request, reply, 'AUTH_INSUFFICIENT_CREDITS', {
+          details: { required_cr: creditCheck.requiredCr, balance_cr: creditCheck.balanceCr },
+        });
+      }
+    }
+
     let handles;
     try {
       handles = await plans.createGeneration({
@@ -345,6 +389,39 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
         return fail(request, reply, 'JOB_ALREADY_RUNNING');
       }
       return reply.code(200).send(generateResponse(raced));
+    }
+
+    /*
+     * ── 原子预留（C-3）──
+     *
+     * **这一步才是闸门**：`UPDATE ... WHERE balance_cr >= $n` 让「查余额」与
+     * 「扣余额」之间没有窗口，因此并发请求不会超发（见 credit-wallet.ts）。
+     * 上面那次预检只是为了让常见情形不留垃圾行。
+     *
+     * 在入队**之前**。反过来的话，worker 可能在预留落库前就跑完并结算，
+     * 而结算找不到预留 = 那次生成免费。
+     *
+     * 走到 402 说明预检之后余额被另一个并发请求抢走了。这时任务行已经建好，
+     * 因此把它取消 —— 留一行永远不会跑的 QUEUED 任务会让用户在列表里
+     * 看到一份卡住的计划。
+     */
+    if (credits !== null && creditCheck?.kind === 'chargeable') {
+      const reserved = await credits.reserve({
+        userId: resolved.identity.userId,
+        jobId: handles.jobId,
+        holdCr: creditCheck.holdCr,
+        priceVersion: creditCheck.priceVersion,
+      });
+      if (reserved.kind === 'insufficient') {
+        await plans.cancelJob(handles.jobId, resolved.identity.userId);
+        request.log.info(
+          { stage: 'billing', required_cr: reserved.requiredCr, balance_cr: reserved.balanceCr },
+          '并发争抢导致余额不足，已取消刚建立的任务',
+        );
+        return fail(request, reply, 'AUTH_INSUFFICIENT_CREDITS', {
+          details: { required_cr: reserved.requiredCr, balance_cr: reserved.balanceCr },
+        });
+      }
     }
 
     await queue.enqueue({

@@ -59,6 +59,18 @@ describe('错误码体系（13.7、13.9.6）', () => {
     expect(AUTH_ERRORS.AUTH_QUOTA_EXCEEDED.retryable).toBe(false);
   });
 
+  it('余额不足是 402 且不可重试（恢复路径是充值，不是重试）', () => {
+    /*
+     * 402 是全表唯一的这个状态码。用 429 会让客户端原地重试到死
+     * （余额不会自己长回来），用 403 会让它引导用户去注册（他已经注册了）。
+     */
+    expect(AUTH_ERRORS.AUTH_INSUFFICIENT_CREDITS.httpStatus).toBe(402);
+    expect(AUTH_ERRORS.AUTH_INSUFFICIENT_CREDITS.retryable).toBe(false);
+    expect(codes.filter((code) => errorDefinition(code).httpStatus === 402)).toEqual([
+      'AUTH_INSUFFICIENT_CREDITS',
+    ]);
+  });
+
   it('限流是 429 且可重试', () => {
     expect(AUTH_ERRORS.AUTH_RATE_LIMITED.retryable).toBe(true);
     expect(AUTH_ERRORS.AUTH_ANON_CREATION_RATE_LIMITED.retryable).toBe(true);
@@ -137,5 +149,22 @@ describe('错误响应体（13.0）', () => {
       field: 'trip.dates.end_date',
     });
     expect(withField.error.field).toBe('trip.dates.end_date');
+  });
+
+  it('details 仅在提供时出现（402 用它带上还差多少）', () => {
+    /*
+     * 不下发这两个数的替代做法是让前端拿到 402 后再请求一次报价 ——
+     * 而那是用户最需要一句「还差 N CR」的时刻，多一次往返多一次失败机会。
+     */
+    expect(
+      buildErrorBody('AUTH_QUOTA_EXCEEDED', { requestId: 'r', traceId: 't' }).error.details,
+    ).toBeUndefined();
+
+    const insufficient = buildErrorBody('AUTH_INSUFFICIENT_CREDITS', {
+      requestId: 'r',
+      traceId: 't',
+      details: { required_cr: 2_970, balance_cr: 1_200 },
+    });
+    expect(insufficient.error.details).toEqual({ required_cr: 2_970, balance_cr: 1_200 });
   });
 });

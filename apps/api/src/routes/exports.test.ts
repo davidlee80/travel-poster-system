@@ -20,6 +20,10 @@ import { InMemoryExportStorage } from '@tps/storage';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { DEFAULT_JOB_LIMITS } from '@tps/billing';
+
+import { FakeCreditWalletRepository, fakePriceBook } from '../credits/fake-wallet-repository.js';
+import { CreditsService } from '../credits/service.js';
 import { FakeUsersRepository } from '../identity/fake-users-repository.js';
 import { InMemorySessionStore } from '../identity/session-store.js';
 import { IdentityService } from '../identity/service.js';
@@ -142,6 +146,7 @@ interface Harness {
   readonly queue: InMemoryExportQueue;
   readonly storage: InMemoryExportStorage;
   readonly shutdown: GracefulShutdown;
+  readonly wallet: FakeCreditWalletRepository;
 }
 
 let harness: Harness | null = null;
@@ -150,7 +155,11 @@ function h(): Harness {
   return harness;
 }
 
-beforeEach(() => {
+/**
+ * `billing: 'on'` 时装配 CR 计费。**缺省关闭** —— 既有用例的身份余额为 0，
+ * 装上计费它们会全部拿到 402，而它们测的是幂等与签名，与钱无关。
+ */
+function makeHarness(billing: 'off' | 'on' = 'off'): Harness {
   const logger = createSilentLogger();
   const shutdown = new GracefulShutdown({ logger, timeoutMs: 1_000 });
   const users = new FakeUsersRepository();
@@ -181,12 +190,26 @@ beforeEach(() => {
     shutdownTimeoutMs: 1_000,
   };
 
-  harness = {
+  const wallet = new FakeCreditWalletRepository();
+  wallet.priceBook = fakePriceBook();
+  const credits =
+    billing === 'off'
+      ? undefined
+      : new CreditsService({
+          wallet,
+          config: { crPerCny: 1_000, signupGrantCr: 9_900, holdBufferPercent: 120 },
+          limits: DEFAULT_JOB_LIMITS,
+          logger,
+          now,
+        });
+
+  return {
     shutdown,
     exports,
     plans,
     queue,
     storage,
+    wallet,
     app: buildServer({
       config,
       logger,
@@ -201,9 +224,14 @@ beforeEach(() => {
         exports,
         plans: plans as unknown as TravelPlansRepository,
         secureCookies: false,
+        ...(credits === undefined ? {} : { credits }),
       },
     }),
   };
+}
+
+beforeEach(() => {
+  harness = makeHarness();
 });
 
 afterEach(async () => {
@@ -554,5 +582,71 @@ describe('13.6 GET /exports/{export_id}', () => {
     expect(response.statusCode).toBe(404);
     expect(response.body).not.toContain('anon/');
     expect(response.body).not.toContain('http');
+  });
+});
+
+describe('CR 扣费（C-3）', () => {
+  /** 装配了计费的夹具 + 一个持有该计划的身份 */
+  async function billingOwner(): Promise<{ cookie: string; userId: string }> {
+    await harness?.app.close();
+    harness = makeHarness('on');
+    const { cookie, userId } = await anonymousCookie();
+    h().plans.ownerId = userId;
+    return { cookie, userId };
+  }
+
+  async function createExport(cookie: string, format = 'PDF') {
+    return h().app.inject({
+      method: 'POST',
+      url: `/api/v1/travel-plans/${PLAN_ID}/exports`,
+      payload: requestBody({ format }),
+      headers: { cookie },
+    });
+  }
+
+  it('余额为 0 → 402，且不建导出行、不入队', async () => {
+    /*
+     * 先扣钱再建行，因此这条断言同时验证了顺序：反过来的话余额不足时会留下
+     * 一行永远不会渲染的导出任务，而它占着幂等键 —— 用户充值后重试会拿到它。
+     */
+    const { cookie } = await billingOwner();
+
+    const response = await createExport(cookie);
+
+    expect(response.statusCode).toBe(402);
+    const error = response.json<{
+      error: { code: string; details: Record<string, number> };
+    }>().error;
+    expect(error.code).toBe('AUTH_INSUFFICIENT_CREDITS');
+    /* PDF 的假价目是 80 CR */
+    expect(error.details).toEqual({ required_cr: 80, balance_cr: 0 });
+    expect(h().exports.rows.size).toBe(0);
+    expect(h().queue.enqueued).toHaveLength(0);
+  });
+
+  it('余额够 → 201 并扣掉固定价（PDF 比 PNG 贵）', async () => {
+    const { cookie, userId } = await billingOwner();
+    h().wallet.seed(userId, 500);
+
+    expect((await createExport(cookie, 'PDF')).statusCode).toBe(201);
+    expect((await h().wallet.balance(userId)).balanceCr).toBe(420);
+  });
+
+  it('幂等命中不重复扣费（21.4 的同一条，扩到钱上）', async () => {
+    const { cookie, userId } = await billingOwner();
+    h().wallet.seed(userId, 500);
+
+    const first = await createExport(cookie);
+    expect(first.statusCode).toBe(201);
+    const second = await createExport(cookie);
+    /* 同一份导出：13.5 返回 200 + 原 export_id */
+    expect(second.statusCode).toBe(200);
+    expect((await h().wallet.balance(userId)).balanceCr).toBe(420);
+  });
+
+  it('未装配计费时不碰钱包（0013 之前的部署）', async () => {
+    const cookie = await ownerCookie();
+    expect((await createExport(cookie)).statusCode).toBe(201);
+    expect(h().wallet.entries()).toHaveLength(0);
   });
 });

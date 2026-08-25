@@ -11,8 +11,10 @@ import {
   requireString,
 } from '@tps/shared';
 import { loadTracingConfig, registerDefaultMetrics, startTracing } from '@tps/observability';
+import { loadCreditConfig, loadJobLimits } from '@tps/billing';
 import {
   checkDatabase,
+  createCreditWalletRepository,
   createExportsRepository,
   createPool,
   createPresentationsRepository,
@@ -37,6 +39,7 @@ import {
   PhoneVerificationService,
 } from './identity/phone-verification.js';
 import { RedisSessionStore } from './identity/redis-session-store.js';
+import { CreditsService } from './credits/service.js';
 import { buildServer } from './server.js';
 
 const SERVICE_NAME = 'tps-api';
@@ -158,6 +161,29 @@ async function main(): Promise<void> {
   const plannerConfig = createPlannerConfigRepository(pool);
 
   /*
+   * ── CR 计费（C-3）──
+   *
+   * 默认**关闭**，而这不是保守而已：钱包与价目表在迁移 0013 才建立，
+   * 而应用与数据库的部署不是原子的。装配了却没迁移的后果是每个生成请求、
+   * 每次会话查询都撞「relation credit_wallets does not exist」——
+   * 也就是全站不可用，而根因在一张不存在的表上。
+   *
+   * 打开顺序必须是：先 `pnpm db:migrate` 到 0013，再把这个开关置 true。
+   * 关闭时 `credits` 为 undefined，三个端点不注册、生成与导出完全不计费
+   * （见各路由的 `credits?` 字段）。
+   */
+  const billingEnabled = optionalBool('CREDIT_BILLING_ENABLED', false);
+  const credits = billingEnabled
+    ? new CreditsService({
+        wallet: createCreditWalletRepository(pool),
+        config: loadCreditConfig(),
+        limits: loadJobLimits(),
+        logger,
+        now: () => new Date(),
+      })
+    : undefined;
+
+  /*
    * 内部端点的共享密钥。未配置则不注册那些路由 ——
    * 少一个默认密钥就少一个「忘了改默认值」的事故。
    */
@@ -173,6 +199,7 @@ async function main(): Promise<void> {
       quota,
       phoneVerification,
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
+      ...(credits === undefined ? {} : { credits }),
     },
     travelPlans: {
       identity,
@@ -185,8 +212,18 @@ async function main(): Promise<void> {
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
       now: () => new Date(),
       plannerConfig,
+      ...(credits === undefined ? {} : { credits }),
     },
     plannerConfig: { config: plannerConfig },
+    ...(credits === undefined
+      ? {}
+      : {
+          credits: {
+            identity,
+            credits,
+            secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
+          },
+        }),
     /*
      * 13.5/13.6 的导出端点。
      *
@@ -203,6 +240,7 @@ async function main(): Promise<void> {
       storage: new S3ExportStorage(loadExportsStorageConfig()),
       featureFlags,
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
+      ...(credits === undefined ? {} : { credits }),
     },
     /*
      * 14.1/14.2 的内部端点：只在配置了共享密钥时注册。
@@ -252,6 +290,8 @@ async function main(): Promise<void> {
       registered_daily_quota: quotaConfig.registered.dailyPlans,
       ip_daily_quota: quotaConfig.ip.plansPerDay,
       session_store: 'redis',
+      /* 关闭时生成与导出完全不计费 —— 这条必须能从启动日志里一眼看到 */
+      credit_billing_enabled: billingEnabled,
     },
     'API 已启动',
   );

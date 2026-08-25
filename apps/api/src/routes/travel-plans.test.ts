@@ -28,6 +28,10 @@ import {
 } from '@tps/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { DEFAULT_JOB_LIMITS } from '@tps/billing';
+
+import { FakeCreditWalletRepository, fakePriceBook } from '../credits/fake-wallet-repository.js';
+import { CreditsService } from '../credits/service.js';
 import { FakeUsersRepository } from '../identity/fake-users-repository.js';
 import { InMemorySessionStore } from '../identity/session-store.js';
 import { IdentityService } from '../identity/service.js';
@@ -297,6 +301,7 @@ interface Harness {
   readonly presentations: FakePresentationsRepository;
   readonly queue: InMemoryPlanQueue;
   readonly users: FakeUsersRepository;
+  readonly wallet: FakeCreditWalletRepository;
 }
 
 let harness: Harness | null = null;
@@ -329,6 +334,8 @@ const T2_REACHED = new Set(['RENDERING_HTML', 'COMPLETED']);
 function build(
   lock: IdempotencyLock = new InMemoryIdempotencyLock(),
   featureFlags?: FeatureFlags,
+  /** 装配 CR 计费。缺省不装 —— 既有用例测的是幂等编排，与钱无关 */
+  billing: 'off' | 'on' = 'off',
 ): Harness {
   const users = new FakeUsersRepository(now);
   const sessions = new InMemorySessionStore();
@@ -352,6 +359,19 @@ function build(
   const presentations = new FakePresentationsRepository();
   const queue = new InMemoryPlanQueue();
 
+  const wallet = new FakeCreditWalletRepository();
+  wallet.priceBook = fakePriceBook();
+  const credits =
+    billing === 'off'
+      ? undefined
+      : new CreditsService({
+          wallet,
+          config: { crPerCny: 1_000, signupGrantCr: 9_900, holdBufferPercent: 120 },
+          limits: DEFAULT_JOB_LIMITS,
+          logger: createSilentLogger(),
+          now,
+        });
+
   const app = buildServer({
     config,
     logger: createSilentLogger(),
@@ -368,10 +388,11 @@ function build(
       secureCookies: false,
       // N-01 需要「今天」；请求 fixture 的出发日期是 2026-04-10
       now,
+      ...(credits === undefined ? {} : { credits }),
     },
   });
 
-  return { app, repository, presentations, queue, users };
+  return { app, repository, presentations, queue, users, wallet };
 }
 
 beforeEach(() => {
@@ -1474,5 +1495,114 @@ describe('13.2 的里程碑字段（21.2 措施一）', () => {
     });
 
     expect(milestonesOf(response)).toEqual({ plan_readable: true, page_viewable: true });
+  });
+});
+
+describe('CR 闸门（C-3）', () => {
+  /**
+   * 装配了计费的独立夹具。
+   *
+   * 既有用例一律不装 —— 它们测的是幂等编排，而给每个用例都塞一个钱包
+   * 会让「幂等命中不扣配额」这类断言多一个与它无关的失败原因。
+   */
+  function billingHarness(): Harness {
+    harness = build(new InMemoryIdempotencyLock(), undefined, 'on');
+    return harness;
+  }
+
+  /** 匿名身份的 Cookie 与它的 user_id —— 计费按 user_id 记账 */
+  async function identity(): Promise<{ cookie: string; userId: string }> {
+    const cookie = await anonymousCookie();
+    const session = await h().app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/session',
+      headers: { cookie },
+    });
+    return { cookie, userId: session.json<{ user_id: string }>().user_id };
+  }
+
+  async function generate(cookie: string) {
+    return h().app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      payload: body(),
+      headers: { cookie },
+    });
+  }
+
+  it('余额为 0 → 402，且不建任务行、不入队', async () => {
+    /*
+     * 「不建任务行」是这条用例的重点。反过来的话，每次余额不足都会留下
+     * 一条 QUEUED 任务与一个被占用的幂等键 —— 用户充值后拿同一份表单重试
+     * 会命中那个幂等键，得到一个永远不会跑的任务。
+     */
+    const { repository, queue } = billingHarness();
+    const { cookie } = await identity();
+
+    const response = await generate(cookie);
+
+    expect(response.statusCode).toBe(402);
+    const error = response.json<{
+      error: { code: string; retryable: boolean; details: Record<string, number> };
+    }>().error;
+    expect(error.code).toBe('AUTH_INSUFFICIENT_CREDITS');
+    /* 恢复路径是充值而不是重试 —— retryable 为真会让客户端原地重试到死 */
+    expect(error.retryable).toBe(false);
+    expect(error.details.balance_cr).toBe(0);
+    expect(error.details.required_cr).toBeGreaterThan(0);
+
+    expect(repository.byKey.size).toBe(0);
+    expect(queue.enqueued).toHaveLength(0);
+  });
+
+  it('余额够 → 201，并把预留额从可用挪到冻结', async () => {
+    const { wallet } = billingHarness();
+    const { cookie, userId } = await identity();
+    wallet.seed(userId, 100_000);
+
+    const response = await generate(cookie);
+    expect(response.statusCode).toBe(201);
+
+    const after = await wallet.balance(userId);
+    expect(after.heldCr).toBeGreaterThan(0);
+    /* 钱没有凭空多也没有凭空少 */
+    expect(after.balanceCr + after.heldCr).toBe(100_000);
+  });
+
+  it('重复提交不冻结第二笔（13.8 的幂等命中先于预留）', async () => {
+    const { wallet } = billingHarness();
+    const { cookie, userId } = await identity();
+    wallet.seed(userId, 100_000);
+
+    const first = await generate(cookie);
+    expect(first.statusCode).toBe(201);
+    const held = (await wallet.balance(userId)).heldCr;
+
+    /* 任务还在 QUEUED（非终态）→ 13.8 要求 409 并带上原 job_id */
+    const second = await generate(cookie);
+    expect(second.statusCode).toBe(409);
+    expect((await wallet.balance(userId)).heldCr).toBe(held);
+  });
+
+  it('一版价目表都没发布时照常生成（降级方向是免费放行）', async () => {
+    /*
+     * 反过来（503 或 402）的表现是「运营还没配价格，全站不能生成」，
+     * 而价目表缺失是我们的配置问题。这条路上的滥用由次数配额挡住。
+     */
+    const { wallet } = billingHarness();
+    wallet.priceBook = null;
+    const { cookie, userId } = await identity();
+
+    expect((await generate(cookie)).statusCode).toBe(201);
+    expect(await wallet.balance(userId)).toEqual({ balanceCr: 0, heldCr: 0 });
+  });
+
+  it('未装配计费时完全不碰钱包（0013 之前的部署）', async () => {
+    /* 默认夹具不装 credits：库还没迁到 0013 的部署里钱包表不存在 */
+    const cookie = await anonymousCookie();
+    const response = await generate(cookie);
+
+    expect(response.statusCode).toBe(201);
+    expect(h().wallet.entries()).toHaveLength(0);
   });
 });

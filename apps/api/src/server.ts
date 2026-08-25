@@ -12,6 +12,7 @@ import {
   registerInternalPresentationRoutes,
   type InternalPresentationRoutesDeps,
 } from './routes/internal-presentations.js';
+import { registerCreditRoutes, type CreditRoutesDeps } from './routes/credits.js';
 import { registerExportRoutes, type ExportRoutesDeps } from './routes/exports.js';
 import { registerTravelPlanRoutes, type TravelPlanRoutesDeps } from './routes/travel-plans.js';
 import {
@@ -61,6 +62,13 @@ export interface ServerDeps {
    */
   readonly internalPresentations?: InternalPresentationRoutesDeps;
   readonly plannerConfig?: PlannerConfigRoutesDeps;
+  /**
+   * CR 钱包端点（C-3）。未提供时不注册。
+   *
+   * 装配条件是 `CREDIT_BILLING_ENABLED` + 库已迁到 0013 —— 钱包表不存在时
+   * 这三个端点每次调用都会 500，而注册它们等于对外承诺它们可用。
+   */
+  readonly credits?: CreditRoutesDeps;
 }
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -75,6 +83,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     internalAssets,
     internalPresentations,
     plannerConfig,
+    credits,
   } = deps;
 
   /*
@@ -241,6 +250,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   }
   if (plannerConfig !== undefined) {
     registerPlannerConfigRoutes(app, plannerConfig);
+  }
+  if (credits !== undefined) {
+    registerCreditRoutes(app, credits);
   }
 
   return app;

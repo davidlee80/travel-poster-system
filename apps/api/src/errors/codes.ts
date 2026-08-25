@@ -121,6 +121,24 @@ export const AUTH_ERRORS = {
     retryable: false,
     message: '已达到使用额度上限。注册账号可获得更多额度与长期保存。',
   },
+  AUTH_INSUFFICIENT_CREDITS: {
+    /*
+     * 402 是全表唯一的这个状态码，而只有它对。
+     *
+     * 另两个看起来能用的都会让客户端做错事：
+     *   429  「太频繁了，稍后重试」—— 而余额不会自己长回来，重试必然再撞一次；
+     *   403  「需要注册账号」—— 而他已经注册了，照着做无路可走。
+     *
+     * 402 Payment Required 的语义正是「这个请求要付费，而你还没付」。
+     * `retryable: false` 与 429 那两条同理：恢复路径是充值，不是重试。
+     *
+     * 响应体带 `details.required_cr` 与 `details.balance_cr`（见
+     * `buildErrorBody`）—— 让「还差多少」不需要客户端再发一次报价请求。
+     */
+    httpStatus: 402,
+    retryable: false,
+    message: '账户余额不足，请充值后再使用。',
+  },
 } as const satisfies Record<string, ErrorDefinition>;
 
 /**
@@ -169,6 +187,15 @@ export interface ErrorResponseBody {
     readonly message: string;
     readonly retryable: boolean;
     readonly field?: string;
+    /**
+     * 让错误可被行动的数值。目前只有 402 用它
+     * （`required_cr` / `balance_cr`）。
+     *
+     * 只允许数字，不允许任意结构：13.0 要求错误体不含内部细节，
+     * 而一个开放的 `unknown` 字段迟早会被塞进 SQL 片段或模型原文。
+     * 键名恒为 snake_case，与响应体其余部分一致。
+     */
+    readonly details?: Readonly<Record<string, number>>;
     readonly request_id: string;
     readonly trace_id: string;
   };
@@ -176,7 +203,12 @@ export interface ErrorResponseBody {
 
 export function buildErrorBody(
   code: ErrorCode,
-  context: { readonly requestId: string; readonly traceId: string; readonly field?: string },
+  context: {
+    readonly requestId: string;
+    readonly traceId: string;
+    readonly field?: string;
+    readonly details?: Readonly<Record<string, number>>;
+  },
 ): ErrorResponseBody {
   const def = errorDefinition(code);
   return {
@@ -185,6 +217,7 @@ export function buildErrorBody(
       message: def.message,
       retryable: def.retryable,
       ...(context.field === undefined ? {} : { field: context.field }),
+      ...(context.details === undefined ? {} : { details: context.details }),
       request_id: context.requestId,
       trace_id: context.traceId,
     },

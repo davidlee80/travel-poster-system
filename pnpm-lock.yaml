@@ -56,6 +56,9 @@ importers:
       '@tps/assets':
         specifier: workspace:*
         version: link:../../packages/assets
+      '@tps/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@tps/db':
         specifier: workspace:*
         version: link:../../packages/db
