@@ -318,6 +318,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@tps/billing':
+        specifier: workspace:*
+        version: link:../billing
       '@tps/shared':
         specifier: workspace:*
         version: link:../shared

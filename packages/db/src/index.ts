@@ -118,3 +118,13 @@ export {
   type PlannerConfigRepository,
   type PublishedPlannerConfig,
 } from './planner-config.js';
+
+export {
+  createCreditWalletRepository,
+  type CreditWalletRepository,
+  type LedgerEntry,
+  type LedgerKind,
+  type ReserveResult,
+  type SettleResult,
+  type WalletBalance,
+} from './credit-wallet.js';

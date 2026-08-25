@@ -21,6 +21,7 @@
     "test:integration": "vitest run integration --no-file-parallelism"
   },
   "dependencies": {
+    "@tps/billing": "workspace:*",
     "@tps/shared": "workspace:*",
     "pg": "^8.16.3"
   },
