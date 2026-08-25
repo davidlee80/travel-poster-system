@@ -51,6 +51,22 @@ export type ModelSkuPrefix = (typeof MODEL_SKU_PREFIXES)[number];
 /** 未登记模型时的兜底变体。见 `priceOf` */
 export const SKU_FALLBACK_MODEL = '*';
 
+/**
+ * 迁移 0013 种下的那一版价目表的版本号。
+ *
+ * 那一版的价格**全是占位值**，是为了让系统在没有运营配置时也能跑通，
+ * 而不是真实定价。用「版本号等于 1」当判据而不是匹配 `note` 里的「占位」字样：
+ * 后者一改文案就失效，而运营发布版本 2 时这条告警自然消失。
+ *
+ * `isSeedPriceBook` 的调用方（api / worker 启动时）应打一条 warn 日志与指标 ——
+ * 带着占位价上线的表现不是报错，是收错钱，而收错钱要到对账时才发现。
+ */
+export const SEED_PRICE_VERSION = 1;
+
+export function isSeedPriceBook(book: PriceBook): boolean {
+  return book.version === SEED_PRICE_VERSION;
+}
+
 export function modelSku(prefix: ModelSkuPrefix, model: string): string {
   return `${prefix}:${model}`;
 }

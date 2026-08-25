@@ -5,11 +5,32 @@ import type { PriceBook } from './price-book.js';
 import { priceUsage, type PricedUsage, type UsageSnapshot } from './usage.js';
 
 /**
- * 生成前的估算：**最坏情况上界**，用来判断余额够不够。
+ * 生成前的估算。产出**两个**数：预留用的典型值，与展示用的最坏上界。
  *
- * ## 为什么可以取上界，而不是「平均值 × 系数」
+ * ## 为什么不能拿上界当预留额
  *
- * 这套系统的成本本来就是有界的，四处硬上限：
+ * 上界含「最多 2 次重生成」这条路径，而它是 2～2.7 倍于典型值的
+ * （实测：5 天 2475 → 5041 CR，14 天 8815 → 23971 CR）。拿它当预留额的后果是
+ * **用户的余额必须够覆盖一个几乎不会发生的最坏情况** —— 9.9 元连一次 14 天
+ * 行程都买不了，而那一次的实际花费大约 8.8 元。产品形态直接失效。
+ *
+ * 因此：
+ *
+ *   预留 = 典型值（0 次重生成）× `holdBufferPercent`
+ *   结算超出预留时，从余额继续扣；余额不足则扣到 0，差额记 `WRITE_OFF` 由我们承担
+ *
+ * 让我们承担而不是让用户欠账或让任务失败：超出预留是**我们估算不准**，
+ * 而另两种做法一个要向用户解释他看不懂的负余额、一个要丢掉已经生成好的计划。
+ * 恶意用户拿最低余额反复触发高成本任务这条路，由保留下来的次数配额挡住
+ * （每分钟 3 次 + 日/月上限）—— 这正是那两层不删掉的价值。
+ *
+ * ## 上界仍然有用
+ *
+ * 报价端点两个数都返回，前端显示「预计 ~2.5 元，最多 5.0 元」——
+ * 用户在点之前就知道波动范围。余额连上界都不够时可以提前提示，
+ * 而不是等到结算才发现要吃坏账。
+ *
+ * ## 各处硬上限
  *
  * ```text
  * AI 图      ≤ 3 张/任务          ai-budget.ts 的 MAX_AI_IMAGES_PER_JOB
@@ -19,19 +40,9 @@ import { priceUsage, type PricedUsage, type UsageSnapshot } from './usage.js';
  * 渲染页     = 1 + 天数           完整版 1 页 + 每日各 1 页
  * ```
  *
- * 取上界的价值：**结算金额一定不超过预留额**，于是不需要处理「扣成负数」
- * 这条分支 —— 而余额有 `>= 0` 的 CHECK，那条分支会让结算事务失败、
- * 任务卡在终态之前，用户的计划生成好了却看不到。
- *
- * ## 输出 token 用分档上限，输入 token 用每天经验值
- *
- * 输出有硬上限（`max_tokens` 按天数分档，`prompt.ts` 的 `MAX_TOKENS_TIERS`），
- * 直接用它。输入没有硬上限 —— 提示词长度取决于约束条数与检索到的参考数量，
- * 而两者都随用户答卷变化。因此输入用「每天多少 token」的经验值乘天数，
- * 放在 env 里可调（`CREDIT_EST_INPUT_TOKENS_PER_DAY`）。
- *
- * 估不准的方向是有意的：宁可预留多了（结算时退还），不可预留少了。
- * 这也是 `holdBufferPercent` 存在的理由。
+ * 输出 token 用分档上限（`MAX_TOKENS_TIERS`，有硬上限）；输入 token 没有硬上限
+ * —— 提示词长度取决于约束条数与检索到的参考数量，两者都随用户答卷变化 ——
+ * 因此用「每天多少 token」的经验值乘天数，env 可调。
  */
 
 export interface JobLimits {
@@ -116,15 +127,45 @@ export interface JobEstimate extends PricedUsage {
   readonly usage: UsageSnapshot;
 }
 
-/** 生成任务的报价。`/credits/quote` 与生成端点的预留都用它 */
+export interface JobQuote {
+  /** 预留基数：典型用量（0 次重生成）的定价 */
+  readonly typical: JobEstimate;
+  /** 最坏上界：含最多重生成。只用于展示与提前警告，**不进预留** */
+  readonly ceiling: JobEstimate;
+}
+
+function priced(
+  totalDays: number,
+  model: string,
+  book: PriceBook,
+  limits: JobLimits,
+): JobEstimate {
+  const usage = estimateUsage(totalDays, model, limits);
+  return { usage, ...priceUsage(usage, book, { includeBaseFee: true }) };
+}
+
+/**
+ * 生成任务的报价。`/credits/quote` 与生成端点的预留都用它。
+ *
+ * 预留取 `typical.totalCr`（再经 `holdAmount` 放大），展示取两者。
+ */
 export function estimateJobCost(input: {
   readonly totalDays: number;
   readonly model: string;
   readonly book: PriceBook;
   readonly limits: JobLimits;
-}): JobEstimate {
-  const usage = estimateUsage(input.totalDays, input.model, input.limits);
-  return { usage, ...priceUsage(usage, input.book, { includeBaseFee: true }) };
+}): JobQuote {
+  const { totalDays, model, book, limits } = input;
+  return {
+    /*
+     * 典型 = 同一套上界逻辑，只把重生成次数按 0 算。
+     *
+     * 复用而不是另写一份「典型用量」函数：两份估算会各自演化，而它们必须
+     * 逐项对应（少算一项的表现是预留恒少那一项的钱，长期就是一笔坏账）。
+     */
+    typical: priced(totalDays, model, book, { ...limits, maxRegenerations: 0 }),
+    ceiling: priced(totalDays, model, book, limits),
+  };
 }
 
 /**

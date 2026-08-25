@@ -9,6 +9,7 @@ import {
 } from './credits.js';
 import {
   amountFor,
+  isSeedPriceBook,
   modelSku,
   priceOf,
   SKU_FALLBACK_MODEL,
@@ -200,43 +201,36 @@ describe('结算定价', () => {
   });
 });
 
-describe('生成前的估算', () => {
+describe('生成前的估算：典型值与上界', () => {
+  const quote = (totalDays: number) =>
+    estimateJobCost({ totalDays, model: 'gpt-x', book: BOOK, limits: DEFAULT_JOB_LIMITS });
+
   it('天数越多估得越贵', () => {
-    const quote = (totalDays: number): number =>
-      estimateJobCost({ totalDays, model: 'gpt-x', book: BOOK, limits: DEFAULT_JOB_LIMITS })
-        .totalCr;
-    expect(quote(3)).toBeLessThan(quote(7));
-    expect(quote(7)).toBeLessThan(quote(14));
+    expect(quote(3).typical.totalCr).toBeLessThan(quote(7).typical.totalCr);
+    expect(quote(7).typical.totalCr).toBeLessThan(quote(14).typical.totalCr);
+  });
+
+  it('上界严格高于典型值 —— 差别全在「最多 2 次重生成」这条路径上', () => {
+    /*
+     * 这条盯的是「预留取典型值」这个决定真的落地了。两者相等意味着典型值
+     * 又变回了上界，于是 9.9 元买不到一次长行程 —— 那正是改这一版的起因。
+     */
+    for (const days of [3, 7, 14]) {
+      const q = quote(days);
+      expect(q.ceiling.totalCr).toBeGreaterThan(q.typical.totalCr);
+    }
   });
 
   it('超过 7 天分段，因此 8 天明显贵于 7 天', () => {
     /*
      * `MAX_DAYS_PER_SEGMENT = 7`：8 天要分两段，输出 token 上限翻倍。
-     * 这条断言盯的是估算真的用了分段逻辑，而不是简单地按天数线性缩放。
+     * 这条断言盯的是估算真的用了分段逻辑，而不是按天数线性缩放。
      */
-    const seven = estimateJobCost({
-      totalDays: 7,
-      model: 'gpt-x',
-      book: BOOK,
-      limits: DEFAULT_JOB_LIMITS,
-    }).totalCr;
-    const eight = estimateJobCost({
-      totalDays: 8,
-      model: 'gpt-x',
-      book: BOOK,
-      limits: DEFAULT_JOB_LIMITS,
-    }).totalCr;
-    expect(eight).toBeGreaterThan(seven * 1.5);
+    expect(quote(8).typical.totalCr).toBeGreaterThan(quote(7).typical.totalCr * 1.4);
   });
 
   it('估算含全部四类成本，一项都不漏', () => {
-    const skus = estimateJobCost({
-      totalDays: 5,
-      model: 'gpt-x',
-      book: BOOK,
-      limits: DEFAULT_JOB_LIMITS,
-    }).lines.map((line) => line.sku);
-    expect(skus).toEqual([
+    expect(quote(5).typical.lines.map((line) => line.sku)).toEqual([
       'plan.base_fee',
       'llm.in:gpt-x',
       'llm.out:gpt-x',
@@ -247,21 +241,15 @@ describe('生成前的估算', () => {
     ]);
   });
 
-  it('估算是上界：真实用量的结算金额不会超过它', () => {
+  it('上界是真上界：顶到各处硬上限的真实用量不超过它', () => {
     /*
-     * 这是整套设计能不处理「扣成负数」那条分支的前提。构造一份**顶到各处硬上限**
-     * 的真实用量，它的结算金额必须 <= 估算金额。
+     * 上界不再进预留，但它仍然是「最多可能消耗」这句话的依据 ——
+     * 前端拿它显示波动范围，余额连它都不够时提前提示。因此它必须真的兜住。
      */
     const totalDays = 5;
-    const estimate = estimateJobCost({
-      totalDays,
-      model: 'gpt-x',
-      book: BOOK,
-      limits: DEFAULT_JOB_LIMITS,
-    });
+    const ceiling = quote(totalDays).ceiling.totalCr;
 
     const meter = new UsageMeter();
-    /* 分段数 × (1 + 重生成) 次调用，每次输出都顶到分档上限 */
     const attempts = Math.ceil(totalDays / 7) * (1 + DEFAULT_JOB_LIMITS.maxRegenerations);
     for (let i = 0; i < attempts; i += 1) {
       meter.addLlm('gpt-x', totalDays * DEFAULT_JOB_LIMITS.estInputTokensPerDay, 16_384);
@@ -271,8 +259,31 @@ describe('生成前的估算', () => {
     meter.addImageSearches(DEFAULT_JOB_LIMITS.maxImageSearchesPerJob);
     meter.addRenderPages(1 + totalDays);
 
-    const actual = priceUsage(meter.snapshot(), BOOK, { includeBaseFee: true });
-    expect(actual.totalCr).toBeLessThanOrEqual(estimate.totalCr);
+    expect(priceUsage(meter.snapshot(), BOOK, { includeBaseFee: true }).totalCr)
+      .toBeLessThanOrEqual(ceiling);
+  });
+
+  it('一次顺利的生成（不重生成）不超过典型值', () => {
+    /* 预留取典型值，因此这条决定了「绝大多数任务不会吃坏账」 */
+    const totalDays = 5;
+    const typical = quote(totalDays).typical.totalCr;
+
+    const meter = new UsageMeter();
+    meter.addLlm('gpt-x', totalDays * DEFAULT_JOB_LIMITS.estInputTokensPerDay, 16_384);
+    meter.addEmbedding('gpt-x', 1_000);
+    meter.addAiImages(DEFAULT_JOB_LIMITS.maxAiImagesPerJob);
+    meter.addImageSearches(DEFAULT_JOB_LIMITS.maxImageSearchesPerJob);
+    meter.addRenderPages(1 + totalDays);
+
+    expect(priceUsage(meter.snapshot(), BOOK, { includeBaseFee: true }).totalCr)
+      .toBeLessThanOrEqual(typical);
+  });
+});
+
+describe('占位价目表可被识别', () => {
+  it('种子版本（1）被认出来 —— 带着占位价上线是收错钱，不是报错', () => {
+    expect(isSeedPriceBook(BOOK)).toBe(true);
+    expect(isSeedPriceBook({ ...BOOK, version: 2 })).toBe(false);
   });
 });
 
