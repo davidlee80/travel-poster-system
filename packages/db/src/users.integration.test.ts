@@ -104,11 +104,45 @@ describeIntegration('users 表约束（集成，需 PostgreSQL）', () => {
       ).rejects.toThrow(/users_registered_shape/);
     });
 
-    it('拒绝「注册行无口令」', async () => {
+    it('允许「有邮箱但无口令」—— 0010 为手机号注册放宽了这一条', async () => {
+      /*
+       * 0002 的原约束是 `email IS NOT NULL AND password_hash IS NOT NULL`，
+       * 而 0010 把它放宽成 `email IS NOT NULL OR (phone_e164 与 phone_verified_at 都有)`
+       * —— 手机号注册的用户本来就没有口令。
+       *
+       * 因此这条用例原来断言「无口令被拒」，从 0010 落地起就一直是红的。
+       * 它一直没被发现是因为集成测试要 `DATABASE_URL` 才跑，
+       * 而 `pnpm test` 默认排除 `*.integration.test.ts`。
+       *
+       * 改断言而不是改约束：放宽是 0010 有意为之，且迁移已应用、带校验和不可改。
+       */
       await expect(
         pool.query(
           `INSERT INTO users (user_type, email, daily_plan_quota, monthly_plan_quota)
            VALUES ('REGISTERED', 'x@example.com', 5, 20)`,
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('拒绝「既无邮箱也无已验证手机号的注册行」', async () => {
+      /* 放宽之后仍然守住的那一半：两种身份标识必须至少有一个 */
+      await expect(
+        pool.query(
+          `INSERT INTO users (user_type, password_hash, daily_plan_quota, monthly_plan_quota)
+           VALUES ('REGISTERED', 'x', 5, 20)`,
+        ),
+      ).rejects.toThrow(/users_registered_shape/);
+    });
+
+    it('拒绝「有手机号但未验证的注册行」', async () => {
+      /*
+       * 0010 要求手机号注册必须 `phone_verified_at IS NOT NULL`。
+       * 少了这一条，一个只填了手机号、验证码还没验过的行就能算注册用户。
+       */
+      await expect(
+        pool.query(
+          `INSERT INTO users (user_type, phone_e164, daily_plan_quota, monthly_plan_quota)
+           VALUES ('REGISTERED', '+8613800000000', 5, 20)`,
         ),
       ).rejects.toThrow(/users_registered_shape/);
     });
