@@ -73,6 +73,7 @@ export {
   TIGHTENED_LATEST_END_TIME,
   TITLE_MAX_CHARS,
   WALKING_TOLERANCE_RATIO,
+  comparableTotal,
   deriveBudget,
   effectiveWalkingLimitKm,
   hasBlocking,

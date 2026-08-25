@@ -10,6 +10,7 @@ import {
   THEME_MAX_CHARS,
   TITLE_MAX_CHARS,
   WALKING_TOLERANCE_RATIO,
+  comparableTotal,
   deriveBudget,
   effectiveWalkingLimitKm,
   latestEndTime,
@@ -573,10 +574,33 @@ function repairBudgetCeiling(
 ): void {
   const ceiling = ctx.normalized.budget.total_max * BUDGET_MAX_TOLERANCE_RATIO;
   const travelers = Math.max(1, plan.traveler_count);
-  let excess = round2(deriveBudget(plan).total - ceiling);
+  const included = new Set<string>(ctx.normalized.budget.included_items);
+
+  /*
+   * 基准必须与 V-21 的比较**完全一致**（都是 `comparableTotal`）。
+   *
+   * 两处基准不同的表现很难定位：V-21 说还超 800，而这里按另一个总额算出
+   * 已经削够了，于是修复不再动手、违规不消失，三轮重试耗尽后计划带着
+   * 「预算未能完全满足」放行 —— 而它其实合规。
+   */
+  let excess = round2(comparableTotal(plan, ctx.normalized.budget.included_items) - ceiling);
   if (excess <= 0) return;
 
-  for (const bucket of BUDGET_CUT_ORDER) {
+  /*
+   * 只削**在用户预算口径之内**的桶。
+   *
+   * 削一个口径外的桶对可比总额毫无影响，而这里的 `excess` 会照常减 ——
+   * 于是修复以为削够了，V-21 下一轮照旧报违规，同时用户的门票被白削了一遍。
+   * `OTHER` 恒可削：`included_items` 里没有「其他」这一项，
+   * 它的非购物部分永远在口径内。
+   */
+  const cutOrder = BUDGET_CUT_ORDER.filter((bucket) => {
+    if (bucket === 'TICKET') return included.has('TICKETS');
+    if (bucket === 'MEAL') return included.has('MEALS');
+    return true;
+  });
+
+  for (const bucket of cutOrder) {
     for (const day of plan.days) {
       for (const entry of day.daily_budget.breakdown) {
         if (excess <= 0) break;

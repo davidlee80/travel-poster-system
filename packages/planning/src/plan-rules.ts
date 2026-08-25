@@ -1,4 +1,9 @@
-import type { NormalizedTravelRequest, TravelPlanContent, ViolationSeverity } from '@tps/schemas';
+import type {
+  BudgetIncludedItem,
+  NormalizedTravelRequest,
+  TravelPlanContent,
+  ViolationSeverity,
+} from '@tps/schemas';
 
 import { planCities } from './normalize.js';
 import { collectAmountSlots, collectCurrencySlots, collectStringSlots } from './plan-slots.js';
@@ -301,6 +306,72 @@ export function deriveBudget(plan: TravelPlanContent): DerivedBudget {
     total,
     perPerson: round2(total / travelers),
   };
+}
+
+/**
+ * 按**用户的预算口径**折算出可比总额（V-21 / V-22）。
+ *
+ * ## 为什么需要它
+ *
+ * `budget.included_items` 声明这笔钱覆盖哪些开支。而 `deriveBudget().total`
+ * 恒等于「门票 + 交通 + 餐饮 + 其他 + 住宿」—— 拿它直接比一个「不含住宿」的
+ * 上限，会把 5 晚房费算成超支，V-21 随即让 `repair-plan.ts` 去砍门票与餐饮。
+ * 计划本来是合规的，被削掉的是用户真正想要的东西。
+ *
+ * ## 两个可选字段缺省时读作 0，而不是「不知道」
+ *
+ * 住宿／门票／餐饮各有独立的桶或字段，可直接扣。往返大交通与市内交通同在
+ * `transport` 桶里、购物混在 `other` 里，要靠 `total_budget.intercity_transport`
+ * 与 `total_budget.shopping` 才能拆开 —— 而它们是可选的。
+ *
+ * 缺省读作 0（「这份总额里没有这一项」），理由有两条：
+ *
+ * 1. **提示词第 8 条正是这么要求的**：含才给，不含就省略、不要写 0。
+ * 2. 读作「不知道」的代价是它会命中**绝大多数请求**：契约默认口径
+ *    `DEFAULT_BUDGET_ITEMS` 只有住宿／餐饮／市内交通／门票，本来就不含
+ *    往返大交通与购物。于是每一份默认请求都要带一句「无法区分…」的说明，
+ *    而 `assumptions` 是我们告知「签证未核验」这类要紧事的同一个位置 ——
+ *    在那里放一句 100% 出现的废话，等于训练用户忽略它。
+ *
+ * 代价是不守规矩的模型（把机票塞进 `transport` 又省略 `intercity_transport`）
+ * 会让比较偏严。这与 `total_budget.accommodation` 的信任级别一致 ——
+ * V-20 校验的是内部自洽，从来不校验金额是否属实。
+ *
+ * ## 不夹到 0
+ *
+ * 模型给出 `intercity_transport > transport` 时结果会是负数。不夹 ——
+ * 那是一处真实的不一致，由 V-20 的子集检查报出并修复；
+ * 夹到 0 只会让它变成「预算低于下限」这种指错方向的违规。
+ */
+export function comparableTotal(
+  plan: TravelPlanContent,
+  includedItems: readonly BudgetIncludedItem[],
+): number {
+  const derived = deriveBudget(plan);
+  const included = new Set<string>(includedItems);
+  const intercity = plan.total_budget.intercity_transport ?? 0;
+
+  let total = derived.total;
+  const drop = (amount: number): void => {
+    total = round2(total - amount);
+  };
+
+  if (!included.has('ACCOMMODATION')) drop(derived.accommodation);
+  if (!included.has('TICKETS')) drop(derived.ticket);
+  if (!included.has('MEALS')) drop(derived.meal);
+
+  /* 两者都不含时整桶扣掉，不必拆 —— 也就不受 intercity 缺省的影响 */
+  if (!included.has('INTERCITY_TRANSPORT') && !included.has('LOCAL_TRANSPORT')) {
+    drop(derived.transport);
+  } else if (!included.has('INTERCITY_TRANSPORT')) {
+    drop(intercity);
+  } else if (!included.has('LOCAL_TRANSPORT')) {
+    drop(round2(derived.transport - intercity));
+  }
+
+  if (!included.has('SHOPPING')) drop(plan.total_budget.shopping ?? 0);
+
+  return total;
 }
 
 // ── 规则实现 ────────────────────────────────────────────────
@@ -656,6 +727,36 @@ const RULE_CHECKS: Record<PlanRuleId, RuleCheck> = {
       }
     }
 
+    /*
+     * 两个可选字段是**子集**而不是新增项。
+     *
+     * 放在 V-20 而不是开一条 V-46：`PLAN_RULE_COUNT = 28` 对应 3.2.1 冻结的
+     * 28 条，加一条要动冻结条款；而 V-20 的题目本来就是「预算分桶与明细自洽」，
+     * 「往返大交通不能超过整个交通桶」正是这个题目下的一条。
+     *
+     * 不检查它会让 `comparableTotal` 算出负数总额 —— 而负数会让 V-22 报
+     * 「低于预算下限」，把一处金额不一致指成一个完全无关的问题。
+     */
+    const subsetChecks = [
+      ['intercity_transport', plan.total_budget.intercity_transport, 'transport', derived.transport],
+      ['shopping', plan.total_budget.shopping, 'other', derived.other],
+    ] as const;
+    for (const [field, actual, parent, ceiling] of subsetChecks) {
+      if (actual !== undefined && actual > ceiling + MONEY_EPSILON) {
+        out.push(
+          violation(
+            'V-20',
+            `total_budget.${field}`,
+            `${actual} 超过它所属的 ${parent} 桶（${ceiling}）`,
+          ),
+        );
+      }
+      /* 负数金额同样是不一致。schema 只要求 finite，不要求非负 */
+      if (actual !== undefined && actual < -MONEY_EPSILON) {
+        out.push(violation('V-20', `total_budget.${field}`, `${actual} 是负数`));
+      }
+    }
+
     return out;
   },
 
@@ -667,10 +768,18 @@ const RULE_CHECKS: Record<PlanRuleId, RuleCheck> = {
    * 包含 `ACCOMMODATION`，用户给的上限是含住宿的。按原文实现的结果是：
    * 5 晚 1600 元住宿对这条规则完全不可见，超预算的计划照常放行。
    * 因此改用 `deriveBudget().total`（= 各日明细 × 人数 + 住宿），见 R-21。
+   *
+   * 那次改动假定「口径一定含住宿」。现在不再假定：口径由
+   * `included_items` 说，`comparableTotal` 据它折算 —— 用户把住宿从口径里去掉
+   * （已经订好、住亲友家）时，这条规则不再拿房费去撞他的上限。
    */
   'V-21': (plan, { normalized }) => {
     const ceiling = normalized.budget.total_max * BUDGET_MAX_TOLERANCE_RATIO;
-    const total = deriveBudget(plan).total;
+    /*
+     * 按用户口径折算后再比（见 `comparableTotal`）。口径默认含住宿，
+     * 因此不改口径的请求走到的是与从前逐字相同的比较。
+     */
+    const total = comparableTotal(plan, normalized.budget.included_items);
     return total > ceiling + MONEY_EPSILON
       ? [
           violation(
@@ -684,7 +793,7 @@ const RULE_CHECKS: Record<PlanRuleId, RuleCheck> = {
 
   'V-22': (plan, { normalized }) => {
     const floor = normalized.budget.total_min * BUDGET_MIN_RATIO;
-    const total = deriveBudget(plan).total;
+    const total = comparableTotal(plan, normalized.budget.included_items);
     return total < floor - MONEY_EPSILON
       ? [
           violation(

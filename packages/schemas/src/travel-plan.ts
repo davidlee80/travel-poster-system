@@ -165,6 +165,42 @@ export const TotalBudgetSchema = z.object({
   total: z.number().finite(),
   per_person: z.number().finite(),
   currency: CurrencySchema,
+
+  /*
+   * 下面两个可选字段让「用户的预算口径」可以被精确对齐。
+   *
+   * ## 为什么需要它们
+   *
+   * `budget.included_items` 让用户声明这笔钱覆盖哪些开支（往返大交通 / 住宿 /
+   * 餐饮 / 市内交通 / 门票 / 购物）。要拿计划的总额与那个口径比，就得能把
+   * 总额按同样的分类拆开 —— 而现有分桶做不到：
+   *
+   *   住宿             ✓ 有独立的 `accommodation` 字段，可精确扣除
+   *   往返大交通       ✗ 与市内交通同在 `transport`
+   *   购物             ✗ 混在 `other` 里
+   *
+   * 于是「用户说预算不含机票」这种情况下，V-21 会拿一个含机票的总额去比一个
+   * 不含机票口径的上限，判超预算，`repair-plan.ts` 随即去砍门票与餐饮 ——
+   * 而计划本来是合规的。
+   *
+   * 细分 `BUDGET_BUCKET_VALUES` 也能解决，但那会改掉 3.2.1 冻结的分桶粒度，
+   * 且撞上 `Record<BudgetBucket, string>` 的穷举点。让模型在总额层面
+   * 多声明两个金额是代价最小的做法。
+   *
+   * ## 为什么是可选
+   *
+   * 可选新增不递增契约版本号，存量 `plan_json` 一行不改仍然合法。
+   * `undefined` 表示模型没给（或用的是旧模型），此时校验层**不扣除**并记一条
+   * assumption —— 静默扣一个猜测值会让实际超预算的计划显示为合规。
+   *
+   * 两者都是 `total` 的**子集**而不是新增项：`intercity_transport ≤ transport`、
+   * `shopping ≤ other`，一致性由 V-20 检查。写成子集而不是独立分桶，
+   * 是为了让 `total` 的含义保持不变 —— 否则存量计划的 `total` 会突然少两项。
+   */
+  /** `transport` 中属于往返大交通（机票、跨城铁路等）的部分 */
+  intercity_transport: z.number().finite().optional(),
+  /** `other` 中属于购物的部分 */
+  shopping: z.number().finite().optional(),
 });
 export type TotalBudget = z.infer<typeof TotalBudgetSchema>;
 

@@ -94,12 +94,17 @@ export const TravelersSchema = z.object({
  * 不含 `INTERCITY_TRANSPORT`：往返大交通常常已经自行订好（原型的「已有订单」
  * 就有这一项），把它算进默认集会让同一个 min/max 显得更紧，从而无谓地收窄行程。
  *
- * ## 这个字段今天是惰性数据
+ * ## 这个字段已经接上了（原为惰性数据）
  *
- * 已核实：`normalize.ts` 只把它透传进 `NormalizedBudget`，Prompt 没有渲染它，
- * 也没有任何 V-xx / N-xx 规则读它。也就是说模型目前并不知道预算覆盖了哪些开支，
- * 而 min/max 的含义恰恰取决于此。这是 P8 之前就存在的缺口，不在本轮范围 ——
- * 记在这里是为了让下一个动预算的人知道它还没接上。
+ * P8～P9 期间它只被透传进 `NormalizedBudget`，Prompt 不渲染、没有任何 V-xx /
+ * N-xx 读它 —— 模型不知道预算覆盖哪些开支，而 min/max 的含义恰恰取决于此。
+ * 现在三处都接上了：
+ *
+ *   `prompt.ts`      预算区间下一行给出「这笔预算覆盖：…」
+ *   `plan-rules.ts`  `comparableTotal` 按口径折算，V-21 / V-22 用它比较
+ *   `plan-rules.ts`  V-20 检查两个可选子集字段（大交通、购物）与所属桶自洽
+ *
+ * 默认集**不含**大交通与购物，因此不改口径的请求走到的比较与从前逐字相同。
  */
 export const DEFAULT_BUDGET_ITEMS: readonly BudgetIncludedItem[] = [
   'ACCOMMODATION',

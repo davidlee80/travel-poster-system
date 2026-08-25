@@ -1,6 +1,7 @@
 import {
   SCHEMA_VERSIONS,
   type BudgetBasis,
+  type BudgetIncludedItem,
   type ConditionCode,
   type Currency,
   type ExistingBooking,
@@ -433,6 +434,18 @@ interface ProjectedBudget {
   readonly min: number;
   readonly max: number;
   readonly tier?: 'ECONOMY' | 'STANDARD' | 'QUALITY' | 'LUXURY';
+  /**
+   * PV2-03-006 的「这笔预算包含哪些项目」。
+   *
+   * 用户没勾时省略，由契约填 `DEFAULT_BUDGET_ITEMS`（住宿 / 餐饮 / 市内交通 / 门票）。
+   * 勾了就必须发 —— 见 `projectBudget` 里那段说明。
+   */
+  /*
+   * 可变数组而不是 `readonly`：`TravelRequestUIInput` 那一侧是 Zod 推出来的
+   * 可变类型，`readonly` 赋不进去。这里就地展开成新数组（见 `projectBudget`），
+   * 因此不存在把 `planner_profile` 里那份数组的引用漏出去的问题。
+   */
+  readonly included_items?: BudgetIncludedItem[];
 }
 
 /** V2 的四档 → P8 的四档。P8 的 `STANDARD` 是「舒适」的旧译名，`CUSTOM` 在 V2 不存在 */
@@ -469,6 +482,26 @@ export function projectBudget(
   const tier = answers.budget?.travel_tier;
   const p8Tier = tier === undefined ? undefined : P8_TIER_OF[tier];
 
+  /*
+   * 预算口径**必须发**。
+   *
+   * 本文件头部曾写着「`included_items` 刻意不发 —— 值与 schema 默认值逐字相同」，
+   * 那句话在 P8 成立（那个表单没有这个输入），但 P9 加了 PV2-03-006 之后就不成立了：
+   * 契约默认值 `DEFAULT_BUDGET_ITEMS` 只有 4 项（住宿 / 餐饮 / 市内交通 / 门票），
+   * 而问卷有 6 项 —— 用户取消勾选住宿（已订好、住亲友家）或勾上往返大交通与购物，
+   * 都与默认不同。
+   *
+   * 不发的后果不是「少一个字段」而是**口径分叉**：`planner_profile` 那一份是发的，
+   * `constraints.ts` 会把它渲染成 FACT 约束进 Prompt，于是模型按用户口径算总额；
+   * 而 `normalized.budget.included_items` 拿的是默认值，V-21/V-22 按默认口径比上限。
+   * 用户说「预算含机票」，模型把机票算进去，V-21 判超预算，repair 去砍门票餐饮。
+   *
+   * 空数组不发：契约的 `.min(1)` 会拒掉它，而「一项都不含」不是用户会有意表达的意思
+   * （那样 min/max 就没有含义了）。
+   */
+  const scope = answers.budget?.scope_and_priorities?.included_items ?? [];
+  const includedItems = scope.length > 0 ? { included_items: [...scope] } : {};
+
   if ((mode === 'TOTAL' || mode === 'PER_PERSON') && range !== undefined) {
     const factor = mode === 'PER_PERSON' ? Math.max(1, travelerCount) : 1;
     return {
@@ -477,6 +510,7 @@ export function projectBudget(
       min: range.min * factor,
       max: range.max * factor,
       ...(p8Tier === undefined ? {} : { tier: p8Tier }),
+      ...includedItems,
     };
   }
 
@@ -494,6 +528,7 @@ export function projectBudget(
     min,
     max,
     ...(p8Tier === undefined ? {} : { tier: p8Tier }),
+    ...includedItems,
   };
 }
 
@@ -686,9 +721,14 @@ export interface BuildPlannerRequestOptions {
  * `planner_profile.trip.destinations` 里。两者由 `TravelRequestUISchema` 的
  * `superRefine` 断言一致 —— 不一致时报带 `field` 的错误而不是静默取其一。
  *
- * ## `output_preferences` / `locale` / `included_items` 刻意不发
+ * ## `output_preferences` / `locale` 刻意不发
  *
  * 它们的值与 schema 默认值逐字相同（见 `travel-request-form.ts` 的同类说明）。
+ *
+ * **`included_items` 不在这一类里。** 这里原来把它也列为「不发」，理由是同一句
+ * 「与默认值逐字相同」—— 那句话是从 P8 的表单注释抄过来的，在那里成立，
+ * 而 P9 加了 PV2-03-006（6 个可勾选项，契约默认只有 4 项）之后就不成立了。
+ * 现在它照 `projectBudget` 里的说明如实发出。
  */
 export function buildPlannerRequest(
   state: PlannerState,

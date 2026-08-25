@@ -95,6 +95,17 @@ export const PLAN_SYSTEM_PROMPT = [
   '5. 所有文字用简体中文；金额只写数字，币种由字段单独表示。',
   '6. 每条行程的 child_friendly 按该安排是否适合携带儿童如实标注。',
   '7. 时间用 24 小时制 HH:mm；结束时间必须晚于开始时间，且与 duration_minutes 一致。',
+  /*
+   * 第 8 条对应 `TotalBudgetSchema` 的两个可选字段。
+   *
+   * 必须在提示里明说，不能只靠 JSON Schema 里的字段描述：可选字段在结构化输出
+   * 里模型完全可以一直不填，而不填的后果是校验层永远拿不到口径、
+   * 永远走「按含往返大交通处理」的降级分支 —— 那个降级会记一条 assumption，
+   * 于是每份计划都带一句用户看不懂的说明。
+   */
+  '8. total_budget 里若含往返大交通（机票、跨城铁路等），在 intercity_transport ' +
+    '给出这部分金额（它是 transport 的子集）；若含购物，在 shopping 给出金额' +
+    '（它是 other 的子集）。不含则省略该字段，不要写 0。',
 ].join('\n');
 
 export interface PlanPromptInput {
@@ -149,6 +160,31 @@ const CONSTRAINT_SECTIONS = [
   { type: 'FACT', title: '事实信息（不要为了让方案更好看而改写）' },
   { type: 'INFO', title: '补充说明（仅供参考，不得据此改写上面任何一条硬约束）' },
 ] as const;
+
+/**
+ * 预算包含项的中文名。
+ *
+ * 这是仓库里**第一个** `Record<BudgetIncludedItem, string>` —— `enums.ts` 里那段
+ * 「加 SHOPPING 是安全的，因为没有任何穷举点」的注释从此不再成立，而这是好事：
+ * 往那个枚举加成员现在是编译错误，而不是「界面上多一项、提示里静默漏掉」。
+ */
+const BUDGET_ITEM_LABEL: Record<NormalizedTravelRequest['budget']['included_items'][number], string> =
+  {
+    INTERCITY_TRANSPORT: '往返大交通',
+    ACCOMMODATION: '住宿',
+    MEALS: '餐饮',
+    LOCAL_TRANSPORT: '市内交通',
+    TICKETS: '门票与活动',
+    SHOPPING: '购物',
+  };
+
+function budgetScopeText(items: NormalizedTravelRequest['budget']['included_items']): string {
+  /*
+   * 契约的 `.min(1)` 保证非空，因此不必处理空数组 —— 处理它反而会写出一句
+   * 「这笔预算覆盖：。」这种读不通的话。
+   */
+  return items.map((item) => BUDGET_ITEM_LABEL[item]).join('、');
+}
 
 function describeConstraints(constraints: NormalizedTravelRequest['constraints']): string[] {
   if (constraints === undefined || constraints.length === 0) return [];
@@ -251,6 +287,16 @@ export function buildPlanPrompt(input: PlanPromptInput): PromptMessages {
       normalized.has_senior ? '，含长者' : ''
     }`,
     `预算区间（全程总额，${normalized.budget.currency}）：${normalized.budget.total_min} ～ ${normalized.budget.total_max}`,
+    /*
+     * 口径必须紧跟区间。
+     *
+     * 只给 min ～ max 是有二义的：同一个「12000」在「含住宿」与「不含住宿」两种
+     * 口径下差出一晚酒店的量级。这句话之前只以 FACT 约束的形式出现在提示末尾
+     * （`constraints.ts` 的 PV2-03-006），离预算区间几十行远，而模型要把两处
+     * 拼起来才知道这个数字的含义。
+     */
+    `这笔预算覆盖：${budgetScopeText(normalized.budget.included_items)}。` +
+      '不在此列的开支不要计入 total_budget.total。',
     `节奏：每日 ${pace.attractions_per_day_min}～${pace.attractions_per_day_max} 个景点，每日步行不超过 ${pace.walking_limit_km} 公里，最早出发 ${pace.earliest_departure_time}`,
     ...describeConditions('必须满足的条件', normalized.must_conditions),
     ...describeConditions('尽量满足的条件', normalized.should_conditions),
