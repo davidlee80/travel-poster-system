@@ -17,6 +17,7 @@ import {
 import { clearDraft, loadDraft, saveDraft, type SaveState } from '@/lib/planner/persistence';
 import { browserTimezone, newClientRequestId } from '@/lib/travel-request-form';
 import { AuthPanel } from '../AuthPanel';
+import { useSummaryLabel } from './PlannerConfigProvider';
 import { useSession } from '../SessionProvider';
 import { GenerationDialog } from './GenerationDialog';
 import { PrepCenter } from './PrepCenter';
@@ -172,7 +173,12 @@ export function Planner(): React.ReactElement {
     () => buildSnapshot(state, { planGenerated: planId !== null }),
     [state, planId],
   );
-  const sections = useMemo(() => buildSummary(state, snapshot), [state, snapshot]);
+  /* 右栏文案与主栏用同一份配置，见 summary.ts 的 `LabelResolver` */
+  const summaryLabel = useSummaryLabel();
+  const sections = useMemo(
+    () => buildSummary(state, snapshot, summaryLabel),
+    [state, snapshot, summaryLabel],
+  );
   const metrics = useMemo(() => buildMetrics(state), [state]);
 
   const registerField = useCallback((fieldId: PlannerFieldId, node: HTMLElement | null) => {

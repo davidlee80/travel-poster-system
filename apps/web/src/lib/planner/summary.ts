@@ -58,20 +58,35 @@ export interface SummarySection {
 }
 
 /**
+ * 选项文案解析器。
+ *
+ * 默认是内置表；`Planner` 与 `ReviewBoard` 传入配置中心的版本，
+ * 让运营改过的文案在右栏与主栏一致 —— 不一致的表现是同一个标签
+ * 在第 5 步显示新文案、在右栏摘要显示旧文案。
+ */
+export type LabelResolver = (value: string, apiKey?: string) => string;
+
+/**
  * 把答案渲染成一句话。
  *
  * 逐形状处理，与 `hasValue` 对应的五种包装一一对应。渲染不出来时返回 null
  * 而不是空串 —— 调用方据此**不产出 chip**，而一个空 chip 会让用户以为
  * 自己填的东西丢了。
  */
-export function formatAnswer(value: unknown, apiKey?: string): string | null {
+export function formatAnswer(
+  value: unknown,
+  apiKey?: string,
+  labelOf: LabelResolver = optionLabel,
+): string | null {
   if (value === undefined || value === null) return null;
-  if (typeof value === 'string') return value.trim().length > 0 ? optionLabel(value, apiKey) : null;
+  if (typeof value === 'string') return value.trim().length > 0 ? labelOf(value, apiKey) : null;
   if (typeof value === 'number') return String(value);
   if (typeof value === 'boolean') return value ? '是' : '否';
 
   if (Array.isArray(value)) {
-    const parts = value.map((entry) => formatAnswer(entry, apiKey)).filter((part) => part !== null);
+    const parts = value
+      .map((entry) => formatAnswer(entry, apiKey, labelOf))
+      .filter((part) => part !== null);
     return parts.length === 0 ? null : parts.join('、');
   }
 
@@ -80,13 +95,13 @@ export function formatAnswer(value: unknown, apiKey?: string): string | null {
 
   /* 三态标签：显示「标签 · 态」，因为「必须公共交通」与「不要公共交通」是两件事 */
   if (typeof record['code'] === 'string' && typeof record['stance'] === 'string') {
-    return `${optionLabel(record['code'], apiKey)}${STANCE_SUFFIX[record['stance']] ?? ''}`;
+    return `${labelOf(record['code'], apiKey)}${STANCE_SUFFIX[record['stance']] ?? ''}`;
   }
 
-  if ('user_reported' in record) return formatAnswer(record['user_reported'], apiKey);
+  if ('user_reported' in record) return formatAnswer(record['user_reported'], apiKey, labelOf);
 
   if ('values' in record) {
-    const values = formatAnswer(record['values'], apiKey);
+    const values = formatAnswer(record['values'], apiKey, labelOf);
     const other = typeof record['other_text'] === 'string' ? record['other_text'].trim() : '';
     if (values === null) return other.length > 0 ? other : null;
     return other.length > 0 ? `${values}、${other}` : values;
@@ -95,7 +110,7 @@ export function formatAnswer(value: unknown, apiKey?: string): string | null {
   if ('enabled' in record) {
     if (record['enabled'] !== true) return null;
     const rest = Object.entries(record).filter(([key]) => key !== 'enabled');
-    const detail = formatAnswer(Object.fromEntries(rest), apiKey);
+    const detail = formatAnswer(Object.fromEntries(rest), apiKey, labelOf);
     return detail === null ? '已开启' : detail;
   }
 
@@ -109,7 +124,7 @@ export function formatAnswer(value: unknown, apiKey?: string): string | null {
   }
 
   const parts = Object.values(record)
-    .map((entry) => formatAnswer(entry, apiKey))
+    .map((entry) => formatAnswer(entry, apiKey, labelOf))
     .filter((part) => part !== null);
   return parts.length === 0 ? null : parts.join('、');
 }
@@ -138,6 +153,7 @@ const KIND_BY_GROUP: Record<PlannerSummaryGroup, SummaryChipKind> = {
 export function buildSummary(
   state: PlannerState,
   snapshot: PlannerSnapshot,
+  labelOf: LabelResolver = optionLabel,
 ): readonly SummarySection[] {
   const chipsByGroup = new Map<PlannerSummaryGroup, SummaryChip[]>();
   for (const entry of SUMMARY_GROUPS) chipsByGroup.set(entry.group, []);
@@ -153,7 +169,7 @@ export function buildSummary(
     const fs: FieldState | undefined = snapshot.states.get(fieldId);
     if (fs === undefined || !isSatisfied(fs)) continue;
 
-    const text = chipText(state, fieldId);
+    const text = chipText(state, fieldId, labelOf);
     if (text === null) continue;
 
     const bucket = chipsByGroup.get(spec.summary_group);
@@ -179,7 +195,11 @@ export function buildSummary(
   }));
 }
 
-function chipText(state: PlannerState, fieldId: PlannerFieldId): string | null {
+function chipText(
+  state: PlannerState,
+  fieldId: PlannerFieldId,
+  labelOf: LabelResolver,
+): string | null {
   const spec = plannerField(fieldId);
   if (isMasked(fieldId)) {
     /*
@@ -189,7 +209,7 @@ function chipText(state: PlannerState, fieldId: PlannerFieldId): string | null {
      */
     return ABSTRACT_SUMMARY[fieldId] ?? null;
   }
-  const value = formatAnswer(readAnswer(state.answers, spec.api_key), spec.api_key);
+  const value = formatAnswer(readAnswer(state.answers, spec.api_key), spec.api_key, labelOf);
   return value === null ? null : `${shortQuestion(spec.question)}：${value}`;
 }
 

@@ -1,8 +1,12 @@
 'use client';
 
+import {
+  usePlannerOptionResolver,
+  type ResolvedOptions,
+} from '@/components/planner/PlannerConfigProvider';
+import { optionFieldKey, resolutionTarget } from '@/lib/planner/config-binding';
 import type { FieldPart } from '@/lib/planner/descriptors';
 import { asList } from '@/lib/planner/field-io';
-import { optionLabel } from '@/lib/planner/field-spec';
 
 import { CheckGroup, ChoiceRow, RankSelect, TriStateTag } from './ChoiceControls';
 import { PlaceList, PlacePicker } from './PlaceControls';
@@ -120,6 +124,29 @@ function ObjectList({
   const max = part.max ?? 20;
 
   /*
+   * 行内部件的选项也走配置中心。
+   *
+   * 路径比字段深一层：订单卡的「类型」是 `trip.locked_orders.type`。
+   * 在这里一次性解析好全部行内部件，而不是让每个 `RowField` 各自解析 ——
+   * 行摘要（`rowSummary`，一个普通函数）也要用这些文案，
+   * 而它不在组件里，拿不到 hook。
+   */
+  const resolve = usePlannerOptionResolver();
+  const prefix = optionFieldKey(apiKey, part);
+  const resolved = new Map<string, ResolvedOptions>(
+    itemParts.flatMap((itemPart) =>
+      itemPart.key === null
+        ? []
+        : [
+            [
+              itemPart.key,
+              resolve(resolutionTarget(apiKey, prefix, itemPart, itemPart.options ?? [])),
+            ],
+          ],
+    ),
+  );
+
+  /*
    * `rows` 来自 `follow_count`。取 `max(计数器, 已存行数)` 而不是直接取计数器：
    * 用户把人数从 4 改到 2 时截断由计数器的 `truncates` 负责，而在那次截断
    * 生效之前的一帧里，直接取计数器会让第 3、4 行的值在界面上凭空消失。
@@ -178,7 +205,7 @@ function ObjectList({
               因此这里恒渲染而不是按屏宽分支 —— 后者要读窗口宽度，
               而那会让服务端渲染与客户端首次渲染不一致。
             */}
-            <p className="planner-repeater__summary">{rowSummary(itemParts, row, apiKey, index)}</p>
+            <p className="planner-repeater__summary">{rowSummary(itemParts, row, resolved, index)}</p>
 
             {itemParts.map((itemPart) => (
               <RowField
@@ -187,6 +214,9 @@ function ObjectList({
                 apiKey={apiKey}
                 row={row}
                 id={`${id}-${index}-${itemPart.key ?? 'self'}`}
+                {...(itemPart.key === null
+                  ? {}
+                  : { resolved: resolved.get(itemPart.key) })}
                 onWrite={(nextRow) => writeRow(index, nextRow)}
               />
             ))}
@@ -228,7 +258,7 @@ function ObjectList({
 function rowSummary(
   itemParts: readonly FieldPart[],
   row: Record<string, unknown>,
-  apiKey: string,
+  resolved: ReadonlyMap<string, ResolvedOptions>,
   index: number,
 ): string {
   const parts: string[] = [];
@@ -236,8 +266,8 @@ function rowSummary(
     if (part.key === null || parts.length >= 2) continue;
     const raw = row[part.key];
     if (typeof raw === 'string' && raw.trim().length > 0) {
-      /* 选项值查文案，自由文本原样 —— `optionLabel` 查不到时回退原值 */
-      parts.push(optionLabel(raw, apiKey));
+      /* 选项值查文案，自由文本原样 —— 解析器查不到时回退原值 */
+      parts.push(resolved.get(part.key)?.labelOf(raw) ?? raw);
     } else if (typeof raw === 'number') {
       parts.push(String(raw));
     }
@@ -257,12 +287,15 @@ function RowField({
   apiKey,
   row,
   id,
+  resolved,
   onWrite,
 }: {
   readonly part: FieldPart;
   readonly apiKey: string;
   readonly row: Record<string, unknown>;
   readonly id: string;
+  /** 父层解析好的选项与文案。无选项的部件（文本、数字）没有它 */
+  readonly resolved?: ResolvedOptions | undefined;
   readonly onWrite: (next: Record<string, unknown>) => void;
 }): React.ReactElement | null {
   const key = part.key;
@@ -287,7 +320,8 @@ function RowField({
         apiKey={apiKey}
         value={row[key]}
         id={id}
-        options={part.options ?? []}
+        options={resolved?.values ?? part.options ?? []}
+        labelOf={resolved?.labelOf ?? ((value) => value)}
         onChange={(next) => {
           const nextRow = { ...row };
           if (next === undefined) delete nextRow[key];

@@ -4,7 +4,6 @@ import { PLANNER_STANCE_VALUES, type PlannerStance } from '@tps/schemas';
 import { useEffect, useRef, useState } from 'react';
 
 import { selectedValues } from '@/lib/planner/field-io';
-import { optionLabel } from '@/lib/planner/field-spec';
 
 import type { ControlProps } from './control-props';
 
@@ -32,7 +31,7 @@ export function ChoiceRow({
   value,
   onChange,
   options,
-  apiKey,
+  labelOf,
   id,
   describedBy,
   compact,
@@ -55,7 +54,7 @@ export function ChoiceRow({
             aria-pressed={selected}
             onClick={() => onChange(selected ? undefined : option)}
           >
-            {optionLabel(option, apiKey)}
+            {labelOf(option)}
           </button>
         );
       })}
@@ -74,7 +73,7 @@ export function CheckGroup({
   value,
   onChange,
   options,
-  apiKey,
+  labelOf,
   part,
   id,
   describedBy,
@@ -118,7 +117,7 @@ export function CheckGroup({
                 else if (!full) write([...selected, option]);
               }}
             >
-              {optionLabel(option, apiKey)}
+              {labelOf(option)}
             </button>
           );
         })}
@@ -179,7 +178,7 @@ export function TriStateTag({
   value,
   onChange,
   options,
-  apiKey,
+  labelOf,
   id,
   describedBy,
 }: ControlProps): React.ReactElement {
@@ -210,7 +209,7 @@ export function TriStateTag({
     >
       {options.map((code) => {
         const stance = selections.find((entry) => entry.code === code)?.stance;
-        const label = optionLabel(code, apiKey);
+        const label = labelOf(code);
         const upcoming = nextStance(stance);
         return (
           <span className="planner-tag-wrap" key={code}>
@@ -255,7 +254,7 @@ export function TriStateTag({
 
       {sheetCode === null ? null : (
         <StanceSheet
-          label={optionLabel(sheetCode, apiKey)}
+          label={labelOf(sheetCode)}
           current={sheetStance}
           onPick={(stance) => {
             write(sheetCode, stance);
@@ -376,7 +375,7 @@ export function RankSelect({
   value,
   onChange,
   options,
-  apiKey,
+  labelOf,
   part,
   id,
   describedBy,
@@ -426,13 +425,13 @@ export function RankSelect({
                 {index + 1}
               </span>
               <span className="planner-rank__label">
-                第 {index + 1} 位：{optionLabel(option, apiKey)}
+                第 {index + 1} 位：{labelOf(option)}
               </span>
               <span className="planner-rank__actions">
                 <button
                   type="button"
                   className="planner-icon-button"
-                  aria-label={`把「${optionLabel(option, apiKey)}」上移`}
+                  aria-label={`把「${labelOf(option)}」上移`}
                   disabled={index === 0}
                   onClick={() => move(index, -1)}
                 >
@@ -441,7 +440,7 @@ export function RankSelect({
                 <button
                   type="button"
                   className="planner-icon-button"
-                  aria-label={`把「${optionLabel(option, apiKey)}」下移`}
+                  aria-label={`把「${labelOf(option)}」下移`}
                   disabled={index === ranked.length - 1}
                   onClick={() => move(index, 1)}
                 >
@@ -450,7 +449,7 @@ export function RankSelect({
                 <button
                   type="button"
                   className="planner-icon-button"
-                  aria-label={`移除「${optionLabel(option, apiKey)}」`}
+                  aria-label={`移除「${labelOf(option)}」`}
                   onClick={() => write(ranked.filter((entry) => entry !== option))}
                 >
                   ✕
@@ -474,7 +473,7 @@ export function RankSelect({
                 if (!full) write([...ranked, option]);
               }}
             >
-              {optionLabel(option, apiKey)}
+              {labelOf(option)}
             </button>
           ))}
       </div>

@@ -6,6 +6,8 @@ import {
   type PlannerFieldId,
 } from '@tps/schemas';
 
+import { usePlannerOptionResolver } from '@/components/planner/PlannerConfigProvider';
+import { resolutionTarget } from '@/lib/planner/config-binding';
 import { FIELD_DESCRIPTORS, type FieldPart } from '@/lib/planner/descriptors';
 import {
   asStringList,
@@ -15,7 +17,9 @@ import {
   patchApiKey,
   patchPart,
   patchToggle,
+  staleCodes,
   truncated,
+  withoutCodes,
 } from '@/lib/planner/field-io';
 import { FIELD_STATE_LABEL } from '@/lib/planner/field-state';
 import { readAnswer, type PlannerAction, type PlannerState } from '@/lib/planner/state';
@@ -223,8 +227,31 @@ function PartField({
   readonly describedBy: string | undefined;
 }): React.ReactElement {
   const controlId = `${fieldId}-${part.key ?? 'self'}`;
-  const options = resolveOptions(part, state);
   const rows = resolveRows(part, state);
+  const value = partValue(state.answers, fieldId, part);
+
+  /*
+   * 选项来自配置中心的发布版本，回退内置（见 `PlannerConfigProvider`）。
+   *
+   * `options_from` 的部件（只有 `interests.top3`）要用动态值覆盖解析出的
+   * `values` —— 那个列表是「用户勾了哪些兴趣」，而解析器返回的是
+   * 「配置里有哪些兴趣」。不覆盖会让排序控件列出全部 14 个兴趣。
+   * 文案与可配性仍沿用源列表，见 `resolutionTarget`。
+   */
+  const resolve = usePlannerOptionResolver();
+  const dynamic = resolveOptions(part, state);
+  const target = resolutionTarget(apiKey, apiKey, part, dynamic);
+  const resolved = resolve(target);
+  const options = part.options_from === undefined ? resolved.values : dynamic;
+
+  /*
+   * 配置里已下线、但草稿里还留着的条件码。
+   *
+   * 只查条件码列表：那里下线一个值会让提交被 N-08 拒（白名单收缩），
+   * 而枚举列表下线一个值只是界面上看不到了 —— 契约照旧接受，提交不受影响。
+   * 把提示扩到枚举会让用户为一件没有后果的事按一次按钮。
+   */
+  const stale = target.kind === 'CONDITION_CODE' ? staleCodes(value, options) : [];
 
   const write = (next: unknown): void => {
     dispatch({
@@ -255,16 +282,31 @@ function PartField({
   };
 
   const body = (
-    <PrimitiveControl
-      part={part}
-      apiKey={apiKey}
-      value={partValue(state.answers, fieldId, part)}
-      onChange={write}
-      id={controlId}
-      options={options}
-      {...(rows === undefined ? {} : { rows })}
-      {...(describedBy === undefined ? {} : { describedBy })}
-    />
+    <>
+      <PrimitiveControl
+        part={part}
+        apiKey={apiKey}
+        value={value}
+        onChange={write}
+        id={controlId}
+        options={options}
+        labelOf={resolved.labelOf}
+        {...(rows === undefined ? {} : { rows })}
+        {...(describedBy === undefined ? {} : { describedBy })}
+      />
+      {stale.length === 0 ? null : (
+        <p className="planner-hint planner-hint--stale">
+          有 {stale.length} 项你选过的偏好已经下线，留着它会让提交被拒。
+          <button
+            type="button"
+            className="planner-button planner-button--light"
+            onClick={() => write(withoutCodes(value, stale))}
+          >
+            移除这 {stale.length} 项
+          </button>
+        </p>
+      )}
+    </>
   );
 
   /*

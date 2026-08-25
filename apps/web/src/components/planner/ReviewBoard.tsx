@@ -10,6 +10,7 @@ import { buildSummary } from '@/lib/planner/summary';
 import { TRIGGER_REASON } from '@/lib/planner/triggers';
 import { invalidFields } from '@/lib/planner/validation';
 
+import { useSummaryLabel } from './PlannerConfigProvider';
 import { FieldControl } from './controls/FieldControl';
 
 /**
@@ -56,7 +57,9 @@ export function ReviewPanel({
   dispatch,
   onJumpToField,
 }: Omit<ReviewBoardProps, 'registerField'>): React.ReactElement {
-  const sections = buildSummary(state, snapshot);
+  /* 右栏文案与主栏用同一份配置，见 summary.ts 的 `LabelResolver` */
+  const summaryLabel = useSummaryLabel();
+  const sections = buildSummary(state, snapshot, summaryLabel);
   const conflicts = invalidFields(state, snapshot.triggered);
 
   const acknowledged = acknowledgedGroups(state);

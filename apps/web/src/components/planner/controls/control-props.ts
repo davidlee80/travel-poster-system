@@ -24,8 +24,17 @@ export interface ControlProps {
   readonly id: string;
   /** 说明与错误文案的 id，进 `aria-describedby`（规范 20）*/
   readonly describedBy?: string;
-  /** 已解析的选项值列表（静态选项或 `options_from` 的动态结果）*/
+  /** 已解析的选项值列表（配置中心的发布版本、静态选项或 `options_from` 的动态结果）*/
   readonly options: readonly string[];
+  /**
+   * 选项文案。
+   *
+   * 由父层从配置中心解析（`usePlannerOptionResolver`），配置缺失时回退到
+   * 内置的 `optionLabel`。控件里**不再**直接调 `optionLabel` ——
+   * 那会让运营改过的文案只在一部分控件里生效，而症状是
+   * 「同一个标签在第 5 步显示新文案、在右栏摘要显示旧文案」。
+   */
+  readonly labelOf: (value: string) => string;
   /**
    * `object-list` 的固定行数，由描述符的 `follow_count` 解析而来。
    *

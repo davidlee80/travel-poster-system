@@ -1124,6 +1124,24 @@
   color: #5a6478;
 }
 
+/*
+ * 配置中心下线过的选项还留在草稿里时的提示。
+ *
+ * 用警示色而不是普通 hint 色：这一条的后果是提交被拒，而它旁边那个按钮
+ * 是用户唯一的出路 —— 混在说明文字里会被当成可以忽略的补充说明。
+ */
+.planner-hint--stale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff6e5;
+  color: #8a5a00;
+}
+
 /* ── 单选卡片与多选 ─────────────────────────────────────────── */
 
 .planner-choices {

@@ -182,6 +182,48 @@ export function selectedValues(partValue_: unknown, wrapped: boolean): readonly 
   return asStringList(asRecord(partValue_)?.['values']);
 }
 
+// ── 已下线的条件码 ──────────────────────────────────────────
+
+/**
+ * 值里出现了但当前选项列表里没有的条件码。
+ *
+ * ## 为什么需要这个
+ *
+ * 配置中心停用一个条件码之后，界面上那个标签消失，但**用户草稿里那个码还在**
+ * （草稿存在 localStorage，可能是几天前填的）。直接提交会被 N-08 以
+ * `REQ_CONDITION_CODE_UNKNOWN` 拒掉整个请求 —— 而用户看不到任何线索：
+ * 界面上已经没有那个标签了。
+ *
+ * ## 为什么不自动清掉
+ *
+ * `conditions.ts` 开头那段说得很清楚：`mode: 'MUST'` 的条件是硬约束，
+ * 静默丢弃一个轮椅需求会让生成出的计划看起来完全正常，而用户要到出行当天
+ * 才发现。因此这里只**报出**，由用户按一次按钮移除。
+ *
+ * 同时处理两种形状：`string[]`（兴趣多选）与 `{code, stance}[]`（三态标签）。
+ */
+export function staleCodes(value: unknown, allowed: readonly string[]): readonly string[] {
+  const set = new Set<string>(allowed);
+  return asList(value)
+    .map((entry) => {
+      if (typeof entry === 'string') return entry;
+      const code = asRecord(entry)?.['code'];
+      return typeof code === 'string' ? code : null;
+    })
+    .filter((code): code is string => code !== null && !set.has(code));
+}
+
+/** 移除若干个码，形状不变。空数组返回 `undefined` —— 清空是删键（见文件头） */
+export function withoutCodes(value: unknown, remove: readonly string[]): unknown {
+  const set = new Set<string>(remove);
+  const kept = asList(value).filter((entry) => {
+    if (typeof entry === 'string') return !set.has(entry);
+    const code = asRecord(entry)?.['code'];
+    return typeof code !== 'string' || !set.has(code);
+  });
+  return kept.length === 0 ? undefined : kept;
+}
+
 /**
  * 把数组截断到 n 项。
  *
