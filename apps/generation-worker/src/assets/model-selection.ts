@@ -8,6 +8,8 @@ import {
 } from '@tps/llm';
 import type { Logger } from '@tps/shared';
 
+import { JOB_TIMEOUT_MS } from '../job-deadline.js';
+
 import { aiFailoverTotal, aiPoolClampedTotal, failoverPositionLabel } from './asset-metrics.js';
 
 /**
@@ -26,13 +28,18 @@ import { aiFailoverTotal, aiPoolClampedTotal, failoverPositionLabel } from './as
  * 相反的做法（读不到配置就失败）会让一个**可选**特性变成新的单点：
  * 池是用来提高成功率的，它自己不该成为失败原因。
  *
- * ## 图像会被截断，文本不会
+ * ## 两侧都会被截断，但预算的来源不同
  *
- * 图像的候选数受 21.2 的素材窗口硬约束（`totalBudgetMs`），运营把
- * `max_candidates` 配成 10 时必须截断（见 `resolveCandidates` 的注释）。
- * 文本没有这个硬窗口：`callModel` 已经把单次超时压到任务剩余预算内，
- * 300 秒的任务上限天然兜住最坏情况。所以文本只受 `max_candidates` 约束，
- * 「特殊用户遍历整个池」才能真的成立。
+ * 图像受 21.2 的素材窗口约束（`IMAGE_JOB_AI_BUDGET_MS`）；文本受 16.3 的
+ * 300 秒任务上限约束，份额见 `LLM_CHAIN_BUDGET_MS`。两侧都走
+ * `resolveCandidates`，因此「配了 10 个而预算只够 2 个」在两侧都会被截断
+ * 并报 `travel_ai_pool_clamped_total` —— 静默截断会让运营以为配置生效了。
+ *
+ * 文本侧曾经不截断，理由是「`callModel` 已经把单次超时压到任务剩余预算内，
+ * 300 秒天然兜住最坏情况」。那句话只对**单次调用**成立：一条链会串行发
+ * 多个请求，每个都拿着同一个剩余预算，于是 20 个候选能把 deadline 超出
+ * 二十倍。真正兜住它的是 `callModel` 传下来的 signal（让链停止开新候选），
+ * 而截断负责的是另一件事 —— 让「配了却试不到」这件事可见。
  */
 
 export interface PoolSelectionBase {
@@ -75,7 +82,29 @@ async function readPool(
 
   try {
     const selection = await input.pools.select(kind, input.tierLevel);
-    if (selection === null || selection.models.length === 0) return null;
+    if (selection === null) return null;
+
+    if (selection.models.length === 0) {
+      /*
+       * 映射存在、池也存在，但 `models` 里没有一个字符串项 —— 迁移 0009 的
+       * CHECK 只验「是非空数组」，验不了元素类型，直接写 `[1,2,3]` 就会到这里。
+       *
+       * 处置与「没有配置」相同（回落 env），但**必须能区分**：前者是配错了。
+       * 不留痕的话运营从 `--list` 能看到空的 `[]`，而运行时没有任何信号，
+       * 于是「为什么配了池却没生效」查不出来。
+       */
+      input.logger.warn(
+        {
+          kind,
+          tier_level: input.tierLevel,
+          pool_name: selection.poolName,
+          reason_code: 'MODEL_POOL_EMPTY_AFTER_FILTER',
+        },
+        `候选池 ${selection.poolName} 没有合法的模型名（非字符串项已被过滤），回落到单模型`,
+      );
+      return null;
+    }
+
     return selection;
   } catch (error) {
     input.logger.warn(
@@ -173,10 +202,23 @@ export async function selectImageClient(
   };
 }
 
+/**
+ * 一条文本候选链允许占用的总时长。
+ *
+ * 文本没有图像那样的独立窗口（21.2 的素材窗口），它的硬约束是 16.3 的
+ * 300 秒任务上限。而一个任务最多**串行**调三次模型：14 天分两段
+ * （`planSegments`）加一次修复（`repair`）—— 每一次都可能是一条完整的链。
+ * 因此一条链的份额取三分之一，超出的候选配了也试不到。
+ *
+ * 不做成 env：它不是可调参数，而是从 `JOB_TIMEOUT_MS` 与「最多三次调用」
+ * 推出来的。做成 env 会让两个本该联动的数字各自漂移。
+ */
+export const LLM_CHAIN_BUDGET_MS = Math.floor(JOB_TIMEOUT_MS / 3);
+
 export interface LlmSelectionInput extends PoolSelectionBase {
   readonly fallback: LlmClient;
   readonly build: (model: string) => LlmClient;
-  /** `LLM_TIMEOUT_MS`。链总预算取它 × 候选数 —— 文本没有独立的硬窗口 */
+  /** `LLM_TIMEOUT_MS` */
   readonly perAttemptMs: number;
 }
 
@@ -187,14 +229,36 @@ export async function selectLlmClient(
   if (pool === null) return fallbackTo(input.fallback);
 
   /*
-   * 只按 `max_candidates` 截取，不做时延截断（见文件头）。
-   * null = 用满整个池，对应第 5 项决策里的「特殊用户遍历整个池」。
+   * 与图像侧走同一个 `resolveCandidates`。
+   *
+   * 曾经这里是手写的 `slice(0, min(max, size))` 且 `clamped` 恒为 false，
+   * 于是 `travel_ai_pool_clamped_total{kind="LLM"}` 永不增长 —— 运营把
+   * `max_candidates` 配成 20 时没有任何信号，而实际只会试到任务预算耗尽。
+   * 「配置看起来生效了，实际没有」正是那个指标存在的理由。
+   *
+   * CLI 的 `--list` 也调这个函数，因此两处不可能给出不同的候选数。
    */
-  const count =
-    pool.maxCandidates === null
-      ? pool.models.length
-      : Math.min(pool.maxCandidates, pool.models.length);
-  const candidates = pool.models.slice(0, count);
+  const { candidates, clamped } = resolveCandidates({
+    models: pool.models,
+    maxCandidates: pool.maxCandidates,
+    perAttemptMs: input.perAttemptMs,
+    totalBudgetMs: LLM_CHAIN_BUDGET_MS,
+  });
+
+  if (clamped) {
+    aiPoolClampedTotal.inc({ kind: 'LLM' });
+    input.logger.warn(
+      {
+        kind: 'LLM',
+        pool_name: pool.poolName,
+        reason_code: 'MODEL_POOL_CLAMPED',
+        configured: pool.maxCandidates,
+        effective: candidates.length,
+      },
+      `文本候选数被链预算削到 ${candidates.length}：` +
+        `${input.perAttemptMs} 毫秒/候选 × 配置值超过了 ${LLM_CHAIN_BUDGET_MS} 毫秒的单链预算`,
+    );
+  }
 
   return {
     client: wrapLlmFailover(candidates.map(input.build), {
@@ -203,12 +267,15 @@ export async function selectLlmClient(
        * 链预算 = 单次超时 × 候选数，即「每个候选都等满」的最坏情况。
        * 不额外压缩：`callModel` 会再把单次超时压到任务剩余预算内，
        * 两层都压的话超时会被削两次，表现是「明明配了 30 秒却 10 秒就超时」。
+       *
+       * 任务预算的兜底不在这个数里，而在 `callModel` 传下来的 signal ——
+       * 它让链在 deadline 到时停止开新候选（见 wrapLlmFailover）。
        */
       totalBudgetMs: input.perAttemptMs * Math.max(1, candidates.length),
       onOutcome: outcomeReporter('LLM', input.logger),
     }),
     candidates,
     poolName: pool.poolName,
-    clamped: false,
+    clamped,
   };
 }

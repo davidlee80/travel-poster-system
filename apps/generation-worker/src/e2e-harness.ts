@@ -78,6 +78,8 @@ export function createE2eWorkerDeps(pool: Pool): E2eWorkerDeps {
         userType,
         heroQuota: userType === 'ANONYMOUS' ? 0 : 2,
         jobAiBudgetMs: DEFAULT_IMAGE_JOB_AI_BUDGET_MS,
+        // 端到端跑的是 fake 客户端的单候选路径
+        chainWorstCaseMs: 40_000,
       }),
     }),
     storage,

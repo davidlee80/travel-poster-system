@@ -10,8 +10,11 @@ import {
   aiImageDailyKey,
 } from './ai-budget.js';
 
-/** 测试用的任务级 AI 耗时预算。取整便于算边界 */
+/** 测试用的任务级 AI 墙钟窗口。取整便于算边界 */
 const JOB_AI_BUDGET_MS = 80_000;
+
+/** 一条候选链的最坏耗时。默认取单候选（= IMAGE_TIMEOUT_MS 的默认值） */
+const CHAIN_WORST_CASE_MS = 40_000;
 
 /**
  * AI 图片预算与熔断（TP-4-03/15/17，设计稿 21.2 措施二、21.4）。
@@ -39,13 +42,17 @@ function makeDeps(overrides: {
   heroQuota?: number;
   dailyBudget?: number;
   jobAiBudgetMs?: number;
+  chainWorstCaseMs?: number;
+  now?: () => Date;
 }) {
   return {
     userType: overrides.userType ?? ('REGISTERED' as const),
     heroQuota: overrides.heroQuota ?? 2,
     dailyBudget: overrides.dailyBudget ?? DEFAULT_AI_IMAGE_DAILY_BUDGET,
     jobAiBudgetMs: overrides.jobAiBudgetMs ?? JOB_AI_BUDGET_MS,
-    now: () => NOW,
+    chainWorstCaseMs: overrides.chainWorstCaseMs ?? CHAIN_WORST_CASE_MS,
+    // 覆盖得了才能测墙钟窗口：固定时钟下窗口永不流动
+    now: overrides.now ?? (() => NOW),
   };
 }
 
@@ -58,6 +65,54 @@ describe('21.4 单任务上限', () => {
     }
     const rejected = await b.reserve('FOOD_IMAGE');
     expect(rejected).toEqual({ allowed: false, reason: 'JOB_IMAGE_LIMIT' });
+  });
+
+  it(`并发 reserve 同样只放行 ${MAX_AI_IMAGES_PER_JOB} 张`, async () => {
+    /*
+     * 上一条是串行的，而素材解析从来不是串行的：`resolve-assets` 以
+     * 天 8 × 槽 6 并发跑，同一瞬间会有多个槽位进入 `reserve`。
+     *
+     * 熔断判定要查 Redis，那次 `await` 是一个让出点。占位若发生在它之后，
+     * 并发进来的槽位会全部读到递增前的 `images` 并全部通过 —— 张数上限
+     * 就此失效，而它是 21.4 的成本上限。这条断言固定「检查与递增之间
+     * 不存在让出点」这件事，串行的用例察觉不到它。
+     */
+    const { budget: b } = budget();
+
+    const decisions = await Promise.all(Array.from({ length: 6 }, () => b.reserve('FOOD_IMAGE')));
+
+    expect(decisions.filter((decision) => decision.allowed)).toHaveLength(MAX_AI_IMAGES_PER_JOB);
+    expect(b.used.images).toBe(MAX_AI_IMAGES_PER_JOB);
+  });
+
+  it(`并发 reserve 同样只放行 ${MAX_REALTIME_HERO_PER_JOB} 次 Hero`, async () => {
+    // Hero 计数与总张数是两个独立的闸，占位的时机问题对两者同时成立
+    const { budget: b } = budget({ heroQuota: 5 });
+
+    const decisions = await Promise.all(
+      Array.from({ length: 5 }, () => b.reserve('HERO_BACKGROUND')),
+    );
+
+    expect(decisions.filter((decision) => decision.allowed)).toHaveLength(
+      MAX_REALTIME_HERO_PER_JOB,
+    );
+    expect(b.used.heroes).toBe(MAX_REALTIME_HERO_PER_JOB);
+  });
+
+  it('熔断打开时归还占位，不占着任务额度', async () => {
+    /*
+     * 占位移到 `await` 之前之后，熔断这条拒绝路径就在占位之后了 ——
+     * 不归还的话「熔断期间被拒的槽位」会消耗张数额度，于是熔断恢复后
+     * 本该还能生成的槽位拿到 JOB_IMAGE_LIMIT。
+     */
+    const { budget: b, counters } = budget({ dailyBudget: 10 });
+    await counters.increment(aiImageDailyKey(NOW), 90_000, 10);
+
+    expect(await b.reserve('FOOD_IMAGE')).toEqual({
+      allowed: false,
+      reason: 'GLOBAL_CIRCUIT_OPEN',
+    });
+    expect(b.used.images).toBe(0);
   });
 
   it(`实时 Hero 上限 ${MAX_REALTIME_HERO_PER_JOB} 次（21.2 措施二）`, async () => {
@@ -202,7 +257,7 @@ describe('连续失败上限（时延保护）', () => {
   });
 });
 
-describe('任务级 AI 累计耗时预算', () => {
+describe('任务级 AI 墙钟窗口', () => {
   /*
    * ## 为什么次数管不住时延了
    *
@@ -210,42 +265,122 @@ describe('任务级 AI 累计耗时预算', () => {
    * 的前提是「一次生成最多 20 秒」这个常量。超时改成可配 + 候选池之后，
    * 同样的「2 次」可以是 80 秒也可以是 400 秒 —— 次数只剩成本含义。
    *
-   * 因此时延要有自己的预算，与次数**先到先停**。
+   * ## 为什么闸是墙钟 + 前瞻，而不是累计耗时之和
+   *
+   * 素材解析并发跑（天 8 × 槽 6）。按「各链耗时之和」判定会同时犯两个错：
+   * 3 条链同时花 40 秒被算成 120 秒（并发被误判成超支），而更要紧的是
+   * 那个和只在调用**返回后**才更新 —— 同批并发的槽位全都在它还是 0 时
+   * 通过，于是闸压根拦不住任何东西。
+   *
+   * 正确的判据是「现在放行的话它最晚什么时候结束」：
+   * 窗口已流走的墙钟 + 这条链的最坏耗时 > 窗口总长 → 拒绝。
    */
 
-  it('累计耗时达上限后拒绝，理由是 JOB_AI_TIME_EXHAUSTED', async () => {
-    const { budget: b } = budget({ jobAiBudgetMs: 80_000 });
+  /** 可推进的假时钟，用来让墙钟窗口真的流动 */
+  function clock(startIso = '2026-08-17T10:00:00Z') {
+    let ms = new Date(startIso).getTime();
+    return {
+      now: () => new Date(ms),
+      advance: (by: number) => {
+        ms += by;
+      },
+    };
+  }
 
+  it('窗口装不下这条链的最坏耗时时拒绝，理由是 JOB_AI_TIME_EXHAUSTED', async () => {
+    const c = clock();
+    const { budget: b } = budget({
+      jobAiBudgetMs: 80_000,
+      chainWorstCaseMs: 40_000,
+      now: c.now,
+    });
+
+    // 第一条链：窗口全新，0 + 40 秒装得下
     expect((await b.reserve('FOOD_IMAGE')).allowed).toBe(true);
-    b.recordElapsed(80_000);
 
+    // 窗口流走 50 秒后，再开一条 40 秒的链会跑到 90 秒 —— 超出 80 秒的窗口
+    c.advance(50_000);
     expect(await b.reserve('FOOD_IMAGE')).toEqual({
       allowed: false,
       reason: 'JOB_AI_TIME_EXHAUSTED',
     });
   });
 
-  it('恰好用满才拒，差 1 毫秒仍然放行（边界不多不少）', async () => {
-    const { budget: b } = budget({ jobAiBudgetMs: 80_000 });
-    b.recordElapsed(79_999);
+  it('恰好装得下就放行，差 1 毫秒装不下就拒（边界不多不少）', async () => {
+    const c = clock();
+    const { budget: b } = budget({
+      jobAiBudgetMs: 80_000,
+      chainWorstCaseMs: 40_000,
+      now: c.now,
+    });
     expect((await b.reserve('FOOD_IMAGE')).allowed).toBe(true);
-  });
 
-  it('耗时与张数是两个独立的闸：张数没到 3 也能被耗时拦住', async () => {
-    const { budget: b } = budget({ jobAiBudgetMs: 40_000 });
+    // 已流走 40 秒 + 最坏 40 秒 = 恰好 80 秒，正好装得下
+    c.advance(40_000);
+    expect((await b.reserve('FOOD_IMAGE')).allowed).toBe(true);
 
-    await b.reserve('FOOD_IMAGE');
-    b.recordElapsed(40_000);
-
-    expect(b.used.images).toBe(1);
-    // 成本闸（3 张）还剩 2 张，时延闸已经关了
+    // 再多 1 毫秒就装不下了
+    c.advance(1);
     expect(await b.reserve('FOOD_IMAGE')).toEqual({
       allowed: false,
       reason: 'JOB_AI_TIME_EXHAUSTED',
     });
+  });
+
+  it('并发的多条链不互相挤占窗口 —— 墙钟只走一次', async () => {
+    /*
+     * 这一条是「和」与「墙钟」的分水岭：3 条链同时发起，各自最坏 40 秒，
+     * 墙钟只会走 40 秒。按和判定会把后两条拒掉（40 × 3 = 120 > 80），
+     * 而它们本来完全赶得上。
+     */
+    const c = clock();
+    const { budget: b } = budget({
+      jobAiBudgetMs: 80_000,
+      chainWorstCaseMs: 40_000,
+      now: c.now,
+    });
+
+    const decisions = await Promise.all(Array.from({ length: 3 }, () => b.reserve('FOOD_IMAGE')));
+    expect(decisions.every((decision) => decision.allowed)).toBe(true);
+  });
+
+  it('候选池把单链最坏耗时翻倍时，窗口一开始就只装得下一条', async () => {
+    /*
+     * 运维手册推荐 IMAGE 的 max_candidates = 2，于是一条链最坏 2 × 40 = 80 秒
+     * —— 恰好是整个窗口。第一条放行后窗口就没有余量了，这正是候选池
+     * 需要前瞻的理由：等「已经花了 80 秒」才发现的话，那 80 秒已经走掉。
+     */
+    const c = clock();
+    const { budget: b } = budget({
+      jobAiBudgetMs: 80_000,
+      chainWorstCaseMs: 80_000,
+      now: c.now,
+    });
+
+    expect((await b.reserve('FOOD_IMAGE')).allowed).toBe(true);
+    c.advance(1);
+    expect(await b.reserve('FOOD_IMAGE')).toEqual({
+      allowed: false,
+      reason: 'JOB_AI_TIME_EXHAUSTED',
+    });
+  });
+
+  it('窗口从首次放行开始算，之前的等待不占它', async () => {
+    /*
+     * 一次 reserve 到实际调用之间还隔着并发锁与同键等待（最多 22 秒），
+     * 而那段时间没有调用任何模型。窗口从第一次放行起算，
+     * 否则「这个槽位等了多久」会被算成「AI 花了多久」。
+     */
+    const c = clock();
+    const { budget: b } = budget({ chainWorstCaseMs: 40_000, now: c.now });
+
+    // 尚未放行过任何调用，窗口还没开始
+    c.advance(200_000);
+    expect((await b.reserve('FOOD_IMAGE')).allowed).toBe(true);
   });
 
   it('耗时累加，且负值不会把已花掉的时间还回来', () => {
+    // 不再参与判定，但仍是排查时要看的量（「实际在 AI 上花了多少」）
     const { budget: b } = budget();
     b.recordElapsed(1_000);
     b.recordElapsed(2_000);

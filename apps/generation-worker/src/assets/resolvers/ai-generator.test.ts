@@ -92,6 +92,8 @@ function harness(
     readonly heroQuota?: number;
     readonly byCacheKey?: Record<string, AssetCandidateRow>;
     readonly jobAiBudgetMs?: number;
+    /** 一条候选链的最坏耗时（单候选超时 × 候选数），窗口闸的前瞻项 */
+    readonly chainWorstCaseMs?: number;
     readonly now?: () => number;
     /** 替换整个图片客户端（用于验证故障转移链在客户端边界之内） */
     readonly image?: ImageClient;
@@ -158,6 +160,7 @@ function harness(
         userType: 'REGISTERED',
         heroQuota: options.heroQuota ?? 2,
         jobAiBudgetMs: options.jobAiBudgetMs ?? 80_000,
+        chainWorstCaseMs: options.chainWorstCaseMs ?? 40_000,
       }),
       ...(options.now === undefined ? {} : { now: options.now }),
     },
@@ -445,6 +448,7 @@ describe('候选模型故障转移与预算的交界', () => {
       userType: 'REGISTERED',
       heroQuota: 2,
       jobAiBudgetMs: 80_000,
+      chainWorstCaseMs: 40_000,
       now: () => new Date('2026-08-21T10:00:00Z'),
     });
 

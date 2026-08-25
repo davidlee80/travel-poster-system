@@ -46,6 +46,18 @@ export interface RaceOptions {
   readonly totalBudgetMs: number;
   /** 对冲触发延迟。缺省 = perAttemptMs（严格顺序） */
   readonly hedgeDelayMs?: number;
+  /**
+   * 外部预算耗尽的信号（任务级 deadline）。
+   *
+   * **只阻止开新候选，不 abort 在途的** —— 已经发出的请求钱已经花了，
+   * 产物只要回来就该用，这是本模块的核心语义。
+   *
+   * 存在的理由：`totalBudgetMs` 由 env 算出（候选数 × 单候选超时），
+   * 而候选数来自数据库，运营可以配成 20。那个乘积管不住 16.3 的 300 秒
+   * 任务上限 —— 剩 8 秒时一条 20 候选的链仍会串行烧掉 20 次请求，
+   * 全部落在 deadline 之后。少了这个信号，那笔钱没有任何东西挡得住。
+   */
+  readonly abortSignal?: AbortSignal;
   readonly now?: () => number;
 }
 
@@ -130,7 +142,7 @@ export async function raceFirstSuccess<T>(
         inFlight.delete(settled.position);
         if (settled.ok) return { value: settled.value, position: settled.position };
 
-        errors.push(settled.error);
+        // 失败原因已在落定处收集（见上面的 `settled`），这里只管调度
         if (inFlight.size === 0) return null;
       }
     } finally {
@@ -139,6 +151,12 @@ export async function raceFirstSuccess<T>(
   };
 
   for (const [index, attempt] of attempts.entries()) {
+    /*
+     * 任务级预算已耗尽：不再开新候选，但**不动在途的** ——
+     * 下面那段收尾仍会等它们，因为那些请求的钱已经花了。
+     */
+    if (options.abortSignal?.aborted === true) break;
+
     const remaining = deadline - now();
     if (remaining <= 0) break;
 
@@ -148,7 +166,18 @@ export async function raceFirstSuccess<T>(
 
     const settled: Promise<Settled<T>> = attempt(controller.signal).then(
       (value) => ({ ok: true as const, position: index, value }),
-      (error: unknown) => ({ ok: false as const, position: index, error }),
+      (error: unknown) => {
+        /*
+         * 在落定处收集，而不是等 `waitForSuccess` 观测到。
+         *
+         * 总预算恰好耗尽时（`remaining <= 0`）下面那次收尾的 `waitForSuccess`
+         * 压根不会执行，在途候选的失败原因会全部丢掉 —— 于是调用方抛出的
+         * 消息成了「全部 N 个候选模型均失败：」后面什么都没有，
+         * 而这恰恰是最需要原因的那种故障（上游整体卡住）。
+         */
+        errors.push(error);
+        return { ok: false as const, position: index, error };
+      },
     );
     inFlight.set(index, settled);
 
@@ -277,9 +306,21 @@ export function wrapLlmFailover(
     model: first.model,
 
     async complete(request) {
+      /*
+       * `request.signal` 是任务级 deadline（`callModel` 传入），它的作用是
+       * **不要再开新候选**，而不是「掐掉在途的」。因此把它交给调度器的
+       * `abortSignal`，并从转发给候选的请求里摘掉 —— 留着的话
+       * `client.ts` 会把它与自己的超时取并集，于是 deadline 一到，
+       * 那些已经付过钱、马上就要回来的在途请求会被一起掐死。
+       *
+       * 单候选路径（上面直接返回底层客户端）不经过这里，signal 照旧并入 ——
+       * 那条路径上没有「其余候选」，两种语义等价。
+       */
+      const { signal: jobSignal, ...forwarded } = request;
+
       const result = await raceFirstSuccess<LlmResult>(
-        candidates.map((candidate) => (signal) => candidate.complete({ ...request, signal })),
-        options,
+        candidates.map((candidate) => (signal) => candidate.complete({ ...forwarded, signal })),
+        { ...options, ...(jobSignal === undefined ? {} : { abortSignal: jobSignal }) },
       );
 
       options.onOutcome?.({

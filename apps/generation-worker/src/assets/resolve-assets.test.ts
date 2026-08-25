@@ -486,6 +486,7 @@ describe('AI 层的位置（十八章第 1 级，TP-4-02）', () => {
           userType: 'REGISTERED',
           heroQuota: 2,
           jobAiBudgetMs: 80_000,
+          chainWorstCaseMs: 40_000,
         }),
       },
     };
@@ -644,6 +645,7 @@ describe('搜索层的位置（十八章第 1 级前半，TP-6-03）', () => {
             userType: 'REGISTERED',
             heroQuota: 2,
             jobAiBudgetMs: 80_000,
+            chainWorstCaseMs: 20_000,
           }),
           imageTimeoutMs: 20_000,
           userTypeLabel: 'REGISTERED',

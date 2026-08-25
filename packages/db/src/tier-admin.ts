@@ -17,11 +17,20 @@ import type { ModelPoolKind } from './model-pools.js';
  * 放进 `UsersRepository` 会让认证路径的接口长出一个运维方法 ——
  * 而那个接口是被 API 的每次请求碰到的。
  *
- * ## 没有 delete
+ * ## 为什么有 delete：它是被承诺的回滚路径
  *
- * 本轮的运维操作只有「查、设、映射」。删池需要先解开外键引用，
- * 而那个顺序一旦做错就是「某一档用户突然拿不到配置」——
- * 真需要时用 psql 做，比给 CLI 加一个半对的删除更安全。
+ * 迁移 0009 的文件头写着「回滚也不需要动代码 —— 清空 `tier_model_pools`
+ * 即可」。那句话描述的是**故障时最需要的那个操作**：池配错导致大面积
+ * failover 时，把映射删掉就回落到 env 单模型。而它一度没有任何实现，
+ * 运营只能拿 psql 连生产库 —— 半夜、有压力、手写 DELETE，正是最容易
+ * 打错 WHERE 的场合。
+ *
+ * 两者的安全性不同，因此接口形状也不同：
+ *
+ *   - `deleteMapping` 天然安全 —— 删掉即回落 env，没有任何东西引用映射。
+ *   - `deletePool` 会撞外键。**先查引用并如实返回**，而不是让
+ *     `violates foreign key constraint` 冒到运营面前 —— 那句话不回答
+ *     「哪几档还指着它」，而那正是下一步要做的事。
  */
 
 export interface UserTierRow {
@@ -71,6 +80,25 @@ export interface TierAdminRepository {
   listMappings(): Promise<readonly TierMappingRow[]>;
   upsertPool(input: UpsertPoolInput): Promise<void>;
   upsertMapping(input: UpsertMappingInput): Promise<void>;
+
+  /**
+   * 删一条 tier → 池的映射。这一档随后回落到 env 单模型。
+   *
+   * 返回 false 表示本来就没有这条映射 —— 调用方据此区分「删掉了」与
+   * 「档位打错了」，后者在回滚场合下必须让人看见。
+   */
+  deleteMapping(kind: ModelPoolKind, minTierLevel: number): Promise<boolean>;
+
+  /**
+   * 删一个池。仍被映射引用时**不删**，并返回引用它的档位。
+   *
+   * 不靠外键报错：`violates foreign key constraint` 不回答「哪几档还指着
+   * 它」，而那是下一步要做的事（先 `deleteMapping` 那几档）。
+   */
+  deletePool(
+    name: string,
+    kind: ModelPoolKind,
+  ): Promise<{ readonly deleted: boolean; readonly referencedBy: readonly number[] }>;
 }
 
 /** 一行 users 的投影 */
@@ -194,6 +222,38 @@ export function createTierAdminRepository(pool: Pool): TierAdminRepository {
                        updated_at = NOW()`,
         [input.kind, input.minTierLevel, input.poolName, input.maxCandidates],
       );
+    },
+
+    async deleteMapping(kind, minTierLevel) {
+      const result = await pool.query(
+        `DELETE FROM tier_model_pools WHERE kind = $1 AND min_tier_level = $2`,
+        [kind, minTierLevel],
+      );
+      return (result.rowCount ?? 0) > 0;
+    },
+
+    async deletePool(name, kind) {
+      /*
+       * 先查引用。并发插入一条映射会让下面的 DELETE 撞外键并抛错 ——
+       * 那是可以接受的：这是运维 CLI，两个人同时改同一个池的概率可忽略，
+       * 而外键在那种情况下正是我们要的最后防线。
+       */
+      const { rows } = await pool.query<{ min_tier_level: number }>(
+        `SELECT min_tier_level FROM tier_model_pools
+          WHERE pool_name = $1 AND kind = $2
+          ORDER BY min_tier_level`,
+        [name, kind],
+      );
+
+      if (rows.length > 0) {
+        return { deleted: false, referencedBy: rows.map((row) => Number(row.min_tier_level)) };
+      }
+
+      const result = await pool.query(`DELETE FROM model_pools WHERE name = $1 AND kind = $2`, [
+        name,
+        kind,
+      ]);
+      return { deleted: (result.rowCount ?? 0) > 0, referencedBy: [] };
     },
   };
 }

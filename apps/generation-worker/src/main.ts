@@ -248,6 +248,16 @@ await runWorker({
                       heroQuota: quotaFor(quotaConfig, userType).aiHero,
                       dailyBudget: aiDailyBudget,
                       jobAiBudgetMs: imageConfig.jobAiBudgetMs,
+                      /*
+                       * 一条链最坏耗时 = 单候选超时 × 候选数。空的 `candidates`
+                       * 表示回落到了 env 单模型（无池配置），此时就是 1 个候选。
+                       *
+                       * 预算闸靠它前瞻：配了 2 候选的档，每条链最坏 80 秒，
+                       * 而窗口也是 80 秒 —— 于是同一任务只放行「能在窗口内
+                       * 结束」的那些链，不会等 80 秒走完才发现超了。
+                       */
+                      chainWorstCaseMs:
+                        imageConfig.timeoutMs * Math.max(1, selected.candidates.length),
                     }),
                   };
                 },

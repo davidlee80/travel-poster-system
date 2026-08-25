@@ -133,6 +133,122 @@ describeIntegration('分层与池的写侧（集成，需 PostgreSQL）', () => 
       expect(await admin.listPools()).toHaveLength(2);
     });
 
+    it('删映射后这一档回落到「无配置」——迁移 0009 承诺的回滚路径', async () => {
+      /*
+       * 池配错导致大面积 failover 时最需要的那个操作。关键断言是删完之后
+       * `select` 返回 **null**（无配置）而不是一个空池 —— 后者的语义会是
+       * 「这一档不许用 AI」，而调用方对两者的处置相反。
+       */
+      await admin.upsertPool({ name: 'paid', kind: 'IMAGE', models: ['flux-pro', 'dalle-3'] });
+      await admin.upsertMapping({
+        kind: 'IMAGE',
+        minTierLevel: 10,
+        poolName: 'paid',
+        maxCandidates: 2,
+      });
+      expect(await pools.select('IMAGE', 10)).not.toBeNull();
+
+      expect(await admin.deleteMapping('IMAGE', 10)).toBe(true);
+      expect(await pools.select('IMAGE', 10)).toBeNull();
+      // 池本身还在，可以留着等查清原因再决定删不删
+      expect(await admin.listPools()).toHaveLength(1);
+    });
+
+    it('删不存在的映射返回 false（档位打错不能静默成功）', async () => {
+      expect(await admin.deleteMapping('LLM', 99)).toBe(false);
+    });
+
+    it('删映射只动指定的那一个 kind 与档位', async () => {
+      /*
+       * 回滚一档时把别的档一起带走，会是比原故障更大的事故。
+       *
+       * **IMAGE:10 是这条断言的关键**：它与要删的 LLM:10 同档位、不同 kind。
+       * 少了它，一个「WHERE 忘了带 kind」的实现也能让这条测试通过 ——
+       * 因为其余档位在两个 kind 下不重叠，删多了也看不出来。
+       */
+      await admin.upsertPool({ name: 'p', kind: 'LLM', models: ['m'] });
+      await admin.upsertPool({ name: 'p', kind: 'IMAGE', models: ['i'] });
+      await admin.upsertMapping({ kind: 'LLM', minTierLevel: 0, poolName: 'p', maxCandidates: 3 });
+      await admin.upsertMapping({ kind: 'LLM', minTierLevel: 10, poolName: 'p', maxCandidates: 3 });
+      await admin.upsertMapping({
+        kind: 'IMAGE',
+        minTierLevel: 0,
+        poolName: 'p',
+        maxCandidates: 1,
+      });
+      await admin.upsertMapping({
+        kind: 'IMAGE',
+        minTierLevel: 10,
+        poolName: 'p',
+        maxCandidates: 1,
+      });
+
+      await admin.deleteMapping('LLM', 10);
+
+      const remaining = await admin.listMappings();
+      expect(remaining.map((row) => `${row.kind}:${row.minTierLevel}`).sort()).toEqual([
+        'IMAGE:0',
+        'IMAGE:10',
+        'LLM:0',
+      ]);
+    });
+
+    it('池仍被映射引用时不删，并如实返回引用它的档位', async () => {
+      /*
+       * 靠外键报错的话运营看到的是 violates foreign key constraint ——
+       * 那句话不回答「哪几档还指着它」，而那正是下一步要做的事。
+       */
+      await admin.upsertPool({ name: 'paid', kind: 'LLM', models: ['m'] });
+      await admin.upsertMapping({
+        kind: 'LLM',
+        minTierLevel: 20,
+        poolName: 'paid',
+        maxCandidates: 2,
+      });
+      await admin.upsertMapping({
+        kind: 'LLM',
+        minTierLevel: 10,
+        poolName: 'paid',
+        maxCandidates: 2,
+      });
+
+      const result = await admin.deletePool('paid', 'LLM');
+      expect(result).toEqual({ deleted: false, referencedBy: [10, 20] });
+      expect(await admin.listPools()).toHaveLength(1);
+    });
+
+    it('解开引用后池可以删掉', async () => {
+      await admin.upsertPool({ name: 'paid', kind: 'LLM', models: ['m'] });
+      await admin.upsertMapping({
+        kind: 'LLM',
+        minTierLevel: 10,
+        poolName: 'paid',
+        maxCandidates: 2,
+      });
+
+      await admin.deleteMapping('LLM', 10);
+      expect(await admin.deletePool('paid', 'LLM')).toEqual({ deleted: true, referencedBy: [] });
+      expect(await admin.listPools()).toHaveLength(0);
+    });
+
+    it('删池只动指定的 kind —— 同名池在另一个 kind 下不受影响', async () => {
+      await admin.upsertPool({ name: 'paid', kind: 'LLM', models: ['gpt-4o'] });
+      await admin.upsertPool({ name: 'paid', kind: 'IMAGE', models: ['flux-pro'] });
+
+      expect(await admin.deletePool('paid', 'LLM')).toMatchObject({ deleted: true });
+
+      const rows = await admin.listPools();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ kind: 'IMAGE', name: 'paid' });
+    });
+
+    it('删不存在的池返回 deleted false', async () => {
+      expect(await admin.deletePool('ghost', 'IMAGE')).toEqual({
+        deleted: false,
+        referencedBy: [],
+      });
+    });
+
     it('重复写同一档映射是覆盖', async () => {
       await admin.upsertPool({ name: 'a', kind: 'LLM', models: ['m'] });
       await admin.upsertPool({ name: 'b', kind: 'LLM', models: ['n'] });

@@ -285,6 +285,15 @@ async function callModel(
       maxTokens,
       purpose,
       timeoutMs,
+      /*
+       * 任务剩余预算。`timeoutMs` 只约束**一次**调用，而候选链会串行发多次 ——
+       * 一条 20 候选的链在剩 8 秒时仍会烧掉 20 次请求，全部落在 300 秒之后。
+       * 候选数来自数据库（运营可改），单靠 env 算出的链预算约束不住它。
+       *
+       * 对单候选客户端这个 signal 与自己的超时取并集，行为不变；
+       * 对故障转移客户端它的含义是「别再开新候选了」（见 wrapLlmFailover）。
+       */
+      signal: AbortSignal.timeout(Math.max(1, deadline.remainingMs())),
     });
   } catch (error) {
     recordLlmCall({

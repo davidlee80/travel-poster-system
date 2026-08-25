@@ -194,6 +194,82 @@ describe('raceFirstSuccess', () => {
     }
   });
 
+  it('总预算耗尽时，被放弃的在途候选的失败原因不丢', async () => {
+    /*
+     * 预算耗尽这条路径上，收尾的 `waitForSuccess` 因 `remaining <= 0` 不执行，
+     * 于是没有任何人去观测在途候选的落定 —— 曾经它们的失败原因就此全部丢掉，
+     * 调用方抛出的是「全部 2 个候选模型均失败：」后面空无一物。
+     *
+     * 这恰恰是最需要原因的那种故障：上游整体卡住。因此原因改在**落定处**
+     * 收集，不再依赖调度循环是否还有机会看它一眼。
+     *
+     * 候选必须响应 abort 才能测到这件事 —— 上一条用的 `never()` 压根不响应，
+     * 而真实客户端都响应（`client.ts` 把 signal 交给 fetch）。
+     */
+    const abortable =
+      (name: string): Attempt<string> =>
+      (signal) =>
+        new Promise<string>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new Error(`${name} 被放弃`)));
+        });
+
+    const result = await raceFirstSuccess([abortable('一号'), abortable('二号')], {
+      perAttemptMs: 20,
+      totalBudgetMs: 45,
+    });
+
+    expect(result.kind).toBe('failed');
+    if (result.kind === 'failed') {
+      expect(result.errors).toHaveLength(2);
+      const joined = result.errors.map(String).join(' | ');
+      expect(joined).toContain('一号 被放弃');
+      expect(joined).toContain('二号 被放弃');
+    }
+  });
+
+  it('外部预算耗尽后不再开新候选，但仍等在途的', async () => {
+    /*
+     * `totalBudgetMs` 由 env 算出（候选数 × 单候选超时），而候选数来自数据库
+     * ——运营可以配成 20。那个乘积管不住 16.3 的 300 秒任务上限：剩 8 秒时
+     * 一条 20 候选的链仍会串行烧掉 20 次请求，全部落在 deadline 之后。
+     *
+     * 但它**只阻止开新候选**：已经发出的请求钱已经花了，产物只要回来就该用。
+     * 这两半必须同时成立，否则要么白烧钱，要么把马上就要回来的产物掐掉。
+     */
+    const controller = new AbortController();
+    const started: number[] = [];
+    const late = deferred<string>();
+
+    const attempts: readonly Attempt<string>[] = [0, 1, 2].map((index) => () => {
+      started.push(index);
+      return index === 0 ? late.promise : never<string>();
+    });
+
+    const race = raceFirstSuccess(attempts, {
+      perAttemptMs: 30,
+      totalBudgetMs: 10_000,
+      abortSignal: controller.signal,
+    });
+
+    // 等第二个候选发出，然后宣告任务预算耗尽
+    await sleep(50);
+    expect(started).toEqual([0, 1]);
+    controller.abort();
+
+    // 第三个候选不该再被发出
+    await sleep(60);
+    expect(started).toEqual([0, 1]);
+
+    // 而第一个候选此刻返回，仍然被采用 —— 那次调用的钱已经花了
+    late.resolve('迟到但有效');
+    expect(await race).toMatchObject({
+      kind: 'success',
+      winner: '迟到但有效',
+      position: 0,
+      attemptsStarted: 2,
+    });
+  });
+
   it('候选列表为空时直接返回 failed，不抛错', async () => {
     const result = await raceFirstSuccess<string>([], { perAttemptMs: 100, totalBudgetMs: 1000 });
 

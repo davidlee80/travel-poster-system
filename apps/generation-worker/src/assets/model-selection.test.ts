@@ -335,11 +335,18 @@ describe('文本候选数只受 max_candidates 约束', () => {
     expect(selected.candidates).toEqual(['m1', 'm2', 'm3']);
   });
 
-  it('max_candidates 为 NULL → 遍历整个池，不被时延削掉', async () => {
+  it('max_candidates 为 NULL → 不受配置上限约束，但仍受链预算约束', async () => {
     /*
-     * 与图像侧刻意不同：4 × 30 秒 = 120 秒超过了 T1 的 75 秒目标，但 T1 是
-     * P95 目标而不是硬上限，而 300 秒的任务预算兜住了最坏情况。
-     * 这里若照图像那样截断，「特殊用户遍历整个池」就永远不会真的发生。
+     * NULL 的含义是「不限 `max_candidates`」，不是「不限时长」。
+     *
+     * 4 × 30 秒 = 120 秒超出了单链预算（`LLM_CHAIN_BUDGET_MS`，300 秒任务
+     * 上限的三分之一），因此削到 3 个并标记 clamped。
+     *
+     * 曾经这里一个都不削，理由是「300 秒的任务预算兜住了最坏情况」——
+     * 那句话对**单次调用**成立，对一条串行发多个请求的链不成立：
+     * 20 个候选能把 deadline 超出二十倍。真正兜住 deadline 的是
+     * `callModel` 传下来的 signal（让链停止开新候选），而截断负责的是
+     * 另一件事：让「配了却试不到」这件事在 --list 与指标上可见。
      */
     const { repository } = pools(rows);
     const selected = await selectLlmClient({
@@ -351,7 +358,22 @@ describe('文本候选数只受 max_candidates 约束', () => {
       perAttemptMs: 30_000,
     });
 
-    expect(selected.candidates).toEqual(['p1', 'p2', 'p3', 'p4']);
+    expect(selected.candidates).toEqual(['p1', 'p2', 'p3']);
+    expect(selected.clamped).toBe(true);
+  });
+
+  it('候选数装得进链预算时不标记 clamped', async () => {
+    // 3 × 30 秒 = 90 秒，装得进 100 秒的单链预算 —— 标准档不该有噪音
+    const { repository } = pools(rows);
+    const selected = await selectLlmClient({
+      pools: repository,
+      tierLevel: 0,
+      logger,
+      fallback: fallbackLlm,
+      build: buildLlm,
+      perAttemptMs: 30_000,
+    });
+
     expect(selected.clamped).toBe(false);
   });
 });

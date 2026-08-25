@@ -13,7 +13,12 @@ import { formatMapping, formatPool, parseArgs } from './model-pool-cli.js';
  *     `max_candidates` 调到 10 会看到「10」并以为生效了，而运行时只试 2 个。
  */
 
-const IMAGE_BUDGET = { perAttemptMs: 40_000, totalBudgetMs: 80_000 };
+const BUDGETS = {
+  // 默认 env：IMAGE_TIMEOUT_MS / IMAGE_JOB_AI_BUDGET_MS
+  image: { perAttemptMs: 40_000, totalBudgetMs: 80_000 },
+  // 默认 env 的 LLM_TIMEOUT_MS 与 LLM_CHAIN_BUDGET_MS（300 秒的三分之一）
+  llm: { perAttemptMs: 30_000, totalBudgetMs: 100_000 },
+};
 
 describe('parseArgs', () => {
   it('--list 是布尔开关，不吞后面的参数', () => {
@@ -102,6 +107,41 @@ describe('parseArgs', () => {
   it('什么动作都不给时报错', () => {
     expect(() => parseArgs([])).toThrow(/--list|--set-pool|--map/);
   });
+
+  it('--unmap 是布尔开关，需要 --kind 与 --min-tier', () => {
+    /*
+     * 删映射是迁移 0009 承诺的回滚路径（「清空 tier_model_pools 即可」）。
+     * 池配错导致大面积 failover 时，这是最需要的那个操作 ——
+     * 而它一度只能拿 psql 连生产库手写 DELETE。
+     */
+    expect(parseArgs(['--unmap', '--kind', 'IMAGE', '--min-tier', '10'])).toEqual({
+      kind: 'unmap',
+      poolKind: 'IMAGE',
+      minTierLevel: 10,
+      dryRun: false,
+    });
+
+    expect(() => parseArgs(['--unmap', '--kind', 'IMAGE'])).toThrow(/min-tier/);
+  });
+
+  it('--drop-pool 取池名，需要 --kind（同名池在两个 kind 下各有内容）', () => {
+    expect(parseArgs(['--drop-pool', 'paid', '--kind', 'LLM'])).toEqual({
+      kind: 'drop-pool',
+      name: 'paid',
+      poolKind: 'LLM',
+      dryRun: false,
+    });
+  });
+
+  it('--dry-run 与两个删除命令也能组合', () => {
+    // 回滚场合下先看一眼要动什么，比其他任何时候都重要
+    expect(parseArgs(['--unmap', '--kind', 'LLM', '--min-tier', '0', '--dry-run'])).toMatchObject({
+      dryRun: true,
+    });
+    expect(parseArgs(['--drop-pool', 'p', '--kind', 'LLM', '--dry-run'])).toMatchObject({
+      dryRun: true,
+    });
+  });
 });
 
 describe('--list 的实际候选数', () => {
@@ -116,7 +156,7 @@ describe('--list 的实际候选数', () => {
     const line = formatMapping(
       { kind: 'IMAGE', minTierLevel: 10, poolName: 'paid', maxCandidates: 10 },
       pool,
-      IMAGE_BUDGET,
+      BUDGETS,
     );
 
     expect(line).toContain('上限 10');
@@ -128,29 +168,56 @@ describe('--list 的实际候选数', () => {
     const line = formatMapping(
       { kind: 'IMAGE', minTierLevel: 0, poolName: 'paid', maxCandidates: 1 },
       pool,
-      IMAGE_BUDGET,
+      BUDGETS,
     );
 
     expect(line).toContain('实际 1');
     expect(line).not.toContain('削过');
   });
 
-  it('文本侧不做时延截断，实际数就是配置值', () => {
+  it('文本侧在链预算内时实际数就是配置值', () => {
+    // 30 秒/候选 × 3 = 90 秒，装得进 100 秒的单链预算
     const line = formatMapping(
       { kind: 'LLM', minTierLevel: 0, poolName: 'free', maxCandidates: 3 },
       { name: 'free', kind: 'LLM', models: ['m1', 'm2', 'm3', 'm4', 'm5'], note: null },
-      IMAGE_BUDGET,
+      BUDGETS,
     );
 
     expect(line).toContain('实际 3');
     expect(line).not.toContain('削过');
   });
 
+  it('文本侧超出链预算时同样被削，并用文本自己的预算算', () => {
+    /*
+     * 曾经文本侧在这里手写 `slice(0, min(max, size))` 且从不标注削减，
+     * 于是运营把 max_candidates 配成 10 时 `--list` 显示「实际 10」——
+     * 而 Worker 只会试到任务预算耗尽。两处各一份实现，这就是分叉的样子。
+     *
+     * 用的必须是文本自己的预算（30 秒 / 100 秒），不是图像那套。
+     */
+    const line = formatMapping(
+      { kind: 'LLM', minTierLevel: 20, poolName: 'paid', maxCandidates: 10 },
+      {
+        name: 'paid',
+        kind: 'LLM',
+        models: ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10'],
+        note: null,
+      },
+      BUDGETS,
+    );
+
+    expect(line).toContain('上限 10');
+    // floor(100000 / 30000) = 3
+    expect(line).toContain('实际 3');
+    expect(line).toContain('被时延预算削过');
+    expect(line).toContain('30000 毫秒/候选');
+  });
+
   it('上限为 NULL 时显示「不限」并列出整池', () => {
     const line = formatMapping(
       { kind: 'LLM', minTierLevel: 10, poolName: 'paid', maxCandidates: null },
       { name: 'paid', kind: 'LLM', models: ['p1', 'p2'], note: null },
-      IMAGE_BUDGET,
+      BUDGETS,
     );
 
     expect(line).toContain('上限 不限');
@@ -166,7 +233,7 @@ describe('--list 的实际候选数', () => {
     const line = formatMapping(
       { kind: 'IMAGE', minTierLevel: 0, poolName: 'ghost', maxCandidates: 1 },
       undefined,
-      IMAGE_BUDGET,
+      BUDGETS,
     );
     expect(line).toContain('池不存在');
   });

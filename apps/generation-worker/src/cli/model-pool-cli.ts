@@ -9,6 +9,8 @@ import {
 } from '@tps/db';
 import { loadImageConfig, loadLlmConfig } from '@tps/llm';
 
+import { LLM_CHAIN_BUDGET_MS } from '../assets/model-selection.js';
+
 /**
  * 模型候选池与 tier 映射的运维 CLI（多模型 failover 计划的任务 5，迁移 0009）。
  *
@@ -18,6 +20,10 @@ import { loadImageConfig, loadLlmConfig } from '@tps/llm';
  * pnpm model:pool -- --map --kind LLM --min-tier 10 --pool paid --max-candidates 3
  * pnpm model:pool -- --map --kind IMAGE --min-tier 10 --pool paid   # 省略即不限
  * pnpm model:pool -- --set-pool paid --kind LLM --models a,b --dry-run
+ *
+ * # 回滚：删映射即回落 env 单模型（迁移 0009 承诺的那条路）
+ * pnpm model:pool -- --unmap --kind IMAGE --min-tier 10
+ * pnpm model:pool -- --drop-pool paid --kind IMAGE   # 仍被映射引用时会拒绝并告知档位
  * ```
  *
  * 只需 `DATABASE_URL`（`--list` 另读 `IMAGE_*` / `LLM_*` 以算实际候选数）。
@@ -62,6 +68,18 @@ export type ModelPoolCommand =
       readonly poolName: string;
       readonly maxCandidates: number | null;
       readonly dryRun: boolean;
+    }
+  | {
+      readonly kind: 'unmap';
+      readonly poolKind: ModelPoolKind;
+      readonly minTierLevel: number;
+      readonly dryRun: boolean;
+    }
+  | {
+      readonly kind: 'drop-pool';
+      readonly name: string;
+      readonly poolKind: ModelPoolKind;
+      readonly dryRun: boolean;
     };
 
 export function parseArgs(argv: readonly string[]): ModelPoolCommand {
@@ -96,7 +114,26 @@ export function parseArgs(argv: readonly string[]): ModelPoolCommand {
     };
   }
 
-  throw new Error('需要 --list、--set-pool <池名> 或 --map 之一');
+  if (flags.has('unmap')) {
+    return {
+      kind: 'unmap',
+      poolKind: parseKind(values.get('kind')),
+      minTierLevel: parseNonNegativeInt(requireValue(values, 'min-tier'), '--min-tier'),
+      dryRun,
+    };
+  }
+
+  const dropPool = values.get('drop-pool');
+  if (dropPool !== undefined) {
+    return {
+      kind: 'drop-pool',
+      name: dropPool,
+      poolKind: parseKind(values.get('kind')),
+      dryRun,
+    };
+  }
+
+  throw new Error('需要 --list、--set-pool <池名>、--map、--unmap 或 --drop-pool <池名> 之一');
 }
 
 /**
@@ -106,7 +143,7 @@ export function parseArgs(argv: readonly string[]): ModelPoolCommand {
  * 「下一个词不是取值」一律报错。这里必须区分两者，否则 `--list` 会去
  * 吞掉后面的东西，或者在它是最后一个参数时报「缺少取值」。
  */
-const BOOLEAN_FLAGS: readonly string[] = ['list', 'map', 'dry-run'];
+const BOOLEAN_FLAGS: readonly string[] = ['list', 'map', 'unmap', 'dry-run'];
 
 function parseFlags(argv: readonly string[]): {
   readonly values: Map<string, string>;
@@ -205,13 +242,17 @@ export interface EffectiveCountInput {
 /**
  * 一行映射的可读形式，含**实际生效**的候选数。
  *
- * 图像侧走 `resolveCandidates`（与 Worker 同一个函数，因此不可能分叉）；
- * 文本侧不做时延截断，实际数就是 `min(max_candidates, 池大小)`。
+ * 两侧都走 `resolveCandidates`（与 Worker 同一个函数，因此不可能分叉），
+ * 只是预算来源不同：图像是 21.2 的素材窗口，文本是 16.3 的 300 秒任务上限
+ * 里一条链的份额（`LLM_CHAIN_BUDGET_MS`）。
+ *
+ * 文本侧曾经在这里手写 `slice(0, min(max, size))` —— 与 Worker 各一份，
+ * 而这个函数的全部用途就是让运营看到 Worker 实际会试几个。
  */
 export function formatMapping(
   mapping: TierMappingRow,
   pool: ModelPoolRow | undefined,
-  image: EffectiveCountInput,
+  budgets: { readonly image: EffectiveCountInput; readonly llm: EffectiveCountInput },
 ): string {
   const poolSize = pool?.models.length ?? 0;
   const configured = mapping.maxCandidates === null ? '不限' : String(mapping.maxCandidates);
@@ -221,24 +262,16 @@ export function formatMapping(
     return `${mapping.kind}  tier ≥ ${mapping.minTierLevel}  → ${mapping.poolName}（池不存在！）`;
   }
 
-  const effective =
-    mapping.kind === 'IMAGE'
-      ? resolveCandidates({
-          models: pool.models,
-          maxCandidates: mapping.maxCandidates,
-          perAttemptMs: image.perAttemptMs,
-          totalBudgetMs: image.totalBudgetMs,
-        })
-      : {
-          candidates: pool.models.slice(
-            0,
-            mapping.maxCandidates === null ? poolSize : Math.min(mapping.maxCandidates, poolSize),
-          ),
-          clamped: false,
-        };
+  const budget = mapping.kind === 'IMAGE' ? budgets.image : budgets.llm;
+  const effective = resolveCandidates({
+    models: pool.models,
+    maxCandidates: mapping.maxCandidates,
+    perAttemptMs: budget.perAttemptMs,
+    totalBudgetMs: budget.totalBudgetMs,
+  });
 
   const clampNote = effective.clamped
-    ? `  ← 被时延预算削过（${image.perAttemptMs} 毫秒/候选，预算 ${image.totalBudgetMs} 毫秒）`
+    ? `  ← 被时延预算削过（${budget.perAttemptMs} 毫秒/候选，预算 ${budget.totalBudgetMs} 毫秒）`
     : '';
 
   return (
@@ -271,7 +304,8 @@ async function main(): Promise<void> {
 
       process.stdout.write(
         `单候选超时：图像 ${imageConfig.timeoutMs} 毫秒 / 文本 ${llmConfig.timeoutMs} 毫秒；` +
-          `图像任务预算 ${imageConfig.jobAiBudgetMs} 毫秒\n\n`,
+          `链预算：图像 ${imageConfig.jobAiBudgetMs} 毫秒（素材窗口）/ ` +
+          `文本 ${LLM_CHAIN_BUDGET_MS} 毫秒（300 秒任务上限的三分之一）\n\n`,
       );
 
       process.stdout.write(
@@ -288,8 +322,14 @@ async function main(): Promise<void> {
               .map(
                 (row) =>
                   `  ${formatMapping(row, byKey.get(`${row.kind}:${row.poolName}`), {
-                    perAttemptMs: imageConfig.timeoutMs,
-                    totalBudgetMs: imageConfig.jobAiBudgetMs,
+                    image: {
+                      perAttemptMs: imageConfig.timeoutMs,
+                      totalBudgetMs: imageConfig.jobAiBudgetMs,
+                    },
+                    llm: {
+                      perAttemptMs: llmConfig.timeoutMs,
+                      totalBudgetMs: LLM_CHAIN_BUDGET_MS,
+                    },
                   })}`,
               )
               .join('\n')}\n`,
@@ -310,6 +350,54 @@ async function main(): Promise<void> {
         note: command.note,
       });
       process.stdout.write(`已写入 ${line}\n`);
+      return;
+    }
+
+    if (command.kind === 'unmap') {
+      const line = `${command.poolKind} tier ≥ ${command.minTierLevel} 的映射`;
+      if (command.dryRun) {
+        process.stdout.write(`--dry-run：将删除 ${line}\n`);
+        return;
+      }
+      const removed = await repository.deleteMapping(command.poolKind, command.minTierLevel);
+      process.stdout.write(
+        removed
+          ? `已删除 ${line}\n这一档回落到 ${command.poolKind === 'LLM' ? 'LLM_MODEL' : 'IMAGE_MODEL'}` +
+              ` 的单模型行为。\n（Worker 侧最多 60 秒后生效，见池缓存 TTL）\n`
+          : // 回滚场合下「档位打错了」必须看得见，不能和「删掉了」长一样
+            `没有 ${line} —— 什么都没删。用 --list 确认档位。\n`,
+      );
+      if (!removed) process.exitCode = 1;
+      return;
+    }
+
+    if (command.kind === 'drop-pool') {
+      const line = `${command.poolKind} 池 ${command.name}`;
+      if (command.dryRun) {
+        process.stdout.write(`--dry-run：将删除 ${line}\n`);
+        return;
+      }
+      const result = await repository.deletePool(command.name, command.poolKind);
+      if (result.referencedBy.length > 0) {
+        /*
+         * 不删。先说清哪几档还指着它 —— 外键的报错不回答这个问题，
+         * 而它正是下一步要做的事。
+         */
+        process.stdout.write(
+          `未删除 ${line}：还有 ${result.referencedBy.length} 档映射指向它` +
+            `（tier ≥ ${result.referencedBy.join('、tier ≥ ')}）。\n` +
+            `先删映射：${result.referencedBy
+              .map(
+                (tier) =>
+                  `pnpm model:pool -- --unmap --kind ${command.poolKind} --min-tier ${tier}`,
+              )
+              .join('\n          ')}\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+      process.stdout.write(result.deleted ? `已删除 ${line}\n` : `没有 ${line} —— 什么都没删。\n`);
+      if (!result.deleted) process.exitCode = 1;
       return;
     }
 

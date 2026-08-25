@@ -10,7 +10,7 @@ import type { AssetRole } from '@tps/schemas';
  * 1. 单任务实时 Hero 次数   21.2 措施二「最多 2 次」∩ 21.4 的 QUOTA_*_AI_HERO
  *                           匿名为 0 → 匿名任务不产生任何 AI Hero（TP-4-17）
  * 2. 单任务 AI 图总张数     21.4「3 张」，超出后续槽位直接走占位图
- * 3. 单任务 AI 累计耗时     IMAGE_JOB_AI_BUDGET_MS，时延闸（见下）
+ * 3. 单任务 AI 墙钟窗口     IMAGE_JOB_AI_BUDGET_MS，时延闸（见下）
  * 4. 全局日调用量熔断       21.4「达到预算阈值时全局切到素材库 + 占位图」
  * ```
  *
@@ -21,16 +21,18 @@ import type { AssetRole } from '@tps/schemas';
  * 生成最多 20 秒。合成一个数的话，一个 14 天的任务可能把 3 张额度全花在
  * Hero 上（3 × 20 = 60 秒），T2 必然违约。
  *
- * ## 为什么次数不再够用：新增累计耗时闸
+ * ## 为什么次数不再够用：时延要有自己的闸
  *
  * 上面那句「一次最多 20 秒」是**硬编码常量**时才成立的推论。多模型故障转移
  * 把单候选超时改成了可配（默认 40 秒），并且一条候选链可以发出多个请求 ——
  * 同样的「2 次 Hero」现在可以是 80 秒也可以是 400 秒。次数就此只剩成本含义。
  *
- * 因此时延要有自己的预算：**次数管成本、耗时管时延，两者先到先停**。
- * 耗时由调用方在每次真实的模型调用后用 `recordElapsed` 回报 ——
- * 放在这里而不是让每个上限各自估算，是因为「已经花了多少时间」这件事
- * 只有实际发起调用的那一层知道。
+ * 因此时延要有自己的预算：**次数管成本、窗口管时延，两者先到先停**。
+ *
+ * 窗口是**墙钟 + 前瞻**，不是累计耗时之和：素材解析并发跑（天 8 × 槽 6），
+ * 3 条链同时花 40 秒，墙钟只走 40 秒。判据因此是「现在放行的话它最晚
+ * 什么时候结束」——「窗口已流走 + 这条链的最坏耗时」超出总长就拒绝。
+ * 详见 `reserve`；`recordElapsed` 回报的实际耗时只作可观测量。
  *
  * ## 21.4 的 `QUOTA_*_AI_HERO` 按「每任务」理解
  *
@@ -122,6 +124,17 @@ export interface AiBudgetDeps {
    * 才被发现 —— 那时排查方向会先落在模型供应商上。
    */
   readonly jobAiBudgetMs: number;
+  /**
+   * 一条候选链的最坏耗时 = 单候选超时 × 该档的候选数。
+   *
+   * 准入判定要的是「**如果现在放行，它最晚什么时候结束**」，而那取决于
+   * 候选数 —— 而候选数是每任务从池里选出来的（`selectImageClient`），
+   * 本类看不到。因此由调用方注入。
+   *
+   * 与 `jobAiBudgetMs` 同样**必填**：缺省值会让「忘了接线」表现为
+   * 「窗口保护恰好失效」，而那要到 T2 违约时才被发现。
+   */
+  readonly chainWorstCaseMs: number;
   readonly dailyBudget?: number;
   readonly now?: () => Date;
 }
@@ -138,6 +151,8 @@ export class AiImageBudget {
   private heroes = 0;
   private failures = 0;
   private elapsedMs = 0;
+  /** 首次放行的墙钟时刻。AI 窗口从这一刻开始算，之前的等待不占窗口 */
+  private windowStartedAt: number | null = null;
 
   constructor(private readonly deps: AiBudgetDeps) {}
 
@@ -154,6 +169,11 @@ export class AiImageBudget {
       failures: this.failures,
       elapsedMs: this.elapsedMs,
     };
+  }
+
+  /** AI 窗口已流走的墙钟时长。尚未放行过任何调用时为 0 */
+  private windowUsedMs(nowMs: number): number {
+    return this.windowStartedAt === null ? 0 : Math.max(0, nowMs - this.windowStartedAt);
   }
 
   /**
@@ -181,29 +201,59 @@ export class AiImageBudget {
       return { allowed: false, reason: 'JOB_IMAGE_LIMIT' };
     }
 
-    if (this.elapsedMs >= this.deps.jobAiBudgetMs) {
-      /*
-       * 时延闸。与张数闸并列而不是二选一：一个 3 天的任务可能张数没用完
-       * 但一次候选链就把窗口花光，而一个 14 天的任务可能每次都很快、
-       * 张数先到。两个闸各自独立地对应一种真实情形。
-       */
-      return { allowed: false, reason: 'JOB_AI_TIME_EXHAUSTED' };
-    }
-
     if (this.failures >= MAX_AI_FAILURES_PER_JOB) {
       // 本任务内的供应商已连续失败：继续试只是在消耗用户的等待时间
       return { allowed: false, reason: 'PROVIDER_FAILING' };
     }
 
-    const budget = this.deps.dailyBudget ?? DEFAULT_AI_IMAGE_DAILY_BUDGET;
     const now = (this.deps.now ?? (() => new Date()))();
+    const nowMs = now.getTime();
+
+    /*
+     * ## 时延闸：墙钟 + 前瞻，不是累计耗时之和
+     *
+     * 判据是「**如果现在放行，它最晚什么时候结束**」：
+     * 窗口已流走的墙钟 + 这条链的最坏耗时 > 窗口总长 → 拒绝。
+     *
+     * 为什么不能用「各链耗时之和」（本方法从前的做法）：素材解析是并发的
+     * （天 8 × 槽 6），3 条链同时跑 40 秒，墙钟只走了 40 秒而和是 120 秒。
+     * 按和判定会把并发误判成超支，把本来赶得上的槽位拒掉；而更糟的是
+     * 反过来 —— `elapsedMs` 只在调用**返回后**才更新，同批并发的槽位
+     * 全都在它还是 0 时通过，于是那个闸压根拦不住任何东西。
+     *
+     * 前瞻项 `chainWorstCaseMs` 是候选池必须存在的理由：一条 2 候选的链
+     * 最坏是 2 × 单候选超时，而单看「已经花了多少」永远发现不了这件事 ——
+     * 等发现时那 80 秒已经走掉了。
+     *
+     * `elapsedMs` 保留但不再参与判定，它是「实际花了多少」的可观测量。
+     */
+    if (this.windowUsedMs(nowMs) + this.deps.chainWorstCaseMs > this.deps.jobAiBudgetMs) {
+      return { allowed: false, reason: 'JOB_AI_TIME_EXHAUSTED' };
+    }
+
+    /*
+     * ## 占位必须发生在任何 `await` 之前
+     *
+     * 素材解析是并发的。递增放在下面那次 `peek` 之后的话，同一瞬间进入
+     * 本方法的槽位会**全部**读到递增前的 `images`，于是每个都通过 ——
+     * 21.4 的「3 张」与 21.2 的「2 次 Hero」双双失守，而症状是成本与 T2
+     * 一起超，看不出是同一个原因。
+     *
+     * 检查与递增之间不能有让出点，这是这几行的全部意义。
+     */
+    this.images += 1;
+    if (hero) this.heroes += 1;
+    // 窗口从第一次放行开始计。之前的本地库查询与搜索层不占 AI 的窗口
+    this.windowStartedAt ??= nowMs;
+
+    const budget = this.deps.dailyBudget ?? DEFAULT_AI_IMAGE_DAILY_BUDGET;
     const spent = await this.deps.counters.peek(aiImageDailyKey(now));
     if (spent >= budget) {
+      // 占位已经做了，这条拒绝路径必须还 —— 否则熔断打开后连降级都占着额度
+      this.refund(role);
       return { allowed: false, reason: 'GLOBAL_CIRCUIT_OPEN' };
     }
 
-    this.images += 1;
-    if (hero) this.heroes += 1;
     return { allowed: true };
   }
 
@@ -214,8 +264,10 @@ export class AiImageBudget {
    * 实际发起调用之间还隔着并发锁与同键等待（最多 22 秒），把那段算进来
    * 会让「AI 花了多久」变成「这个槽位等了多久」，两者的处置完全不同。
    *
-   * 与额度相反，**耗时不可归还**（`refund` 不动它）：额度还了还能给别的
-   * 槽位用，而时间一旦流走，T2 的窗口就是真的少了那么多。
+   * **不再参与准入判定**（那件事由 `reserve` 的墙钟 + 前瞻负责）。
+   * 并发下这个累加值是各链耗时之**和**，而窗口是墙钟 —— 两者量纲不同，
+   * 拿它当闸会同时犯两个错：并发被误判成超支，而同批并发压根拦不住。
+   * 保留它是因为「这个任务实际在 AI 上花了多少」是排查时要看的量。
    */
   recordElapsed(ms: number): void {
     // 负值只可能来自时钟回拨；忽略而不是让已花掉的时间被凭空还回来
