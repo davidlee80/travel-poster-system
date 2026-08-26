@@ -32,6 +32,7 @@ import {
   type ErrorCode,
 } from '../errors/codes.js';
 import { ALL_FEATURES_ON, featureGateTotal } from '../feature-gate.js';
+import { recordCreditGate } from '../credits/metrics.js';
 import type { CreditsService, JobCreditCheck } from '../credits/service.js';
 import { resolveIdentity, type IdentityContextDeps } from './identity-context.js';
 
@@ -357,10 +358,16 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
         totalDays: normalized.total_days,
       });
       if (creditCheck.kind === 'insufficient') {
+        recordCreditGate('generate', 'insufficient');
         return fail(request, reply, 'AUTH_INSUFFICIENT_CREDITS', {
           details: { required_cr: creditCheck.requiredCr, balance_cr: creditCheck.balanceCr },
         });
       }
+      /*
+       * `free` 也要记：那条路径下**所有生成都不收费**（没有价目表、
+       * 或算出 0 CR），而除了这条曲线之外没有任何迹象。
+       */
+      if (creditCheck.kind === 'free') recordCreditGate('generate', 'free');
     }
 
     let handles;
@@ -413,6 +420,7 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
         priceVersion: creditCheck.priceVersion,
       });
       if (reserved.kind === 'insufficient') {
+        recordCreditGate('generate', 'insufficient');
         await plans.cancelJob(handles.jobId, resolved.identity.userId);
         request.log.info(
           { stage: 'billing', required_cr: reserved.requiredCr, balance_cr: reserved.balanceCr },
@@ -422,6 +430,7 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
           details: { required_cr: reserved.requiredCr, balance_cr: reserved.balanceCr },
         });
       }
+      recordCreditGate('generate', 'allowed');
     }
 
     await queue.enqueue({

@@ -2,6 +2,8 @@ import { priceUsage, type PriceBook, type PricedUsage, type UsageSnapshot } from
 import type { CreditWalletRepository } from '@tps/db';
 import type { Logger } from '@tps/shared';
 
+import { creditSettledCrTotal, creditUnpricedTotal, skuDomain } from './credit-metrics.js';
+
 /**
  * 生成任务的 CR 结算（C-4）。
  *
@@ -111,7 +113,13 @@ export function createJobBilling(deps: JobBillingDeps): JobBilling {
       /*
        * 命中兜底价或压根没登记。两者都要报出来 —— 前者按一个偏贵的价收，
        * 后者不收。静默的话「运营加了模型忘了配价」永远不会被发现。
+       *
+       * 指标按 SKU 的**域**（基数封顶），完整 SKU 留在日志里 —— 告警要回答的
+       * 是「有没有漏配」，「漏配了哪一个」是随后一次 grep 的事。
        */
+      for (const sku of priced.unpriced) {
+        creditUnpricedTotal.inc({ domain: skuDomain(sku) });
+      }
       deps.logger.warn(
         { job_id: jobId, stage: 'billing', sku: priced.unpriced.join(',') },
         '有 SKU 没有登记单价（走兜底或跳过）',
@@ -132,6 +140,21 @@ export function createJobBilling(deps: JobBillingDeps): JobBilling {
         lines: result.priced?.lines ?? [],
         unpriced: result.priced?.unpriced ?? [],
       });
+
+      /*
+       * 三个方向同时记：它们恒同时产生于结算这一刻，而 `write_off` 那一条
+       * 是坏账告警的唯一数据源。`inc(0)` 是安全的（Prometheus 计数器允许
+       * 加 0），但显式跳过 0 能少建两条恒为 0 的序列。
+       */
+      if (settled.chargedCr > 0) {
+        creditSettledCrTotal.inc({ direction: 'charged' }, settled.chargedCr);
+      }
+      if (settled.refundedCr > 0) {
+        creditSettledCrTotal.inc({ direction: 'refunded' }, settled.refundedCr);
+      }
+      if (settled.writeOffCr > 0) {
+        creditSettledCrTotal.inc({ direction: 'write_off' }, settled.writeOffCr);
+      }
 
       const level = settled.writeOffCr > 0 ? 'warn' : 'info';
       deps.logger[level](
@@ -162,12 +185,26 @@ export function createJobBilling(deps: JobBillingDeps): JobBilling {
         lines: result.priced?.lines ?? [],
       });
 
+      /*
+       * 失败释放：退回的算 `refunded`，我们烧掉的算 `write_off`。
+       *
+       * 后者与结算超支那一条共用同一个方向标签，因为处置相同 ——
+       * 「这段时间我们自己吃掉了多少钱」不该按原因分成两条曲线去相加。
+       */
+      const burnedCr = result.priced?.totalCr ?? 0;
+      if (released.refundedCr > 0) {
+        creditSettledCrTotal.inc({ direction: 'refunded' }, released.refundedCr);
+      }
+      if (burnedCr > 0) {
+        creditSettledCrTotal.inc({ direction: 'write_off' }, burnedCr);
+      }
+
       deps.logger.info(
         {
           job_id: jobId,
           stage: 'billing',
           refunded_cr: released.refundedCr,
-          burned_cr: result.priced?.totalCr ?? 0,
+          burned_cr: burnedCr,
           replayed: released.replayed,
         },
         'CR 预留已释放，成本记为坏账',

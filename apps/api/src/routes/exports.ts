@@ -33,6 +33,7 @@ import {
   type ErrorCode,
 } from '../errors/codes.js';
 import { ALL_FEATURES_ON, featureGateTotal } from '../feature-gate.js';
+import { recordCreditGate } from '../credits/metrics.js';
 import type { CreditsService } from '../credits/service.js';
 import { resolveIdentity, type IdentityContextDeps } from './identity-context.js';
 
@@ -265,10 +266,12 @@ export function registerExportRoutes(app: FastifyInstance, deps: ExportRoutesDep
           exportIdempotencyKey: idempotencyKey,
         });
         if (charged.kind === 'insufficient') {
+          recordCreditGate('export', 'insufficient');
           return fail(request, reply, 'AUTH_INSUFFICIENT_CREDITS', {
             details: { required_cr: charged.requiredCr, balance_cr: charged.balanceCr },
           });
         }
+        recordCreditGate('export', charged.kind === 'charged' ? 'allowed' : 'free');
         if (charged.kind === 'charged') chargedCr = charged.amountCr;
       }
 

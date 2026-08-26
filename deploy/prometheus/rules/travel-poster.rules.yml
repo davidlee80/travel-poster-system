@@ -247,3 +247,70 @@ groups:
           summary: '渲染容器内中文字体不可用'
           description: '17.5 的字形断言失败，页面会是豆腐块。检查渲染镜像的 /usr/share/fonts 与 web 服务的 /fonts/ 静态资源。'
           runbook: 'docs/运维手册.md#中文字体故障'
+
+      # 7. 坏账速率异常（C-7）
+      #
+      # 「我们自己吃掉的钱」有两个来源，处置完全不同：
+      #   结算超支   预留取的是典型值，真实用量超出预留又超出用户余额
+      #              → 估算参数或价目不准
+      #   任务失败   上游故障时每次失败都真的烧了供应商的钱
+      #              → 那一头有自己的告警（AiFailover / LlmDuration）
+      #
+      # 两者共用一条曲线是刻意的：这条告警回答的是「现在正在亏多少」，
+      # 而那个数不该按原因拆成两条再让人相加。
+      #
+      # 阈值 5000 CR / 小时 = 5 元/小时。按占位价一次生成约 1～3 元，
+      # 因此它相当于「每小时有两三次生成的钱是我们出的」——
+      # 偶发的失败退款不会到这个量级，而一次上游故障会瞬间越过它。
+      - alert: TravelCreditWriteOffHigh
+        expr: sum(rate(travel_credit_settled_cr_total{direction="write_off"}[1h])) * 3600 > 5000
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: '坏账速率超过 5000 CR/小时'
+          description: '先看 travel_job_total{status="FAILED"} 是否同时升高：升高说明是上游故障在烧钱（看故障转移与模型延迟），没升高说明是估算不准（结算超支），要调 CREDIT_HOLD_BUFFER_PERCENT 或重定价目。'
+          runbook: 'docs/运维手册.md#坏账速率异常'
+
+      # 8. 有 SKU 没配价（C-7）
+      #
+      # 运营往模型池里加模型、忘了登记价格 —— 那两件事在不同的表、
+      # 由不同的命令完成，因此一定会发生。此时系统**不报错**：
+      # 命中兜底价就按一个偏贵的价收，连兜底都没有就完全不收费。
+      # 两种都只有这条曲线能发现。
+      #
+      # `for: 15m` 而不是「一次即告警」：一次可能来自灰度中的新模型，
+      # 而漏配的表现是持续命中 —— 15 分钟足以把两者分开。
+      - alert: TravelCreditUnpriced
+        expr: sum by (domain) (increase(travel_credit_unpriced_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: '有 SKU 没有登记单价（走兜底价或未计费）'
+          description: '看日志里 stage=billing 的 sku 字段拿到完整 SKU（含模型名），然后 clone_credit_prices 补上那一项并发布。domain=llm.in|llm.out 说明是模型漏配，其余说明固定项漏配。'
+          runbook: 'docs/运维手册.md#有sku没配价'
+
+      # 9. 余额不足占比升高（C-7）
+      #
+      # **这是一条产品告警，不是故障告警。**
+      #
+      # 定价配错时的表现不是报错：每一次都返回一个语义完全正确的 402，
+      # 而用户不会来问「为什么我不能生成」—— 他会走。
+      # 实测过一次：占位价下 14 天行程的预留额（10578 CR）就超过注册赠送额
+      # （9900 CR），也就是刚注册的用户点 14 天必然被拒。
+      #
+      # 分母只算真的进了闸门的请求（allowed + insufficient），
+      # 不含 free —— 那条路径压根不收费，混进来会把比例稀释掉。
+      - alert: TravelCreditInsufficientRatioHigh
+        expr: |
+          sum(rate(travel_credit_gate_total{outcome="insufficient"}[30m]))
+            /
+          sum(rate(travel_credit_gate_total{outcome=~"allowed|insufficient"}[30m])) > 0.2
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: '超过 20% 的计费请求因余额不足被拒'
+          description: '按 event 拆开看是生成还是导出。若集中在生成，用 POST /credits/quote 对几个典型天数报一次价，与 CREDIT_SIGNUP_GRANT_CR 比 —— 大概率是价目表或赠送额需要重定，而不是用户真的都花完了。'
+          runbook: 'docs/运维手册.md#余额不足占比升高'

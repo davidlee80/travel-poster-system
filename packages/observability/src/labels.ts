@@ -59,6 +59,18 @@ export const ALLOWED_LABELS = [
    */
   'kind',
   'position',
+
+  /*
+   * 计费（C-7）。SKU 的**域**，不是完整 SKU ——
+   *   llm.in / llm.out / embedding.in / plan.base_fee / image.ai_generate /
+   *   image.search / render.page / export.png / export.pdf / other
+   * 十个取值，由 `FIXED_SKUS` 与 `MODEL_SKU_PREFIXES` 封闭。
+   *
+   * 完整 SKU 不能进来：`llm.in:<model>` 里的 model 是**供应商回给我们的**，
+   * 有些供应商返回带日期的版本名，那个集合会随时间慢慢长。
+   * 具体哪个 SKU 走日志（billing.ts 打了 sku 字段）。
+   */
+  'domain',
 ] as const;
 
 export type AllowedLabel = (typeof ALLOWED_LABELS)[number];

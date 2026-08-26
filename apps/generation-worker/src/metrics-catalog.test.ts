@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
  * 会抱怨，因此显式使用它们的一个成员。
  */
 import { assetResolutionTotal } from './assets/asset-metrics.js';
+import { creditSettledCrTotal, creditUnpricedTotal } from './credit-metrics.js';
 import { llmTokensTotal } from './llm-metrics.js';
 import { jobTotal } from './plan-metrics.js';
 import { retrievalReferenceTotal } from './plan-metrics.js';
@@ -25,6 +26,8 @@ describe('21.3 指标目录（generation-worker）', () => {
   it('目录里属于本进程的指标全部已注册，且标签集一致', () => {
     // 触发注册；具体值不重要
     expect(typeof assetResolutionTotal.inc).toBe('function');
+    expect(typeof creditSettledCrTotal.inc).toBe('function');
+    expect(typeof creditUnpricedTotal.inc).toBe('function');
     expect(typeof llmTokensTotal.inc).toBe('function');
     expect(typeof jobTotal.inc).toBe('function');
     expect(typeof retrievalReferenceTotal.inc).toBe('function');

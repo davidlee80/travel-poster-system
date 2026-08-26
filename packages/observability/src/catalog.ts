@@ -278,6 +278,36 @@ export const METRICS_CATALOG: readonly CatalogEntry[] = [
     note: 'R-13 的转化观察：匿名与注册各自的请求量',
   },
 
+  // ── CR 计费（C-7）─────────────────────────────────────────
+  //
+  // 三条都是 `supplementary`：21.3 写在货币系统之前，那张表里没有计费。
+  // 它们盯的是同一类失效 —— **出问题时没有任何东西会失败**：
+  // 坏账时用户照样拿到计划、兜底价照样收钱、余额不足时 402 语义完全正确。
+  {
+    name: 'travel_credit_settled_cr_total',
+    kind: 'counter',
+    labels: ['direction'],
+    owner: 'generation-worker',
+    source: 'supplementary',
+    note: '单位是 CR 而不是次数：「发生了 10 次坏账」不说明任何事，10 次 1 CR 与 10 次 10000 CR 是完全不同的两件事。direction=charged|refunded|write_off，三者恒同时产生于结算那一刻',
+  },
+  {
+    name: 'travel_credit_unpriced_total',
+    kind: 'counter',
+    labels: ['domain'],
+    owner: 'generation-worker',
+    source: 'supplementary',
+    note: '运营加模型与配价格在不同的表、由不同的命令完成，忘配一定会发生。标签是 SKU 的域（llm.in / export.png / …，十个取值封顶）而不是完整 SKU —— 后者含供应商回给我们的模型名，那个集合会随时间慢慢长。具体哪个模型在日志的 sku 字段里',
+  },
+  {
+    name: 'travel_credit_gate_total',
+    kind: 'counter',
+    labels: ['event', 'outcome'],
+    owner: 'api',
+    source: 'supplementary',
+    note: '产品信号而非故障信号：定价配错时的表现不是报错，是「一批用户点了生成什么也没发生」，而每一次都返回了语义完全正确的 402。outcome=free 那条序列同样必须可见 —— 它意味着所有生成都不收费，而除此之外没有任何迹象',
+  },
+
   // ── 保留期（retention-worker）─────────────────────────────
   {
     name: 'travel_anon_purge_total',
