@@ -8,7 +8,7 @@ import type { PlanErrorCode } from '@tps/schemas';
  * ```text
  * FakeLlmClient     回放录制好的输出。本地开发与 CI 用它 ——
  *                   不需要凭据，也不会因为模型改版让测试变红
- * DirectLlmClient   直连供应商的 OpenAI 兼容端点
+ * DirectLlmClient   ofox 的 OpenAI 兼容端点（落地供应商，见下方类注释）
  * GatewayLlmClient  经企业 AI 网关（同为 OpenAI 兼容），
  *                   由网关统一做鉴权、限流、路由与成本归集
  * ```
@@ -282,7 +282,34 @@ abstract class HttpLlmClient implements LlmClient {
   }
 }
 
-/** 直连供应商 */
+/**
+ * 走 ofox（`https://api.ofox.ai`）的 OpenAI 兼容协议。
+ *
+ * ofox 是统一大模型网关，一个 key 覆盖 100+ 模型。上面那个请求体一字不改就能
+ * 用 —— 它的 OpenAI 兼容端点就是 `POST /v1/chat/completions` + `Bearer` 鉴权。
+ * 因此这一层没有 ofox 专属代码；接入它的全部工作在配置与两条约束上：
+ *
+ * **① `LLM_BASE_URL` 不带 `/v1`**（ofox 文档写的 `https://api.ofox.ai/v1` 是给
+ * SDK 用户的，SDK 自己拼后半段）。由 `assertBaseUrlHasNoApiVersion` 启动即拦。
+ *
+ * **② 模型 ID 必须带 provider 前缀** —— `openai/gpt-5.5`，不是 `gpt-5.5`。
+ * 这一条**不做格式校验**：`GatewayLlmClient` 面对的企业网关不一定要前缀，
+ * 加校验会挡住合法配置。填错的症状是 HTTP 4xx，可从状态码查到。
+ *
+ * ## `json_schema` + `strict` 限定了候选池能配哪些模型
+ *
+ * 上面用的是 schema 约束模式（6.3 的硬要求），而 ofox 跨 100+ 模型的**保底**
+ * 结构化输出能力只有 `json_object`（只保证「是 JSON」，不保证形状）。
+ * 于是 3.7.2 的 `model_pools.models` **只能配支持 structured outputs 的模型**。
+ *
+ * 配了不支持的（`deepseek/*`、`bailian/*` 多数如此）后果不是崩，而是更难查：
+ * 那个候选返回 4xx → 落到 `LlmUnavailableError` → 报 `PLAN_LLM_UNAVAILABLE`，
+ * 也就是把「我们的请求体与模型能力不匹配」伪装成「上游挂了」，
+ * 恰好是本文件开头那段错误分类想避免的事。而每个这样的候选都白烧一次调用。
+ *
+ * 不为此降级到 `json_object`：它不约束形状，14 天行程缺字段会落到 planning 的
+ * 校验并触发 3.2.2 的定向重生成 —— 比一次 4xx 贵得多。
+ */
 export class DirectLlmClient extends HttpLlmClient {
   protected endpoint(): string {
     return '/v1/chat/completions';

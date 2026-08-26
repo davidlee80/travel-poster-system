@@ -50,8 +50,14 @@ try {
   process.exit(2);
 }
 
-/** 生产代码实际交给模型的那一份（generate-plan.ts:266） */
-const REAL_SCHEMA = schemas.travelPlanLlmOutputJsonSchema;
+/**
+ * 两份 schema：
+ *   RAW_SCHEMA     `z.toJSONSchema()` 的原样产物。**已不再发给模型** ——
+ *                  它违反 strict 三条规则，留在这里作为对照（S1 会实测）
+ *   STRICT_SCHEMA  generate-plan.ts 实际发出去的那一份（净化 + 可选转可空）
+ */
+const RAW_SCHEMA = schemas.travelPlanLlmOutputJsonSchema;
+const STRICT_SCHEMA = schemas.travelPlanLlmOutputStrictJsonSchema;
 
 // ── CLI ─────────────────────────────────────────────────────
 
@@ -79,31 +85,11 @@ const baseUrl = baseUrlRaw.replace(/\/+$/, '');
  *   2. object 的所有 properties 必须全部列进 required（不允许可选字段）
  *   3. 拒绝一批校验关键字 —— 命中即 400，不是忽略
  * 第 3 条最反直觉：minLength / pattern 这些在普通 JSON Schema 里完全正确。
+ *
+ * 关键字清单从 @tps/schemas 取，不在这里再写一遍：生产代码用同一份做净化，
+ * 两边漂移的症状是「探针说合规、真实端点 400」，而那时人会先怀疑端点。
  */
-const STRICT_FORBIDDEN = new Set([
-  'minLength',
-  'maxLength',
-  'pattern',
-  'format',
-  'minimum',
-  'maximum',
-  'exclusiveMinimum',
-  'exclusiveMaximum',
-  'multipleOf',
-  'minItems',
-  'maxItems',
-  'uniqueItems',
-  'default',
-  'oneOf',
-  'allOf',
-  'not',
-  'if',
-  'then',
-  'else',
-  'patternProperties',
-  'unevaluatedProperties',
-  'contains',
-]);
+const STRICT_FORBIDDEN = new Set(schemas.STRICT_FORBIDDEN_KEYWORDS);
 
 function auditStrict(
   node,
@@ -137,37 +123,6 @@ function auditStrict(
   return report;
 }
 
-/**
- * 把 schema 改造成满足 strict 三条规则的形态。
- *
- * **这不是无损转换。** 剥掉 minLength / pattern / minimum 等于放弃
- * 「模型在解码阶段被硬约束」，把这些检查完全交给解析后的 Zod。
- * 代价是真实存在的：日期格式错、字符串为空、天数越界这些原本不可能
- * 发生的输出，之后会以「校验失败 → 重试」的形式出现，消耗 3.2.2 的
- * 重生成次数。收益是请求不再被端点直接 400 拒掉。
- *
- * 采用与否取决于阶段 C 的实测结果，脚本本身不做决定。
- */
-function sanitizeForStrict(node) {
-  if (node === null || typeof node !== 'object') return node;
-  if (Array.isArray(node)) return node.map(sanitizeForStrict);
-
-  const out = {};
-  for (const [key, value] of Object.entries(node)) {
-    if (STRICT_FORBIDDEN.has(key)) continue;
-    out[key] = sanitizeForStrict(value);
-  }
-
-  if (out.type === 'object' || out.properties !== undefined) {
-    out.additionalProperties = false;
-    // 规则 2：strict 不允许可选字段，把全部属性提为 required
-    if (out.properties !== undefined) out.required = Object.keys(out.properties);
-  }
-  return out;
-}
-
-const SANITIZED_SCHEMA = sanitizeForStrict(REAL_SCHEMA);
-
 function printAudit(label, schema) {
   const r = auditStrict(schema);
   const ok = r.missingAP.length === 0 && r.optional.length === 0 && r.forbidden.size === 0;
@@ -188,17 +143,17 @@ function printAudit(label, schema) {
 }
 
 process.stdout.write('\n【本地体检】交给模型的 JSON Schema 是否满足 strict 模式\n\n');
-const realOk = printAudit('原样 schema（= 现在生产代码发出去的）', REAL_SCHEMA);
+printAudit('原样 schema（z.toJSONSchema 产物，已不再发出）', RAW_SCHEMA);
 process.stdout.write('\n');
-printAudit('净化后 schema（候选修复方案）', SANITIZED_SCHEMA);
+const strictOk = printAudit('strict 兼容 schema（= 现在生产代码发出去的）', STRICT_SCHEMA);
 
-if (!realOk) {
-  process.stdout.write(
-    '\n  → 原样 schema 不满足 strict 规则。对严格实现该规则的端点，\n' +
-      '    `strict: true` 会被直接 400 拒掉，在日志里表现为 HTTP 400。\n' +
-      '    阶段 C 的 S1 与 S2 会实测这一点。\n',
-  );
-}
+process.stdout.write(
+  strictOk
+    ? '\n  → 生产发出的那一份合规。阶段 C 的 S2 会在真实端点上确认这一点，\n' +
+        '    S1 则用原样 schema 反证「不净化会被 400」。\n'
+    : '\n  ✗ 生产发出的那一份**不合规** —— 这是 packages/schemas 的\n' +
+        '    travelPlanLlmOutputStrictJsonSchema 有缺口，不是配置问题。\n',
+);
 
 if (dryRun) {
   process.stdout.write('\n--dry-run：跳过所有网络请求。\n');
@@ -269,7 +224,10 @@ function errorDetail(res) {
 process.stdout.write('\n─ 阶段 A：端点拼法 ─────────────────────────────\n');
 process.stdout.write(
   '  client.ts 拼的是 baseUrl + "/v1/chat/completions"。中转站给的地址\n' +
-    '  常常已经带 /v1，那样会拼成 /v1/v1/... → 404。\n\n',
+    '  常常已经带 /v1（ofox 文档给的就是 https://api.ofox.ai/v1，那是 SDK 写法），\n' +
+    '  那样会拼成 /v1/v1/... → 404。\n' +
+    '  LLM_BASE_URL 带 /v1 现在会被 loadLlmConfig 启动即拒；探针直接读 CLI 参数\n' +
+    '  与环境变量、不过那道校验，所以这一阶段仍然要探。\n\n',
 );
 
 const CANDIDATES = ['/v1/chat/completions', '/chat/completions'];
@@ -324,7 +282,9 @@ if (!tokenProbe.ok && /max_completion_tokens|max_tokens/i.test(errorDetail(token
 }
 process.stdout.write(
   `  token 上限字段 : ${tokenField}` +
-    (tokenField === 'max_tokens' ? '（与 client.ts:187 一致）' : '（⚠ client.ts:187 需要改）') +
+    (tokenField === 'max_tokens'
+      ? '（与 HttpLlmClient.complete 发的一致）'
+      : '（⚠ HttpLlmClient.complete 的 max_tokens 需要改名）') +
     '\n',
 );
 
@@ -338,7 +298,7 @@ if (!tempProbe.ok && /temperature/i.test(errorDetail(tempProbe))) {
   sendTemperature = false;
 }
 process.stdout.write(
-  `  temperature    : ${sendTemperature ? '接受 0.3（与 client.ts:207 一致）' : '⚠ 被拒，client.ts:207 需要按模型跳过'}\n`,
+  `  temperature    : ${sendTemperature ? '接受 0.3（与 HttpLlmClient.complete 一致）' : '⚠ 被拒，HttpLlmClient.complete 需要按模型跳过'}\n`,
 );
 
 if (!tempProbe.ok && sendTemperature) {
@@ -363,28 +323,28 @@ const CASES = [
   {
     id: 'S1',
     label: 'json_schema + strict:true + 原样 schema',
-    note: '= 现在生产代码的行为',
+    note: '反证用：不净化会被 400（生产代码曾经的行为）',
     format: {
       type: 'json_schema',
-      json_schema: { name: 'travel_plan', schema: REAL_SCHEMA, strict: true },
+      json_schema: { name: 'travel_plan', schema: RAW_SCHEMA, strict: true },
     },
   },
   {
     id: 'S2',
-    label: 'json_schema + strict:true + 净化 schema',
-    note: '候选修复；代价是丢掉模型侧的格式与范围约束',
+    label: 'json_schema + strict:true + strict 兼容 schema',
+    note: '= 现在生产代码的行为',
     format: {
       type: 'json_schema',
-      json_schema: { name: 'travel_plan', schema: SANITIZED_SCHEMA, strict: true },
+      json_schema: { name: 'travel_plan', schema: STRICT_SCHEMA, strict: true },
     },
   },
   {
     id: 'S3',
     label: 'json_schema + strict:false + 原样 schema',
-    note: 'schema 降级为「建议」，输出形状无硬保证',
+    note: '备选：保留格式与范围提示，但形状无硬保证',
     format: {
       type: 'json_schema',
-      json_schema: { name: 'travel_plan', schema: REAL_SCHEMA, strict: false },
+      json_schema: { name: 'travel_plan', schema: RAW_SCHEMA, strict: false },
     },
   },
   {
@@ -448,7 +408,7 @@ for (const testCase of selected) {
 
   if (parsed !== undefined && parseError === '') {
     const keys = Object.keys(parsed);
-    const wanted = REAL_SCHEMA.required ?? [];
+    const wanted = RAW_SCHEMA.required ?? [];
     const missing = wanted.filter((k) => !keys.includes(k));
     marks.push(
       missing.length === 0
@@ -482,22 +442,26 @@ const s1 = results.find((r) => r.id === 'S1');
 const s2 = results.find((r) => r.id === 'S2');
 
 process.stdout.write('\n');
-if (s1?.verdict === 'pass') {
-  process.stdout.write('  现有代码可直接用：LLM_MODE=direct + 三个环境变量，不必改 client.ts。\n');
-} else if (s2?.verdict === 'pass') {
+if (s2?.verdict === 'pass') {
   process.stdout.write(
-    '  需要改代码：strict 模式可用，但 schema 必须先净化。\n' +
-      '  落点是 packages/schemas（导出一份 strict 兼容的 schema），\n' +
-      '  而不是在 client.ts 里就地改 —— 那里没有 schema 的上下文。\n' +
-      '  注意净化会把格式与范围约束从「解码期硬保证」降为「解析后校验+重试」。\n',
+    '  现有代码可直接用：LLM_MODE=direct + 三个环境变量，不必改代码。\n' +
+      (s1?.verdict === 'http'
+        ? '  S1 被拒证实了净化是必要的 —— 别把 generate-plan.ts 换回原样 schema。\n'
+        : '  注意 S1 也通过了：这个端点不严格校验 strict 规则。净化仍该保留\n' +
+          '  （换成严格校验的模型就会 400），但它不是此刻唯一可行的选择。\n'),
   );
 } else {
   process.stdout.write(
-    '  strict 两档都不可用。看上面 S3/S4/S5 哪档通过，\n' +
+    '  生产用的那一档（S2）不可用。看上面 S3/S4/S5 哪档通过，\n' +
       '  再决定是否给 LlmConfig 增加一个「结构化输出档位」配置项。\n' +
       '  若只有 S4/S5 通过，还需要在 client.ts 里剥离 Markdown 围栏。\n',
   );
 }
 
-const anyPass = results.some((r) => r.verdict === 'pass');
-process.exit(anyPass ? 0 : 1);
+/*
+ * 退出码回答的是「生产那一档能用吗」，不是「有任意一档能用吗」——
+ * 后者会在 S2 被拒、只有 json_object 能用时也给 0，而那时系统其实跑不起来。
+ * 只有在 --only 没选 S2 时才退回「任意一档」。
+ */
+const ok = s2 === undefined ? results.some((r) => r.verdict === 'pass') : s2.verdict === 'pass';
+process.exit(ok ? 0 : 1);

@@ -97,10 +97,35 @@ describe('HttpImageClient', () => {
       seed: 918273,
       negative_prompt: 'no text, no logo',
       response_format: 'b64_json',
-      n: 1,
     });
     expect(result.bytes).toEqual(new Uint8Array([1, 2, 3]));
     expect(result.costUnits).toBe(1);
+  });
+
+  it('不传 n —— 它零收益，却让 Gemini 系图片模型整类不可用', async () => {
+    /*
+     * 这条断言原本是 `n: 1`。改成「不能有」是因为 ofox 明确警告
+     * `google/*-image-*` 不接受这个参数（它们是 generateContent 模型，
+     * 只返回单图）。而 OpenAI 的 `n` 默认就是 1 —— 传与不传等价。
+     *
+     * 断言「不存在」而不是删掉这条测试：删了的话下一次有人把 n 加回来
+     * （它看起来那么无害）不会有任何东西拦他，而症状是 Gemini 候选全部 4xx。
+     */
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(okResponse('AQID'));
+    await new HttpImageClient({
+      baseUrl: 'https://api.ofox.ai',
+      apiKey: 'sk-of-test',
+      model: 'google/gemini-3-pro-image',
+      fetchImpl,
+    }).generate(request);
+
+    const body = JSON.parse(fetchImpl.mock.calls[0]?.[1]?.body as string) as Record<
+      string,
+      unknown
+    >;
+    expect(body).not.toHaveProperty('n');
+    // 同时钉住 ofox 的 images 端点拼接
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('https://api.ofox.ai/v1/images/generations');
   });
 
   it('网关模式带业务标识头', async () => {
@@ -160,6 +185,32 @@ describe('配置', () => {
     expect(() =>
       loadImageConfig({ IMAGE_MODE: 'gateway', IMAGE_GATEWAY_URL: 'u', IMAGE_API_KEY: 'k' }),
     ).toThrow(/IMAGE_MODEL/);
+  });
+
+  it('base 带 /v1 尾缀时启动即失败（与 LLM 侧同一条规则）', () => {
+    /*
+     * 图片端同样自己拼 `/v1/images/generations`。照 ofox 文档填
+     * `https://api.ofox.ai/v1` 会打到 `/v1/v1/images/generations`，
+     * 而图片类错误是**告警级**的（13.7）—— 症状会是「AI 素材全部降级成占位图」，
+     * 比文本侧的失败更容易被当成模型质量问题而不是配置问题。
+     */
+    expect(() =>
+      loadImageConfig({
+        IMAGE_MODE: 'direct',
+        IMAGE_BASE_URL: 'https://api.ofox.ai/v1',
+        IMAGE_API_KEY: 'k',
+        IMAGE_MODEL: 'openai/gpt-image-2',
+      }),
+    ).toThrow(/不应带 \/v1 尾缀/);
+
+    expect(
+      loadImageConfig({
+        IMAGE_MODE: 'direct',
+        IMAGE_BASE_URL: 'https://api.ofox.ai',
+        IMAGE_API_KEY: 'k',
+        IMAGE_MODEL: 'openai/gpt-image-2',
+      }).baseUrl,
+    ).toBe('https://api.ofox.ai');
   });
 
   it('gateway 模式读 IMAGE_GATEWAY_URL，不读 IMAGE_BASE_URL', () => {

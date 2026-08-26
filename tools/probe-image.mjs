@@ -279,12 +279,12 @@ function errorDetail(res) {
 // ── 阶段 A：端点拼法 ────────────────────────────────────────
 
 process.stdout.write('\n─ 阶段 A：端点拼法 ─────────────────────────────\n');
-process.stdout.write('  image.ts:196 拼的是 baseUrl + "/v1/images/generations"。\n\n');
+process.stdout.write('  HttpImageClient 拼的是 baseUrl + "/v1/images/generations"。\n\n');
 
 let endpointPath = '';
 for (const candidate of ['/v1/images/generations', '/images/generations']) {
   // 用 1024x1024（最通用）探路，避免尺寸问题污染端点判断
-  const res = await callImages(candidate, { model, prompt: 'ping', n: 1, size: '1024x1024' });
+  const res = await callImages(candidate, { model, prompt: 'ping', size: '1024x1024' });
   process.stdout.write(
     `  ${res.url}\n      ${res.status === 404 ? '✗ 404（路径不存在）' : `✓ HTTP ${res.status}`}` +
       ` ${Math.round(res.ms)} ms\n`,
@@ -300,41 +300,55 @@ if (endpointPath === '') {
 }
 process.stdout.write(`\n  采用：${endpointPath}\n`);
 if (endpointPath !== '/v1/images/generations') {
-  process.stdout.write('  ⚠ 与 image.ts:196 硬编码的路径不一致 → 去掉 base-url 尾部的 /v1。\n');
+  /*
+   * 走到这里说明 base-url 带了 /v1（ofox 文档的 SDK 写法）。`loadImageConfig`
+   * 现在会启动即拒这种取值，所以生产路径上不会出现 —— 但探针直接读 CLI 参数
+   * 与环境变量、不过那道校验，因此这条提示仍然要在。
+   */
+  process.stdout.write(
+    '  ⚠ 与 HttpImageClient 硬编码的路径不一致 → 去掉 base-url 尾部的 /v1。\n' +
+      '    IMAGE_BASE_URL 带 /v1 会被 loadImageConfig 直接拒绝启动。\n',
+  );
 }
 
 // ── 阶段 B：参数剥离阶梯 ────────────────────────────────────
 
 const HERO = projectSizes[0];
 
+/*
+ * 阶梯里**没有 `n`**，与 `HttpImageClient.generate` 保持一致。
+ *
+ * 生产代码原来发 `n: 1`，接 ofox 时删掉了：OpenAI 的默认值就是 1（传与不传
+ * 等价），而 Gemini 系图片模型不接受这个参数。这里跟着删是必须的 ——
+ * P1 标着「= 生产行为」，两边不一致的话这份探测结论就是关于另一个请求的。
+ */
 const LADDER = [
   {
     id: 'P1',
-    label: '原样（= image.ts:172-192 生产行为）',
+    label: '原样（= HttpImageClient.generate 的生产行为）',
     body: {
       model,
       prompt: PROMPT,
       negative_prompt: NEGATIVE,
       seed: 42,
       size: HERO.size,
-      n: 1,
       response_format: 'b64_json',
     },
   },
   {
     id: 'P2',
     label: '去掉 response_format',
-    body: { model, prompt: PROMPT, negative_prompt: NEGATIVE, seed: 42, size: HERO.size, n: 1 },
+    body: { model, prompt: PROMPT, negative_prompt: NEGATIVE, seed: 42, size: HERO.size },
   },
   {
     id: 'P3',
     label: '再去掉 negative_prompt 与 seed',
-    body: { model, prompt: PROMPT, size: HERO.size, n: 1 },
+    body: { model, prompt: PROMPT, size: HERO.size },
   },
   {
     id: 'P4',
     label: `size 换成 1024x1024（其余同 P3）`,
-    body: { model, prompt: PROMPT, size: '1024x1024', n: 1 },
+    body: { model, prompt: PROMPT, size: '1024x1024' },
   },
   { id: 'P5', label: '最小请求（只有 model 与 prompt）', body: { model, prompt: PROMPT } },
 ];

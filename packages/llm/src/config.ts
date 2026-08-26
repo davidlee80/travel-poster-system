@@ -40,6 +40,30 @@ function readEnv(env: Record<string, string | undefined>, key: string): string {
 }
 
 /**
+ * base URL 不得带 `/v1` 尾缀。
+ *
+ * `direct` 走 ofox（`https://api.ofox.ai`），而 ofox 的文档给的是 SDK 用户的
+ * 写法 —— `baseURL: "https://api.ofox.ai/v1"`，因为各家 SDK 自己拼后半段路径。
+ * 我们不用 SDK：两个客户端都自己拼完整路径（`/v1/chat/completions`、
+ * `/v1/images/generations`）。照文档原样填进来会打到
+ * `/v1/v1/chat/completions`，而那个 404 会被归类为「上游不可用」并进入重试 ——
+ * 日志里只有一行 `HTTP 404`，配置看起来完全正常，直到任务耗尽重试次数失败。
+ *
+ * 选启动即失败而不是静默剥掉尾缀：剥离是替运维猜意图，且会让「哪一层负责拼
+ * 路径」这个契约说不清。一条启动日志能在部署时就拦住，一次 404 重试风暴不能。
+ *
+ * 用 `\/v\d+` 而不是只匹配 `/v1`：`/v2` 填错的后果一模一样。
+ */
+export function assertBaseUrlHasNoApiVersion(key: string, value: string): void {
+  if (/\/v\d+$/.test(value.replace(/\/+$/, ''))) {
+    throw new LlmConfigError(
+      `${key} 不应带 /v1 尾缀（客户端自己拼 /v1/... 路径）：${value}。` +
+        'ofox 填 https://api.ofox.ai',
+    );
+  }
+}
+
+/**
  * 从环境变量读配置。
  *
  * `direct` 与 `gateway` 模式下 `baseUrl` 与 `apiKey` **必填且启动即校验**。
@@ -68,8 +92,9 @@ export function loadLlmConfig(env: Record<string, string | undefined> = process.
   };
 
   if (mode !== 'fake') {
+    const urlKey = mode === 'gateway' ? 'LLM_GATEWAY_URL' : 'LLM_BASE_URL';
     for (const [key, value] of [
-      [mode === 'gateway' ? 'LLM_GATEWAY_URL' : 'LLM_BASE_URL', config.baseUrl],
+      [urlKey, config.baseUrl],
       ['LLM_API_KEY', config.apiKey],
       ['LLM_MODEL', config.model],
     ] as const) {
@@ -77,6 +102,7 @@ export function loadLlmConfig(env: Record<string, string | undefined> = process.
         throw new LlmConfigError(`LLM_MODE=${mode} 时 ${key} 必填`);
       }
     }
+    assertBaseUrlHasNoApiVersion(urlKey, config.baseUrl);
   }
 
   return config;

@@ -22,8 +22,9 @@ import {
   SCHEMA_VERSIONS,
   TravelPlanContentSchema,
   TravelPlanLlmOutputSchema,
+  normalizeStrictLlmOutput,
   stageMessage,
-  travelPlanLlmOutputJsonSchema,
+  travelPlanLlmOutputStrictJsonSchema,
   type JobStatus,
   type NormalizedTravelRequest,
   type PlanErrorCode,
@@ -294,7 +295,15 @@ async function callModel(
     result = await llm.complete({
       system: messages.system,
       user: messages.user,
-      jsonSchema: { name: 'travel_plan', schema: travelPlanLlmOutputJsonSchema },
+      /*
+       * 发 strict 兼容那一份，不是 `z.toJSONSchema()` 的原样产物。
+       *
+       * client.ts 发的是 `strict: true`（6.3 要求 schema 约束模式），而原样
+       * schema 违反 OpenAI strict 的三条规则 —— 对 ofox 转发过去的
+       * `openai/*` 模型是直接 400，不是「偶发不兼容」。转换的取舍与代价见
+       * `travelPlanLlmOutputStrictJsonSchema` 的注释。
+       */
+      jsonSchema: { name: 'travel_plan', schema: travelPlanLlmOutputStrictJsonSchema },
       maxTokens,
       purpose,
       timeoutMs,
@@ -341,7 +350,12 @@ async function callModel(
    */
   meter.addLlm(result.model, result.usage.inputTokens, result.usage.outputTokens);
 
-  const parsed = TravelPlanLlmOutputSchema.safeParse(result.data);
+  /*
+   * strict 不允许可选属性，所以 `total_budget` 的两个可选金额被改成了可空必填 ——
+   * 模型用 `null` 表达「没有这一项」。这一步把那些 `null` 还原成「没给」，
+   * 于是 Zod 的 `.optional()` 与「不扣除 + 记一条 assumption」的语义不变。
+   */
+  const parsed = TravelPlanLlmOutputSchema.safeParse(normalizeStrictLlmOutput(result.data));
   if (!parsed.success) {
     throw new PlanSchemaInvalidError(parsed.error.issues[0]?.message ?? '结构不符');
   }

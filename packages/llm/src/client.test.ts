@@ -328,3 +328,75 @@ describe('配置切换（1.3）', () => {
     expect([...LLM_MODES]).toEqual(['fake', 'direct', 'gateway']);
   });
 });
+
+describe('ofox 接入', () => {
+  it('ofox 的 base 拼出 /v1/chat/completions，不需要任何专属代码', async () => {
+    /*
+     * ofox 的 OpenAI 兼容协议与上面的请求体完全一致，所以「接入」只是配置。
+     * 这条断言把那个前提钉住：base 填 https://api.ofox.ai 时打到的地址
+     * 必须正好是 ofox 的端点。
+     */
+    let href = '';
+    const client = new DirectLlmClient({
+      baseUrl: 'https://api.ofox.ai',
+      apiKey: 'sk-of-test',
+      model: 'openai/gpt-5.5',
+      fetchImpl: (url) => {
+        href = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url;
+        return Promise.resolve(jsonResponse(completion({})));
+      },
+    });
+
+    await client.complete(request);
+    expect(href).toBe('https://api.ofox.ai/v1/chat/completions');
+  });
+
+  it('base 带 /v1 尾缀时启动即失败，而不是运行时 404', () => {
+    /*
+     * ofox 文档给的是 SDK 写法（baseURL: https://api.ofox.ai/v1，SDK 自己拼
+     * 后半段）。照抄进 env 会打到 /v1/v1/chat/completions —— 那个 404 会被
+     * 归类为「上游不可用」并进入重试，日志里只有一行 HTTP 404，
+     * 而配置看起来完全正常。所以这里必须在启动时就拦住。
+     */
+    expect(() =>
+      loadLlmConfig({
+        LLM_MODE: 'direct',
+        LLM_BASE_URL: 'https://api.ofox.ai/v1',
+        LLM_API_KEY: 'k',
+        LLM_MODEL: 'openai/gpt-5.5',
+      }),
+    ).toThrow(/不应带 \/v1 尾缀/);
+
+    // 尾随斜杠不该让检查失效 —— 它在客户端里本来就会被去掉
+    expect(() =>
+      loadLlmConfig({
+        LLM_MODE: 'direct',
+        LLM_BASE_URL: 'https://api.ofox.ai/v1/',
+        LLM_API_KEY: 'k',
+        LLM_MODEL: 'openai/gpt-5.5',
+      }),
+    ).toThrow(LlmConfigError);
+
+    // gateway 走同一条规则：拼路径的是客户端，与走哪个端点无关
+    expect(() =>
+      loadLlmConfig({
+        LLM_MODE: 'gateway',
+        LLM_GATEWAY_URL: 'https://gw.internal/openai/v1',
+        LLM_API_KEY: 'k',
+        LLM_MODEL: 'm',
+      }),
+    ).toThrow(/LLM_GATEWAY_URL/);
+  });
+
+  it('不带版本号的 base 正常通过', () => {
+    const config = loadLlmConfig({
+      LLM_MODE: 'direct',
+      LLM_BASE_URL: 'https://api.ofox.ai',
+      LLM_API_KEY: 'sk-of-test',
+      LLM_MODEL: 'openai/gpt-5.5',
+    });
+    expect(config.baseUrl).toBe('https://api.ofox.ai');
+    // provider 前缀是 ofox 的要求，但**不做格式校验**（见 DirectLlmClient 注释）
+    expect(config.model).toBe('openai/gpt-5.5');
+  });
+});

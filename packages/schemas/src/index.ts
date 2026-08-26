@@ -33,5 +33,11 @@ export * from './ai-asset.js';
 export * from './export.js';
 export * from './job-status.js';
 export * from './view-model.js';
-export { travelPlanJsonSchema, travelPlanLlmOutputJsonSchema } from './json-schema.js';
+export {
+  STRICT_FORBIDDEN_KEYWORDS,
+  normalizeStrictLlmOutput,
+  travelPlanJsonSchema,
+  travelPlanLlmOutputJsonSchema,
+  travelPlanLlmOutputStrictJsonSchema,
+} from './json-schema.js';
 export { TRAVEL_PLAN_FIXTURES, makeTravelPlanFixture, type FixtureOptions } from './fixtures.js';

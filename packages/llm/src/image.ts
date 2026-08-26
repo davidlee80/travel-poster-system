@@ -1,6 +1,6 @@
 import type { AssetWarningCode } from '@tps/schemas';
 
-import { LlmConfigError } from './config.js';
+import { LlmConfigError, assertBaseUrlHasNoApiVersion } from './config.js';
 
 /**
  * 图片模型访问（TP-4-01/03，设计稿 11.1、21.2 措施二、13.7）。
@@ -237,11 +237,21 @@ export class HttpImageClient implements ImageClient {
       negative_prompt: request.negativePrompt,
       seed: request.seed,
       size: `${request.width}x${request.height}`,
-      n: 1,
+      /*
+       * **不传 `n`。** OpenAI 的默认值就是 1，传与不传等价 —— 而 ofox 明确
+       * 警告 Gemini 系图片模型（`google/*-image-*`）不接受这个参数：它们是
+       * `generateContent` 模型，只返回单图，`n` 不是它们契约里的字段
+       * （`numberOfImages` 是 Imagen 专有的，这里也不合法）。
+       * 一个零收益的字段换来一整类模型不可用，不划算。
+       */
       /*
        * 必须要 base64 而不是 URL：二十章明确「外部图片应下载、审核并转存
        * 到自己的对象存储，不建议页面直接引用第三方地址」。
        * 要 URL 就得再发一次请求去下载，多一次失败面与一次超时预算。
+       *
+       * 这一项**不为 Gemini 系让步**（ofox 建议对它们「只传最少参数」）：
+       * 删掉它的代价是 OpenAI 路径退回 URL 形态，违反上面那条。Gemini 图片
+       * 模型真要接，走 Gemini 原生协议（`/gemini` 的 inline_data），是另一件事。
        */
       response_format: 'b64_json',
     };
@@ -427,8 +437,9 @@ export function loadImageConfig(
   };
 
   if (mode !== 'fake') {
+    const urlKey = mode === 'gateway' ? 'IMAGE_GATEWAY_URL' : 'IMAGE_BASE_URL';
     for (const [key, value] of [
-      [mode === 'gateway' ? 'IMAGE_GATEWAY_URL' : 'IMAGE_BASE_URL', config.baseUrl],
+      [urlKey, config.baseUrl],
       ['IMAGE_API_KEY', config.apiKey],
       ['IMAGE_MODEL', config.model],
     ] as const) {
@@ -436,6 +447,7 @@ export function loadImageConfig(
         throw new LlmConfigError(`IMAGE_MODE=${mode} 时 ${key} 必填`);
       }
     }
+    assertBaseUrlHasNoApiVersion(urlKey, config.baseUrl);
   }
 
   return config;
