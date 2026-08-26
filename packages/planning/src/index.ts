@@ -14,11 +14,7 @@ export {
   truncateCustomText,
 } from './normalize.js';
 
-export {
-  deriveConstraints,
-  sortConstraints,
-  type DerivedConstraints,
-} from './constraints.js';
+export { deriveConstraints, sortConstraints, type DerivedConstraints } from './constraints.js';
 
 export {
   MAX_DESTINATIONS,

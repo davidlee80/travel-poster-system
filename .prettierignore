@@ -17,3 +17,19 @@ pnpm-lock.yaml
 # 渲染产物由 `kubectl apply --dry-run` 校验 —— 两者都比格式化更能说明问题。
 # values.yaml 与 Chart.yaml 是纯 YAML，仍然纳入格式化。
 deploy/helm/*/templates/
+
+# 离线页面快照（`pnpm preview` 的产物，不入库）。
+#
+# Prettier 不读 .gitignore，只读本文件 —— 因此这两个目录会让本地
+# `pnpm format:check` 恒红（其中 fonts.css 有 10 MB，字体内联成 data URI），
+# 而 CI 上它们不存在。也就是说不写这两行的话，「本地红、CI 绿」会成为常态，
+# 而那正是让人不再看 format:check 的原因。
+preview/
+preview-local/
+
+# 设计原始产物：从设计工具导出的原型 HTML、Word/Excel 规范与对话记录。
+#
+# 与 `**/src/generated/` 同一理由 —— 它们不是本仓库编写的源码，格式化一次
+# 之后下一次重新导出又会产生整份 diff（两个原型 HTML 各 100 KB）。
+# 它们的「正确形态」由导出工具决定，不由 Prettier 决定。
+docs/design/

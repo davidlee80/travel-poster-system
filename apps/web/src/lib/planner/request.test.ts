@@ -177,7 +177,10 @@ describe('提交前的清洗与盖章', () => {
     const answers = prepareProfile(
       {
         trip: { destinations: [{ text: '东京' }, { text: '  ' }] },
-        interests: { must_do: [{ text: 'teamLab' }, { text: '' }], wish_and_exclude: { wish: ['', '奈良'], exclude: [] } },
+        interests: {
+          must_do: [{ text: 'teamLab' }, { text: '' }],
+          wish_and_exclude: { wish: ['', '奈良'], exclude: [] },
+        },
         lodging: { class_and_brand: { brands: ['万豪', ' '] } },
         special: { work_constraints: { enabled: true, items: [{ when_text: '' }] } },
         pretrip: { loyalty_programs: [{ kind: 'AIRLINE', brand: '' }] },
@@ -370,9 +373,9 @@ describe('节奏投影', () => {
   });
 
   it('只填了行动能力时也有上限', () => {
-    expect(projectPace({ travelers: { mobility_level: 'NO_LONG_STANDING' } }).walking_limit_km).toBe(
-      6,
-    );
+    expect(
+      projectPace({ travelers: { mobility_level: 'NO_LONG_STANDING' } }).walking_limit_km,
+    ).toBe(6);
   });
 
   it('「交给系统」不投影每日项目数 —— 那是不设约束', () => {
@@ -433,7 +436,9 @@ describe('条件投影', () => {
     /* `accessibility.low_walking` 有三个派生来源（行动能力、健康需求、久站） */
     const result = projectConditions({
       travelers: { mobility_level: 'NO_LONG_STANDING' },
-      special: { health_accessibility_needs: { values: ['NO_LONG_STANDING', 'WHEELCHAIR_OR_WALKER'] } },
+      special: {
+        health_accessibility_needs: { values: ['NO_LONG_STANDING', 'WHEELCHAIR_OR_WALKER'] },
+      },
     });
     const codes = result.map((condition) => condition.code);
     expect(new Set(codes).size).toBe(codes.length);
@@ -445,7 +450,9 @@ describe('条件投影', () => {
      * 而用户明确说了可以转一次。
      */
     expect(
-      projectConditions({ transport: { flight_constraints: { transfer_tolerance: 'DIRECT_ONLY' } } }),
+      projectConditions({
+        transport: { flight_constraints: { transfer_tolerance: 'DIRECT_ONLY' } },
+      }),
     ).toEqual([{ code: 'transport.avoid_transfer', mode: 'MUST', value: true }]);
     expect(
       projectConditions({
@@ -463,9 +470,9 @@ describe('条件投影', () => {
   });
 
   it('只有「一次都不换」投影成单一落脚点', () => {
-    expect(projectConditions({ pace: { hotel_change_tolerance: 'ZERO' } }).map((c) => c.code)).toEqual(
-      ['accommodation.single_base'],
-    );
+    expect(
+      projectConditions({ pace: { hotel_change_tolerance: 'ZERO' } }).map((c) => c.code),
+    ).toEqual(['accommodation.single_base']);
     /* 「最多换 1 次」不是单点，算进去会让双中心行程被硬约束拦掉 */
     expect(projectConditions({ pace: { hotel_change_tolerance: 'ONE' } })).toEqual([]);
   });

@@ -294,7 +294,9 @@ function whereFrom(fieldId: PlannerFieldId): string {
 function stringList(value: unknown, key: string): readonly string[] {
   if (typeof value !== 'object' || value === null) return [];
   const list = (value as Record<string, unknown>)[key];
-  return Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === 'string') : [];
+  return Array.isArray(list)
+    ? list.filter((entry): entry is string => typeof entry === 'string')
+    : [];
 }
 
 function acknowledgedGroups(state: PlannerState): readonly string[] {

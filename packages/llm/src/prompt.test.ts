@@ -1,4 +1,9 @@
-import { buildRetrievalProjection, makeValidContext, makeValidPlan, planCities } from '@tps/planning';
+import {
+  buildRetrievalProjection,
+  makeValidContext,
+  makeValidPlan,
+  planCities,
+} from '@tps/planning';
 import { makeTravelPlanFixture, type TravelPlanLlmOutput } from '@tps/schemas';
 import { describe, expect, it } from 'vitest';
 

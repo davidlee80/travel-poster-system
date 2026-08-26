@@ -217,7 +217,10 @@ describe('挂到 TravelRequestUI 之后的向后兼容', () => {
       ...minimal,
       planner_profile: {
         /* 首个目的地必须与 `trip.destination.text` 一致，见下面那组断言 */
-        trip: { destinations: [{ text: '杭州' }, { text: '苏州' }], date_flexibility: 'PLUS_MINUS_3' },
+        trip: {
+          destinations: [{ text: '杭州' }, { text: '苏州' }],
+          date_flexibility: 'PLUS_MINUS_3',
+        },
         privacy: { trip_processing_consent: true, save_preferences: false },
       },
     });
@@ -228,7 +231,9 @@ describe('挂到 TravelRequestUI 之后的向后兼容', () => {
 
   it('目的地上限 5 个（字段表：允许 1~5 个备选）', () => {
     /* 首个与 `trip.destination` 一致，因此这条只可能因为「超过 5 个」而失败 */
-    const six = ['杭州', ...Array.from({ length: 5 }, (_, i) => `城市${i}`)].map((text) => ({ text }));
+    const six = ['杭州', ...Array.from({ length: 5 }, (_, i) => `城市${i}`)].map((text) => ({
+      text,
+    }));
     const result = TravelRequestUISchema.safeParse({
       ...minimal,
       planner_profile: { trip: { destinations: six } },

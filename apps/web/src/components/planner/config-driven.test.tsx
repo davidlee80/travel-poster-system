@@ -116,9 +116,11 @@ describe('改文案与改排序都是纯配置', () => {
   it('文案按配置显示，内置文案不再出现', () => {
     const after = render(
       '01',
-      config({ 'trip.destination_status': asPublished('trip.destination_status', {
-        CONFIRMED: '已经定死了',
-      }) }),
+      config({
+        'trip.destination_status': asPublished('trip.destination_status', {
+          CONFIRMED: '已经定死了',
+        }),
+      }),
     );
     expect(after).toContain('>已经定死了</button>');
     /*
@@ -154,16 +156,24 @@ describe('改文案与改排序都是纯配置', () => {
           ...RICH.answers.trip,
           locked_order_types: ['LODGING'],
           locked_orders: [
-            { type: 'LODGING', name: '', datetime_text: '', place_text: '', changeability: 'UNKNOWN' },
+            {
+              type: 'LODGING',
+              name: '',
+              datetime_text: '',
+              place_text: '',
+              changeability: 'UNKNOWN',
+            },
           ],
         },
       },
     };
     const after = render(
       '01',
-      config({ 'trip.locked_orders.type': asPublished('trip.locked_orders.type', {
-        LODGING: '住宿预订',
-      }) }),
+      config({
+        'trip.locked_orders.type': asPublished('trip.locked_orders.type', {
+          LODGING: '住宿预订',
+        }),
+      }),
       state,
     );
     expect(after).toContain('住宿预订');
@@ -227,10 +237,7 @@ describe('下线的码还留在草稿里时给得出出路', () => {
   });
 
   it('没有下线码时不出现提示', () => {
-    const after = render(
-      '07',
-      config({ 'interests.tags': asPublished('interests.tags') }),
-    );
+    const after = render('07', config({ 'interests.tags': asPublished('interests.tags') }));
     expect(after).not.toContain('已经下线');
   });
 

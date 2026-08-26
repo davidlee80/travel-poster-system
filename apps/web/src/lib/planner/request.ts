@@ -152,8 +152,16 @@ const AGE_BAND_REPRESENTATIVE: Record<string, number> = {
  * 数值取常见目的地的中位区间，且**只区分档位**，不区分目的地 ——
  * 假装能区分目的地会让这张表看起来比它实际更权威。
  */
-export const TIER_PER_PERSON_PER_DAY: Record<Currency, Record<string, readonly [number, number]>> = {
-  CNY: { ECONOMY: [300, 600], COMFORT: [600, 1_200], QUALITY: [1_200, 2_500], LUXURY: [2_500, 6_000] },
+export const TIER_PER_PERSON_PER_DAY: Record<
+  Currency,
+  Record<string, readonly [number, number]>
+> = {
+  CNY: {
+    ECONOMY: [300, 600],
+    COMFORT: [600, 1_200],
+    QUALITY: [1_200, 2_500],
+    LUXURY: [2_500, 6_000],
+  },
   JPY: {
     ECONOMY: [6_000, 12_000],
     COMFORT: [12_000, 25_000],
@@ -163,7 +171,12 @@ export const TIER_PER_PERSON_PER_DAY: Record<Currency, Record<string, readonly [
   USD: { ECONOMY: [50, 100], COMFORT: [100, 200], QUALITY: [200, 400], LUXURY: [400, 900] },
   EUR: { ECONOMY: [45, 90], COMFORT: [90, 180], QUALITY: [180, 350], LUXURY: [350, 800] },
   GBP: { ECONOMY: [40, 80], COMFORT: [80, 160], QUALITY: [160, 320], LUXURY: [320, 700] },
-  HKD: { ECONOMY: [350, 700], COMFORT: [700, 1_400], QUALITY: [1_400, 2_800], LUXURY: [2_800, 6_500] },
+  HKD: {
+    ECONOMY: [350, 700],
+    COMFORT: [700, 1_400],
+    QUALITY: [1_400, 2_800],
+    LUXURY: [2_800, 6_500],
+  },
 };
 
 /** 档次缺省时按「舒适型」估算 —— 它是四档里的中位，猜错的幅度最小 */
@@ -350,7 +363,8 @@ export function projectConditions(answers: PlannerProfileInput): readonly Projec
    * 「可多次转机」不产出条件：它是放宽而不是约束。
    */
   const transfer = answers.transport?.flight_constraints?.transfer_tolerance;
-  if (transfer === 'DIRECT_ONLY') out.push(conditionToContract('transport.avoid_transfer', 'REQUIRE'));
+  if (transfer === 'DIRECT_ONLY')
+    out.push(conditionToContract('transport.avoid_transfer', 'REQUIRE'));
   else if (transfer === 'DIRECT_PREFERRED' || transfer === 'MAX_ONE_TRANSFER') {
     out.push(conditionToContract('transport.avoid_transfer', 'PREFER'));
   }
@@ -547,7 +561,8 @@ export function projectPace(answers: PlannerProfileInput): ProjectedPace {
   const perDay = activities === undefined ? undefined : ATTRACTIONS_PER_DAY[activities];
 
   /* 步行上限取「愿意走」与「能走」的较小值（字段表：若冲突取更保守值）*/
-  const willing = pace?.walking_tolerance === undefined ? undefined : WALKING_LIMIT_KM[pace.walking_tolerance];
+  const willing =
+    pace?.walking_tolerance === undefined ? undefined : WALKING_LIMIT_KM[pace.walking_tolerance];
   const mobility = answers.travelers?.mobility_level;
   const cap = mobility === undefined ? undefined : MOBILITY_WALKING_CAP[mobility];
   const walking =

@@ -514,11 +514,7 @@ export function deriveConstraints(profile: PlannerProfile | undefined): DerivedC
   const cap = budget?.hard_cap;
   if (cap?.enabled === true && cap.amount !== undefined) {
     /* 硬上限的优先级高于档次偏好（字段表）。它是 HARD 而不是 PREFER */
-    push(
-      'HARD',
-      'PV2-03-005',
-      `总花费绝对不能超过 ${cap.amount} ${budget?.currency ?? 'CNY'}`,
-    );
+    push('HARD', 'PV2-03-005', `总花费绝对不能超过 ${cap.amount} ${budget?.currency ?? 'CNY'}`);
   }
   const scope = budget?.scope_and_priorities;
   if (scope !== undefined && scope.included_items.length > 0) {
@@ -583,7 +579,8 @@ export function deriveConstraints(profile: PlannerProfile | undefined): DerivedC
     push('EXCLUDE', 'PV2-05-002', '不要红眼航班', 'red_eye');
   }
   const comfort = transport?.flight_comfort;
-  if (comfort?.cabin !== undefined) push('PREFER', 'PV2-05-003', `舱等：${phrase('PV2-05-003', comfort.cabin)}`);
+  if (comfort?.cabin !== undefined)
+    push('PREFER', 'PV2-05-003', `舱等：${phrase('PV2-05-003', comfort.cabin)}`);
   if ((comfort?.seats ?? []).length > 0) {
     push('PREFER', 'PV2-05-003', `座位：${phrases('PV2-05-003', comfort?.seats ?? [])}`, 'seats');
   }
@@ -611,7 +608,9 @@ export function deriveConstraints(profile: PlannerProfile | undefined): DerivedC
     const items = [
       luggage.carry_on === undefined ? '' : `随身 ${luggage.carry_on} 件`,
       luggage.checked === undefined ? '' : `托运 ${luggage.checked} 件`,
-      (luggage.large_items ?? []).length === 0 ? '' : `大件：${phrases('PV2-05-007', luggage.large_items ?? [])}`,
+      (luggage.large_items ?? []).length === 0
+        ? ''
+        : `大件：${phrases('PV2-05-007', luggage.large_items ?? [])}`,
       luggage.large_items_other ?? '',
     ].filter((part) => part.length > 0);
     if (items.length > 0) push('FACT', 'PV2-05-007', `行李：${items.join('，')}`);
@@ -642,14 +641,23 @@ export function deriveConstraints(profile: PlannerProfile | undefined): DerivedC
   }
   const priorities = lodging?.location_priorities ?? [];
   if (priorities.length > 0) {
-    push('PREFER', 'PV2-06-005', `住宿位置看重（按重要性排序）：${phrases('PV2-06-005', priorities)}`);
+    push(
+      'PREFER',
+      'PV2-06-005',
+      `住宿位置看重（按重要性排序）：${phrases('PV2-06-005', priorities)}`,
+    );
   }
   const classAndBrand = lodging?.class_and_brand;
   if (classAndBrand?.hotel_class !== undefined && classAndBrand.hotel_class !== 'ANY') {
     push('PREFER', 'PV2-06-006', `住宿星级：${phrase('PV2-06-006', classAndBrand.hotel_class)}`);
   }
   if ((classAndBrand?.brands ?? []).length > 0) {
-    push('PREFER', 'PV2-06-006', `偏好住宿品牌：${(classAndBrand?.brands ?? []).join('、')}`, 'brands');
+    push(
+      'PREFER',
+      'PV2-06-006',
+      `偏好住宿品牌：${(classAndBrand?.brands ?? []).join('、')}`,
+      'brands',
+    );
   }
   const sleep = lodging?.sleep_checkin_needs;
   if (sleep !== undefined && sleep.needs.length > 0) {
@@ -663,11 +671,17 @@ export function deriveConstraints(profile: PlannerProfile | undefined): DerivedC
   // ── 07 吃好也玩好 ──────────────────────────────────────
   const food = profile.food;
   if ((food?.experience_tags ?? []).length > 0) {
-    push('PREFER', 'PV2-07-001', `餐饮体验偏好：${phrases('PV2-07-001', food?.experience_tags ?? [])}`);
+    push(
+      'PREFER',
+      'PV2-07-001',
+      `餐饮体验偏好：${phrases('PV2-07-001', food?.experience_tags ?? [])}`,
+    );
   }
   const diet = food?.dietary_requirements;
   if (diet !== undefined && (diet.values.length > 0 || diet.other_text !== undefined)) {
-    const text = [phrases('PV2-07-002', diet.values), diet.other_text ?? ''].filter((p) => p.length > 0).join('、');
+    const text = [phrases('PV2-07-002', diet.values), diet.other_text ?? '']
+      .filter((p) => p.length > 0)
+      .join('、');
     /* 饮食是硬约束，不是偏好（规范 4.2 禁止对它用三态） */
     push('HARD', 'PV2-07-002', `必须遵守的饮食方式：${text}`);
   }
@@ -686,7 +700,11 @@ export function deriveConstraints(profile: PlannerProfile | undefined): DerivedC
      * 而清单存在的意义是让真正危险的那几条被看见。
      */
     if (entry.severity === 'SEVERE' || entry.severity === 'ANAPHYLAXIS') {
-      pushVerify('PV2-07-004', `${entry.allergen}（${phrase('PV2-07-004', entry.severity)}）需逐家餐厅确认`, String(index));
+      pushVerify(
+        'PV2-07-004',
+        `${entry.allergen}（${phrase('PV2-07-004', entry.severity)}）需逐家餐厅确认`,
+        String(index),
+      );
     }
   }
   if (allergies?.carries_emergency_medication === true) {
@@ -743,7 +761,9 @@ export function deriveConstraints(profile: PlannerProfile | undefined): DerivedC
   const special = profile.special;
   const health = special?.health_accessibility_needs;
   if (health !== undefined && (health.values.length > 0 || health.other_text !== undefined)) {
-    const text = [phrases('PV2-08-002', health.values), health.other_text ?? ''].filter((p) => p.length > 0).join('、');
+    const text = [phrases('PV2-08-002', health.values), health.other_text ?? '']
+      .filter((p) => p.length > 0)
+      .join('、');
     push('HARD', 'PV2-08-002', `需要照顾的实际需求：${text}`);
   }
   const risky = special?.high_risk_activities ?? [];
@@ -799,7 +819,10 @@ export function deriveConstraints(profile: PlannerProfile | undefined): DerivedC
   }
   const insurance = profile.insurance?.status?.user_reported;
   if (insurance !== undefined) {
-    pushVerify('PV2-08-008', `旅行保险：${phrase('PV2-08-008', insurance)}（用户自报，需核验承保范围）`);
+    pushVerify(
+      'PV2-08-008',
+      `旅行保险：${phrase('PV2-08-008', insurance)}（用户自报，需核验承保范围）`,
+    );
   }
   const safety = profile.safety?.contexts ?? [];
   if (safety.length > 0) {

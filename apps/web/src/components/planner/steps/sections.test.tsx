@@ -216,7 +216,10 @@ describe('九步渲染出全部主问卷字段', () => {
     /* 规范 16：行前准备中心不把用户拖回主问卷 */
     for (const scenario of SCENARIOS) {
       const found = renderScenario(scenario.state);
-      expect(found.filter((id) => id.startsWith('PV2-10-')), scenario.name).toEqual([]);
+      expect(
+        found.filter((id) => id.startsWith('PV2-10-')),
+        scenario.name,
+      ).toEqual([]);
     }
   });
 

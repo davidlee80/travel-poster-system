@@ -157,10 +157,7 @@ export function CheckGroup({
  * 饮食与宗教要求**不用**这个控件（规范 4.2 明令禁止）：「偏好清真」不是一个
  * 有意义的表达。那些字段在描述符表里是 `check`。
  */
-const STANCE_CYCLE: readonly (PlannerStance | undefined)[] = [
-  undefined,
-  ...PLANNER_STANCE_VALUES,
-];
+const STANCE_CYCLE: readonly (PlannerStance | undefined)[] = [undefined, ...PLANNER_STANCE_VALUES];
 
 const STANCE_TEXT: Record<PlannerStance, string> = {
   PREFER: '偏好',
@@ -306,12 +303,13 @@ function StanceSheet({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const choices: readonly { readonly stance: PlannerStance | undefined; readonly text: string }[] = [
-    { stance: 'PREFER', text: STANCE_TEXT.PREFER },
-    { stance: 'REQUIRE', text: STANCE_TEXT.REQUIRE },
-    { stance: 'EXCLUDE', text: STANCE_TEXT.EXCLUDE },
-    { stance: undefined, text: '不选' },
-  ];
+  const choices: readonly { readonly stance: PlannerStance | undefined; readonly text: string }[] =
+    [
+      { stance: 'PREFER', text: STANCE_TEXT.PREFER },
+      { stance: 'REQUIRE', text: STANCE_TEXT.REQUIRE },
+      { stance: 'EXCLUDE', text: STANCE_TEXT.EXCLUDE },
+      { stance: undefined, text: '不选' },
+    ];
 
   return (
     <div className="planner-sheet" role="presentation">

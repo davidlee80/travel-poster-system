@@ -183,7 +183,8 @@ export function MoneyRange({
   id,
   describedBy,
 }: ControlProps): React.ReactElement {
-  const record = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  const record =
+    typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
   const min = record['min'];
   const max = record['max'];
 
@@ -214,7 +215,9 @@ export function MoneyRange({
         aria-label="最低"
         placeholder="最低"
         value={typeof min === 'number' ? String(min) : ''}
-        onChange={(event) => write(event.target.value === '' ? undefined : Number(event.target.value), max)}
+        onChange={(event) =>
+          write(event.target.value === '' ? undefined : Number(event.target.value), max)
+        }
       />
       <span className="planner-range__sep" aria-hidden="true">
         ～
@@ -227,7 +230,9 @@ export function MoneyRange({
         aria-label="最高"
         placeholder="最高"
         value={typeof max === 'number' ? String(max) : ''}
-        onChange={(event) => write(min, event.target.value === '' ? undefined : Number(event.target.value))}
+        onChange={(event) =>
+          write(min, event.target.value === '' ? undefined : Number(event.target.value))
+        }
       />
     </div>
   );
@@ -235,12 +240,7 @@ export function MoneyRange({
 
 // ── 时间与日期 ──────────────────────────────────────────────
 
-export function TimeInput({
-  value,
-  onChange,
-  id,
-  describedBy,
-}: ControlProps): React.ReactElement {
+export function TimeInput({ value, onChange, id, describedBy }: ControlProps): React.ReactElement {
   return (
     <input
       className="planner-input planner-input--time"
@@ -255,7 +255,8 @@ export function TimeInput({
 
 /** 双时间选择器。跨午夜是**合法**的（规范 10 允许夜生活跨午夜），只提示不拦 */
 export function DualTime({ value, onChange, id, describedBy }: ControlProps): React.ReactElement {
-  const record = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  const record =
+    typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
   const start = typeof record['start'] === 'string' ? record['start'] : '';
   const end = typeof record['end'] === 'string' ? record['end'] : '';
 
@@ -290,7 +291,9 @@ export function DualTime({ value, onChange, id, describedBy }: ControlProps): Re
           onChange={(event) => write(start, event.target.value)}
         />
       </div>
-      {crossesMidnight ? <p className="planner-hint">这段时间跨过午夜，我们会按夜间活动安排。</p> : null}
+      {crossesMidnight ? (
+        <p className="planner-hint">这段时间跨过午夜，我们会按夜间活动安排。</p>
+      ) : null}
     </div>
   );
 }
@@ -310,7 +313,8 @@ export function DateInput({ value, onChange, id, describedBy }: ControlProps): R
 
 /** 日期区间。键名是 `start_date` / `end_date`（契约的 `trip.dates`） */
 export function DateRange({ value, onChange, id, describedBy }: ControlProps): React.ReactElement {
-  const record = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  const record =
+    typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
   const start = typeof record['start_date'] === 'string' ? record['start_date'] : '';
   const end = typeof record['end_date'] === 'string' ? record['end_date'] : '';
 
@@ -393,7 +397,9 @@ export function TextArea({
         value={text}
         onChange={(event) => onChange(event.target.value === '' ? undefined : event.target.value)}
       />
-      <div className={`planner-char-count${text.length > limit ? ' planner-char-count--over' : ''}`}>
+      <div
+        className={`planner-char-count${text.length > limit ? ' planner-char-count--over' : ''}`}
+      >
         {text.length} / {limit}
       </div>
     </>

@@ -498,21 +498,12 @@ function checkBlockingVerify(
     });
   };
 
-  require(
-    profile.documents?.nationality_residency?.nationality !== undefined,
-    'planner_profile.documents.nationality_residency.nationality',
-    '跨境行程缺少国籍 —— 签证与入境规则由它决定',
-  );
-  require(
-    profile.documents?.passport_status?.user_reported?.status !== undefined,
-    'planner_profile.documents.passport_status',
-    '跨境行程缺少护照状态 —— 它决定能否做不可退预订',
-  );
-  require(
-    profile.documents?.visa_status?.user_reported?.status !== undefined,
-    'planner_profile.documents.visa_status',
-    '跨境行程缺少签证状态 —— 办理时间需要排进时间线',
-  );
+  require(profile.documents?.nationality_residency?.nationality !==
+    undefined, 'planner_profile.documents.nationality_residency.nationality', '跨境行程缺少国籍 —— 签证与入境规则由它决定');
+  require(profile.documents?.passport_status?.user_reported?.status !==
+    undefined, 'planner_profile.documents.passport_status', '跨境行程缺少护照状态 —— 它决定能否做不可退预订');
+  require(profile.documents?.visa_status?.user_reported?.status !==
+    undefined, 'planner_profile.documents.visa_status', '跨境行程缺少签证状态 —— 办理时间需要排进时间线');
 
   return out;
 }

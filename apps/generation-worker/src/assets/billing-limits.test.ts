@@ -31,7 +31,9 @@ describe('计费估算参数不低于真实硬上限', () => {
   });
 
   it('图源搜索次数', () => {
-    expect(DEFAULT_JOB_LIMITS.maxImageSearchesPerJob).toBeGreaterThanOrEqual(MAX_IMAGE_SEARCHES_PER_JOB);
+    expect(DEFAULT_JOB_LIMITS.maxImageSearchesPerJob).toBeGreaterThanOrEqual(
+      MAX_IMAGE_SEARCHES_PER_JOB,
+    );
   });
 
   it('重生成次数 —— 与 3.2.2 的上限一致（落库时有 CHECK 兜着）', () => {

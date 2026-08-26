@@ -104,7 +104,8 @@ describe('Planner 字段元数据（规范 21.1 硬门槛）', () => {
   });
 
   it('优先级分布与规范 23 章的交付边界一致（P0 52 / P1 20 / P2 4）', () => {
-    const count = (priority: string) => PLANNER_FIELDS.filter((f) => f.priority === priority).length;
+    const count = (priority: string) =>
+      PLANNER_FIELDS.filter((f) => f.priority === priority).length;
     expect(count('P0')).toBe(52);
     expect(count('P1')).toBe(20);
     expect(count('P2')).toBe(4);
@@ -150,7 +151,8 @@ describe('Planner 字段元数据（规范 21.1 硬门槛）', () => {
    */
   it('摘要分组与运行时类型的偏离恰好是字段表里那四条', () => {
     const deviations = PLANNER_FIELDS.filter(
-      (field) => field.summary_group !== PLANNER_RUNTIME_TYPE_META[field.runtime_type].summary_group,
+      (field) =>
+        field.summary_group !== PLANNER_RUNTIME_TYPE_META[field.runtime_type].summary_group,
     ).map((field) => `${field.field_id}:${field.runtime_type}→${field.summary_group}`);
 
     expect(deviations).toEqual([

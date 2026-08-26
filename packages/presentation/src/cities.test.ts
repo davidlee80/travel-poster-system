@@ -118,7 +118,10 @@ describe('每日配图按 day.city 取材', () => {
      * 缓存键也含目的地段，因此不改的话两个城市会共用同一张图。
      */
     const base = makeTravelPlanFixture({ totalDays: 5 });
-    const days = base.days.map((day, index) => ({ ...day, city: index === 0 ? base.destination.name : '京都' }));
+    const days = base.days.map((day, index) => ({
+      ...day,
+      city: index === 0 ? base.destination.name : '京都',
+    }));
     const plan: TravelPlan = { ...base, days };
 
     const firstDay = plan.days[0];
@@ -127,7 +130,11 @@ describe('每日配图按 day.city 取材', () => {
     expect(secondDay).toBeDefined();
     if (firstDay === undefined || secondDay === undefined) return;
 
-    const firstItems = requirementsForDay({ plan, day: firstDay, limits: FULL_PLAN_CONTENT_LIMITS });
+    const firstItems = requirementsForDay({
+      plan,
+      day: firstDay,
+      limits: FULL_PLAN_CONTENT_LIMITS,
+    });
     const secondItems = requirementsForDay({
       plan,
       day: secondDay,

@@ -113,8 +113,7 @@ class MinimalPresentationsRepository implements PresentationsRepository {
 /** 只有 `getPublished` 的假仓储 —— 端点用到的就是这一个方法 */
 function fakeConfig(fields: PublishedPlannerConfig['fields']): PlannerConfigRepository {
   return {
-    getPublished: () =>
-      Promise.resolve({ version: 3, publishedAt: now().toISOString(), fields }),
+    getPublished: () => Promise.resolve({ version: 3, publishedAt: now().toISOString(), fields }),
   };
 }
 

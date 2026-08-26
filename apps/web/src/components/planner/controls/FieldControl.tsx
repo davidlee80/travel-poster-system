@@ -1,10 +1,6 @@
 'use client';
 
-import {
-  PLANNER_RUNTIME_TYPE_META,
-  plannerField,
-  type PlannerFieldId,
-} from '@tps/schemas';
+import { PLANNER_RUNTIME_TYPE_META, plannerField, type PlannerFieldId } from '@tps/schemas';
 
 import { usePlannerOptionResolver } from '@/components/planner/PlannerConfigProvider';
 import { resolutionTarget } from '@/lib/planner/config-binding';

@@ -54,7 +54,18 @@ import { z } from 'zod';
  */
 
 /** 9 步主问卷 + 生成后的行前准备中心。字符串而不是数字 —— 它同时是 field_id 的第二段 */
-export const PLANNER_STEP_IDS = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10'] as const;
+export const PLANNER_STEP_IDS = [
+  '01',
+  '02',
+  '03',
+  '04',
+  '05',
+  '06',
+  '07',
+  '08',
+  '09',
+  '10',
+] as const;
 export type PlannerStepId = (typeof PLANNER_STEP_IDS)[number];
 
 /** 字段层级（规范 2.2）。`POST_PLAN` 不参与首次生成的完成度与 blocker */
@@ -1595,7 +1606,8 @@ export const PLANNER_FIELDS = [
     control: '多选开关',
     trigger: '初步方案生成后',
     validation: '安全警报可按产品策略设为默认推荐，但需说明',
-  },] as const satisfies readonly PlannerFieldSpec[];
+  },
+] as const satisfies readonly PlannerFieldSpec[];
 
 /**
  * 字段总数。写成常量供测试断言 —— 规范 21.1 与附录 C 都把它列为**阻塞发布**

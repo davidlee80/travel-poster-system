@@ -168,15 +168,17 @@ const CONSTRAINT_SECTIONS = [
  * 「加 SHOPPING 是安全的，因为没有任何穷举点」的注释从此不再成立，而这是好事：
  * 往那个枚举加成员现在是编译错误，而不是「界面上多一项、提示里静默漏掉」。
  */
-const BUDGET_ITEM_LABEL: Record<NormalizedTravelRequest['budget']['included_items'][number], string> =
-  {
-    INTERCITY_TRANSPORT: '往返大交通',
-    ACCOMMODATION: '住宿',
-    MEALS: '餐饮',
-    LOCAL_TRANSPORT: '市内交通',
-    TICKETS: '门票与活动',
-    SHOPPING: '购物',
-  };
+const BUDGET_ITEM_LABEL: Record<
+  NormalizedTravelRequest['budget']['included_items'][number],
+  string
+> = {
+  INTERCITY_TRANSPORT: '往返大交通',
+  ACCOMMODATION: '住宿',
+  MEALS: '餐饮',
+  LOCAL_TRANSPORT: '市内交通',
+  TICKETS: '门票与活动',
+  SHOPPING: '购物',
+};
 
 function budgetScopeText(items: NormalizedTravelRequest['budget']['included_items']): string {
   /*

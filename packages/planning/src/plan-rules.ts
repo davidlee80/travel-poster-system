@@ -738,7 +738,12 @@ const RULE_CHECKS: Record<PlanRuleId, RuleCheck> = {
      * 「低于预算下限」，把一处金额不一致指成一个完全无关的问题。
      */
     const subsetChecks = [
-      ['intercity_transport', plan.total_budget.intercity_transport, 'transport', derived.transport],
+      [
+        'intercity_transport',
+        plan.total_budget.intercity_transport,
+        'transport',
+        derived.transport,
+      ],
       ['shopping', plan.total_budget.shopping, 'other', derived.other],
     ] as const;
     for (const [field, actual, parent, ceiling] of subsetChecks) {

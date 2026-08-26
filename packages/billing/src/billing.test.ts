@@ -191,7 +191,10 @@ describe('结算定价', () => {
   });
 
   it('连兜底都没有时不收费但报出来 —— 弄丢产物比少收一笔严重得多', () => {
-    const thin: PriceBook = { ...BOOK, items: { 'render.page': item('render.page', 'PER_ITEM', 5) } };
+    const thin: PriceBook = {
+      ...BOOK,
+      items: { 'render.page': item('render.page', 'PER_ITEM', 5) },
+    };
     const meter = new UsageMeter();
     meter.addLlm('gpt-x', 1_000, 1_000);
     meter.addRenderPages(2);
@@ -259,8 +262,9 @@ describe('生成前的估算：典型值与上界', () => {
     meter.addImageSearches(DEFAULT_JOB_LIMITS.maxImageSearchesPerJob);
     meter.addRenderPages(1 + totalDays);
 
-    expect(priceUsage(meter.snapshot(), BOOK, { includeBaseFee: true }).totalCr)
-      .toBeLessThanOrEqual(ceiling);
+    expect(
+      priceUsage(meter.snapshot(), BOOK, { includeBaseFee: true }).totalCr,
+    ).toBeLessThanOrEqual(ceiling);
   });
 
   it('一次顺利的生成（不重生成）不超过典型值', () => {
@@ -275,8 +279,9 @@ describe('生成前的估算：典型值与上界', () => {
     meter.addImageSearches(DEFAULT_JOB_LIMITS.maxImageSearchesPerJob);
     meter.addRenderPages(1 + totalDays);
 
-    expect(priceUsage(meter.snapshot(), BOOK, { includeBaseFee: true }).totalCr)
-      .toBeLessThanOrEqual(typical);
+    expect(
+      priceUsage(meter.snapshot(), BOOK, { includeBaseFee: true }).totalCr,
+    ).toBeLessThanOrEqual(typical);
   });
 });
 

@@ -189,12 +189,16 @@ function ObjectList({
       {Array.from({ length: rowCount }, (_unused, index) => {
         const raw = items[index];
         const row: Record<string, unknown> =
-          typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : { ...part.item_defaults };
+          typeof raw === 'object' && raw !== null
+            ? (raw as Record<string, unknown>)
+            : { ...part.item_defaults };
         return (
           /* key 用下标：行没有稳定标识（契约里没有 id 字段），下标是唯一可用的 key */
           <fieldset className="planner-repeater" key={index}>
             <legend className="planner-repeater__legend">
-              {part.add_label === undefined ? `第 ${index + 1} 项` : `${part.add_label.replace(/^添加/, '')} ${index + 1}`}
+              {part.add_label === undefined
+                ? `第 ${index + 1} 项`
+                : `${part.add_label.replace(/^添加/, '')} ${index + 1}`}
             </legend>
 
             {/*
@@ -205,7 +209,9 @@ function ObjectList({
               因此这里恒渲染而不是按屏宽分支 —— 后者要读窗口宽度，
               而那会让服务端渲染与客户端首次渲染不一致。
             */}
-            <p className="planner-repeater__summary">{rowSummary(itemParts, row, resolved, index)}</p>
+            <p className="planner-repeater__summary">
+              {rowSummary(itemParts, row, resolved, index)}
+            </p>
 
             {itemParts.map((itemPart) => (
               <RowField
@@ -214,9 +220,7 @@ function ObjectList({
                 apiKey={apiKey}
                 row={row}
                 id={`${id}-${index}-${itemPart.key ?? 'self'}`}
-                {...(itemPart.key === null
-                  ? {}
-                  : { resolved: resolved.get(itemPart.key) })}
+                {...(itemPart.key === null ? {} : { resolved: resolved.get(itemPart.key) })}
                 onWrite={(nextRow) => writeRow(index, nextRow)}
               />
             ))}

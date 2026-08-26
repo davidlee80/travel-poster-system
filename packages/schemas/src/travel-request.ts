@@ -225,136 +225,138 @@ export const OutputPreferencesSchema = z.object({
  * 这次放宽**向后兼容**：照旧发全量字段的客户端一行不改，因此
  * `travel_request_ui_v1` 不升版本号。
  */
-export const TravelRequestUISchema = z.object({
-  schema_version: z.literal(SCHEMA_VERSIONS.travelRequestUi),
-  client_request_id: NonEmptyStringSchema.max(100),
-  /** P8：可缺省。V1 只有 zh-CN */
-  locale: LocaleSchema.default('zh-CN'),
-  /** IANA 时区名。N-01 用它判断「今天」，因此**不能**缺省 */
-  timezone: NonEmptyStringSchema.max(64),
+export const TravelRequestUISchema = z
+  .object({
+    schema_version: z.literal(SCHEMA_VERSIONS.travelRequestUi),
+    client_request_id: NonEmptyStringSchema.max(100),
+    /** P8：可缺省。V1 只有 zh-CN */
+    locale: LocaleSchema.default('zh-CN'),
+    /** IANA 时区名。N-01 用它判断「今天」，因此**不能**缺省 */
+    timezone: NonEmptyStringSchema.max(64),
 
-  trip: z.object({
-    origin: PlaceRefSchema,
-    destination: TripDestinationSchema,
-    dates: TripDatesSchema,
+    trip: z.object({
+      origin: PlaceRefSchema,
+      destination: TripDestinationSchema,
+      dates: TripDatesSchema,
+      /**
+       * P8：已经自行订好的部分。空数组 = 尚无预订。
+       *
+       * 默认值写成函数，理由同 `included_items`：Zod 4 的 `.default()` 短路
+       * 返回同一个引用。
+       */
+      existing_bookings: z.array(ExistingBookingSchema).default(() => []),
+    }),
+
+    travelers: TravelersSchema,
+    budget: RequestBudgetSchema,
     /**
-     * P8：已经自行订好的部分。空数组 = 尚无预订。
+     * P8：可缺省。内部字段本来就全可选，标准化阶段按 level 补默认值。
      *
-     * 默认值写成函数，理由同 `included_items`：Zod 4 的 `.default()` 短路
-     * 返回同一个引用。
+     * ## 对象级默认值一律用 `.prefault()` 而不是 `.default()`
+     *
+     * Zod 4 的 `.default()` **短路**：输入为 undefined 时直接返回默认值，
+     * 不再走内部 schema 的解析。因此 `OutputPreferencesSchema.default({})`
+     * 会产出 `{}` —— 而 `z.infer` 声称那里有四个必填字段。也就是说
+     * `.default()` 在对象上能造出**不满足自身推断类型**的值，而 TypeScript
+     * 完全看不见。
+     *
+     * `.prefault()` 会把默认值送进内部 schema 解析，内层的 `.default()`
+     * 因此正常生效。标量与数组的默认值本身已是完整合法值，用 `.default()` 即可。
      */
-    existing_bookings: z.array(ExistingBookingSchema).default(() => []),
-  }),
+    pace: RequestPaceSchema.prefault({}),
+    /*
+     * 上限取字典大小而不是字面量：两者本来就该相等（一个 code 勾一次），
+     * 写死数字会在下一次扩字典时静默变成「最多只能勾前 N 个」，
+     * 而超出的表现是 REQ_SCHEMA_INVALID —— 定位不到任何表单项。
+     *
+     * 这里**不**去重：重复 code 的处理属于 N-08 的职责，它能给出带 field
+     * 的精确错误，而 schema 层只能给 REQ_SCHEMA_INVALID。
+     */
+    // 配置中心可发布新标签；200 是单次请求的防滥用上限，不再等于内置字典数量。
+    conditions: z.array(TravelConditionSchema).max(200).default([]),
+    custom_requirements: CustomRequirementsSchema.prefault({}),
+    output_preferences: OutputPreferencesSchema.prefault({}),
 
-  travelers: TravelersSchema,
-  budget: RequestBudgetSchema,
-  /**
-   * P8：可缺省。内部字段本来就全可选，标准化阶段按 level 补默认值。
-   *
-   * ## 对象级默认值一律用 `.prefault()` 而不是 `.default()`
-   *
-   * Zod 4 的 `.default()` **短路**：输入为 undefined 时直接返回默认值，
-   * 不再走内部 schema 的解析。因此 `OutputPreferencesSchema.default({})`
-   * 会产出 `{}` —— 而 `z.infer` 声称那里有四个必填字段。也就是说
-   * `.default()` 在对象上能造出**不满足自身推断类型**的值，而 TypeScript
-   * 完全看不见。
-   *
-   * `.prefault()` 会把默认值送进内部 schema 解析，内层的 `.default()`
-   * 因此正常生效。标量与数组的默认值本身已是完整合法值，用 `.default()` 即可。
-   */
-  pace: RequestPaceSchema.prefault({}),
-  /*
-   * 上限取字典大小而不是字面量：两者本来就该相等（一个 code 勾一次），
-   * 写死数字会在下一次扩字典时静默变成「最多只能勾前 N 个」，
-   * 而超出的表现是 REQ_SCHEMA_INVALID —— 定位不到任何表单项。
-   *
-   * 这里**不**去重：重复 code 的处理属于 N-08 的职责，它能给出带 field
-   * 的精确错误，而 schema 层只能给 REQ_SCHEMA_INVALID。
-   */
-  // 配置中心可发布新标签；200 是单次请求的防滥用上限，不再等于内置字典数量。
-  conditions: z.array(TravelConditionSchema).max(200).default([]),
-  custom_requirements: CustomRequirementsSchema.prefault({}),
-  output_preferences: OutputPreferencesSchema.prefault({}),
+    /**
+     * P9：Planner V2.1 的 76 字段问卷答案。
+     *
+     * ## 为什么是一个新块而不是就地扩展上面几块
+     *
+     * 完整推导见 `planner-profile.ts` 的文件头。一句话：就地扩展会造出
+     * 「同一概念两个路径」（`budget.travel_tier` 与 P8 的 `budget.tier` 等四对），
+     * 而新块让「76 个字段的载荷路径 === `planner_profile.` + api_key」成为一条
+     * 可被测试穷举的规则。
+     *
+     * ## 为什么是 optional 而不是 prefault({})
+     *
+     * `prefault({})` 会让**每一个**请求（包括只带 11 个必填字段的最小请求）
+     * 都长出一个 19 个空子块的对象，落进 `travel_requests.raw_request` 一路存下去。
+     * 而「客户端没发问卷」与「客户端发了但全空」在语义上不同：前者是 P8 及之前的
+     * 客户端，后者是 V2 客户端上用户什么都没填。下游要能区分 —— 见 normalize 的
+     * 回退逻辑。
+     *
+     * ## 它不改变必填集
+     *
+     * 契约的必填集仍是 P8 的 11 个字段，`travel_request_ui_v1` 不升版本
+     * （见 versions.ts 的递增规则：可选字段新增不递增）。照旧发全量字段的
+     * 客户端一行不改。
+     */
+    planner_profile: PlannerProfileSchema.optional(),
+  })
+  .superRefine((request, ctx) => {
+    /*
+     * 目的地在两处出现，必须一致。
+     *
+     * ## 为什么两处都要发
+     *
+     * `travel_requests` 表有 `destination_name VARCHAR(200) NOT NULL` 与
+     * `destination_place_id` 两个**提取列**，若干 CHECK 约束依赖它们，
+     * 因此 `trip.destination` 是单个地点、不能变成数组。而多城序列必须能表达，
+     * 它落在 `planner_profile.trip.destinations`（1～5 个，顺序即行程顺序）。
+     *
+     * ## 为什么要在契约层断言，而不是取其一
+     *
+     * 静默取其一有两种走法，两种都很糟：取 `trip.destination` 会让多城行程的
+     * 第 2～5 个城市凭空消失，而生成出的计划看起来完全正常；取
+     * `destinations[0]` 会让提取列与请求体不一致，于是数据库里那一行的
+     * 目的地与用户看到的不是同一个地方。
+     *
+     * 这是本文件里**唯一**一条跨字段校验。它不违反「schema 只做结构校验」那条
+     * 原则：不一致的两处目的地不是「业务上不可行」（那类判断归 N-xx），
+     * 而是**客户端构造错误** —— 与模板 ID 写错同类，因此
+     * `REQ_SCHEMA_INVALID` 是正确的错误码，而 `path` 指向具体那一处。
+     */
+    const destinations = request.planner_profile?.trip?.destinations;
+    if (destinations === undefined || destinations.length === 0) return;
 
-  /**
-   * P9：Planner V2.1 的 76 字段问卷答案。
-   *
-   * ## 为什么是一个新块而不是就地扩展上面几块
-   *
-   * 完整推导见 `planner-profile.ts` 的文件头。一句话：就地扩展会造出
-   * 「同一概念两个路径」（`budget.travel_tier` 与 P8 的 `budget.tier` 等四对），
-   * 而新块让「76 个字段的载荷路径 === `planner_profile.` + api_key」成为一条
-   * 可被测试穷举的规则。
-   *
-   * ## 为什么是 optional 而不是 prefault({})
-   *
-   * `prefault({})` 会让**每一个**请求（包括只带 11 个必填字段的最小请求）
-   * 都长出一个 19 个空子块的对象，落进 `travel_requests.raw_request` 一路存下去。
-   * 而「客户端没发问卷」与「客户端发了但全空」在语义上不同：前者是 P8 及之前的
-   * 客户端，后者是 V2 客户端上用户什么都没填。下游要能区分 —— 见 normalize 的
-   * 回退逻辑。
-   *
-   * ## 它不改变必填集
-   *
-   * 契约的必填集仍是 P8 的 11 个字段，`travel_request_ui_v1` 不升版本
-   * （见 versions.ts 的递增规则：可选字段新增不递增）。照旧发全量字段的
-   * 客户端一行不改。
-   */
-  planner_profile: PlannerProfileSchema.optional(),
-}).superRefine((request, ctx) => {
-  /*
-   * 目的地在两处出现，必须一致。
-   *
-   * ## 为什么两处都要发
-   *
-   * `travel_requests` 表有 `destination_name VARCHAR(200) NOT NULL` 与
-   * `destination_place_id` 两个**提取列**，若干 CHECK 约束依赖它们，
-   * 因此 `trip.destination` 是单个地点、不能变成数组。而多城序列必须能表达，
-   * 它落在 `planner_profile.trip.destinations`（1～5 个，顺序即行程顺序）。
-   *
-   * ## 为什么要在契约层断言，而不是取其一
-   *
-   * 静默取其一有两种走法，两种都很糟：取 `trip.destination` 会让多城行程的
-   * 第 2～5 个城市凭空消失，而生成出的计划看起来完全正常；取
-   * `destinations[0]` 会让提取列与请求体不一致，于是数据库里那一行的
-   * 目的地与用户看到的不是同一个地方。
-   *
-   * 这是本文件里**唯一**一条跨字段校验。它不违反「schema 只做结构校验」那条
-   * 原则：不一致的两处目的地不是「业务上不可行」（那类判断归 N-xx），
-   * 而是**客户端构造错误** —— 与模板 ID 写错同类，因此
-   * `REQ_SCHEMA_INVALID` 是正确的错误码，而 `path` 指向具体那一处。
-   */
-  const destinations = request.planner_profile?.trip?.destinations;
-  if (destinations === undefined || destinations.length === 0) return;
+    const primary = destinations[0];
+    if (primary === undefined) return;
 
-  const primary = destinations[0];
-  if (primary === undefined) return;
+    if (primary.text !== request.trip.destination.text) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['planner_profile', 'trip', 'destinations', 0, 'text'],
+        message: `与 trip.destination.text（${request.trip.destination.text}）不一致`,
+      });
+    }
 
-  if (primary.text !== request.trip.destination.text) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['planner_profile', 'trip', 'destinations', 0, 'text'],
-      message: `与 trip.destination.text（${request.trip.destination.text}）不一致`,
-    });
-  }
-
-  /*
-   * `place_id` 只在两边都有时比较。
-   *
-   * 单边有值是合法的：`planner_profile` 的地点可能来自地点服务而
-   * `trip.destination` 由前端投影时省略了它（`PlaceRefSchema.place_id` 可缺省）。
-   * 要求两边同时有值会把「还没接地点服务」变成一个提交错误。
-   */
-  const primaryId = primary.place_id;
-  const tripId = request.trip.destination.place_id;
-  if (primaryId !== undefined && tripId !== undefined && primaryId !== tripId) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['planner_profile', 'trip', 'destinations', 0, 'place_id'],
-      message: `与 trip.destination.place_id（${tripId}）不一致`,
-    });
-  }
-});
+    /*
+     * `place_id` 只在两边都有时比较。
+     *
+     * 单边有值是合法的：`planner_profile` 的地点可能来自地点服务而
+     * `trip.destination` 由前端投影时省略了它（`PlaceRefSchema.place_id` 可缺省）。
+     * 要求两边同时有值会把「还没接地点服务」变成一个提交错误。
+     */
+    const primaryId = primary.place_id;
+    const tripId = request.trip.destination.place_id;
+    if (primaryId !== undefined && tripId !== undefined && primaryId !== tripId) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['planner_profile', 'trip', 'destinations', 0, 'place_id'],
+        message: `与 trip.destination.place_id（${tripId}）不一致`,
+      });
+    }
+  });
 
 /**
  * **消费**用的类型：默认值已填好，全部字段都在。

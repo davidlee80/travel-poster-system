@@ -1,10 +1,4 @@
-import {
-  amountFor,
-  modelSku,
-  priceOf,
-  type PriceBook,
-  type ModelSkuPrefix,
-} from './price-book.js';
+import { amountFor, modelSku, priceOf, type PriceBook, type ModelSkuPrefix } from './price-book.js';
 
 /**
  * 一次任务的真实用量，以及它到 CR 的换算。

@@ -118,15 +118,16 @@ describe('选项列表的派生', () => {
   });
 
   it('恰好 6 个条件码列表，与三态标签加兴趣多选对得上', () => {
-    expect(OPTION_LISTS.filter((list) => list.kind === 'CONDITION_CODE').map((l) => l.fieldKey))
-      .toEqual([
-        'budget.scope_and_priorities.priorities',
-        'transport.intercity_modes',
-        'transport.local_modes',
-        'lodging.types',
-        'lodging.amenities',
-        'interests.tags',
-      ]);
+    expect(
+      OPTION_LISTS.filter((list) => list.kind === 'CONDITION_CODE').map((l) => l.fieldKey),
+    ).toEqual([
+      'budget.scope_and_priorities.priorities',
+      'transport.intercity_modes',
+      'transport.local_modes',
+      'lodging.types',
+      'lodging.amenities',
+      'interests.tags',
+    ]);
   });
 
   it('`options_from` 的部件不入表 —— 它的可配性归源列表', () => {

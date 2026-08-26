@@ -96,7 +96,10 @@ export function PrepCenter({
           const open = openCards.includes(fieldId);
           const filled = isAnswered(state, fieldId);
           return (
-            <article className={`planner-prep__card${filled ? ' planner-prep__card--done' : ''}`} key={fieldId}>
+            <article
+              className={`planner-prep__card${filled ? ' planner-prep__card--done' : ''}`}
+              key={fieldId}
+            >
               {/*
                 整张卡的标题是一个按钮（不是 div 加 onClick）：键盘用户要能
                 Tab 到它并用回车展开，而 `aria-expanded` 让屏读用户知道

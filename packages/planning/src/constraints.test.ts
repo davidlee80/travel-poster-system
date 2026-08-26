@@ -158,7 +158,11 @@ describe('类型分派', () => {
 
   it('硬上限是 HARD，档次是 PREFER —— 前者优先级高于后者（字段表）', () => {
     const result = derive({
-      budget: { currency: 'CNY', hard_cap: { enabled: true, amount: 40_000 }, travel_tier: 'LUXURY' },
+      budget: {
+        currency: 'CNY',
+        hard_cap: { enabled: true, amount: 40_000 },
+        travel_tier: 'LUXURY',
+      },
     });
     const cap = result.constraints.find((c) => c.source_field_id === 'PV2-03-005');
     const tier = result.constraints.find((c) => c.source_field_id === 'PV2-03-004');
@@ -245,7 +249,10 @@ describe('可追溯性（规范 21.2）', () => {
       travelers: { mobility_level: 'AVOID_STAIRS', child_needs: { values: ['CAR_SEAT'] } },
       pace: { level: 3, daily_window: { start: '09:00', end: '21:00' } },
       food: { dietary_requirements: { values: ['VEGAN'] }, experience_tags: ['MARKET'] },
-      interests: { must_do: [{ text: 'teamLab' }], wish_and_exclude: { wish: [], exclude: ['夜店'] } },
+      interests: {
+        must_do: [{ text: 'teamLab' }],
+        wish_and_exclude: { wish: [], exclude: ['夜店'] },
+      },
       special: { work_constraints: { enabled: true, items: [{ when_text: '10/06 上午' }] } },
       documents: { nationality_residency: { nationality: '中国' } },
       safety: { contexts: ['SOLO_FEMALE'] },
@@ -298,7 +305,9 @@ describe('待核验项的 blocking 取自字段元数据（规范 0 章的 VERIF
         visa_status: { user_reported: { status: 'NOT_APPLIED' } },
       },
     });
-    const byField = new Map(result.verify_items.map((item) => [item.source_field_id, item.blocking]));
+    const byField = new Map(
+      result.verify_items.map((item) => [item.source_field_id, item.blocking]),
+    );
     expect(byField.get('PV2-08-008')).toBe(false);
     expect(byField.get('PV2-08-006')).toBe(true);
     expect(byField.get('PV2-08-007')).toBe(true);
@@ -322,9 +331,9 @@ describe('待核验项的 blocking 取自字段元数据（规范 0 章的 VERIF
   });
 
   it('不需要携带药物时不产出待核验项', () => {
-    expect(derive({ special: { medication_status: { user_reported: 'NO' } } }).verify_items).toEqual(
-      [],
-    );
+    expect(
+      derive({ special: { medication_status: { user_reported: 'NO' } } }).verify_items,
+    ).toEqual([]);
     /* 「不确定」要进 —— 它正是需要进一步确认的那一类 */
     expect(
       derive({ special: { medication_status: { user_reported: 'UNSURE' } } }).verify_items,
@@ -339,9 +348,9 @@ describe('文案表按字段分层，重名值不串味', () => {
      * 「住宿星级：可以换三次以上住宿」—— 模型会照着那条错约束生成，
      * 而没有任何校验能发现。
      */
-    expect(textsOf({ lodging: { class_and_brand: { hotel_class: 'THREE_PLUS' } } }, 'PV2-06-006')).toEqual([
-      '住宿星级：三星以上',
-    ]);
+    expect(
+      textsOf({ lodging: { class_and_brand: { hotel_class: 'THREE_PLUS' } } }, 'PV2-06-006'),
+    ).toEqual(['住宿星级：三星以上']);
     expect(textsOf({ pace: { hotel_change_tolerance: 'THREE_PLUS' } }, 'PV2-04-007')).toEqual([
       '可以换三次以上住宿',
     ]);
@@ -351,16 +360,18 @@ describe('文案表按字段分层，重名值不串味', () => {
     expect(textsOf({ transport: { flight_comfort: { cabin: 'ECONOMY' } } }, 'PV2-05-003')).toEqual([
       '舱等：经济舱',
     ]);
-    expect(textsOf({ budget: { travel_tier: 'ECONOMY' } }, 'PV2-03-004')).toEqual(['整体档次：经济型']);
+    expect(textsOf({ budget: { travel_tier: 'ECONOMY' } }, 'PV2-03-004')).toEqual([
+      '整体档次：经济型',
+    ]);
   });
 
   it('NONE 在自由时间与大件行李两处含义不同', () => {
     expect(textsOf({ pace: { free_time: 'NONE' } }, 'PV2-04-005')).toEqual([
       '几乎不需要留自由时间',
     ]);
-    expect(textsOf({ transport: { luggage_profile: { large_items: ['NONE'] } } }, 'PV2-05-007')).toEqual(
-      ['行李：大件：没有大件行李'],
-    );
+    expect(
+      textsOf({ transport: { luggage_profile: { large_items: ['NONE'] } } }, 'PV2-05-007'),
+    ).toEqual(['行李：大件：没有大件行李']);
   });
 
   it('步行档位在 Prompt 里是自足的一句话', () => {
@@ -388,14 +399,20 @@ describe('文案表按字段分层，重名值不串味', () => {
           },
         ],
       },
-      profile: { trip_purposes: { values: ['BLEISURE', 'SKI'] }, top_goals: { values: ['PHOTOS'] } },
+      profile: {
+        trip_purposes: { values: ['BLEISURE', 'SKI'] },
+        top_goals: { values: ['PHOTOS'] },
+      },
       travelers: {
         minor_guardianship: 'NON_PARENT_GUARDIAN',
         mobility_level: 'FREQUENT_REST',
         child_needs: { values: ['KIDS_MEAL', 'FAMILY_ROOM'] },
         grouping_needs: ['SPLIT_ACTIVITIES'],
       },
-      budget: { travel_tier: 'COMFORT', scope_and_priorities: { included_items: ['MEALS'], priorities: [] } },
+      budget: {
+        travel_tier: 'COMFORT',
+        scope_and_priorities: { included_items: ['MEALS'], priorities: [] },
+      },
       pace: {
         walking_tolerance: 'KM_5_TO_8',
         core_activities_per_day: 'FOUR_TO_FIVE',
@@ -407,7 +424,9 @@ describe('文案表按字段分层，重名值不串味', () => {
         flight_constraints: { transfer_tolerance: 'MAX_ONE_TRANSFER' },
         flight_comfort: { cabin: 'PREMIUM_ECONOMY', seats: ['AISLE', 'TOGETHER'] },
         time_preferences: { windows: ['EVENING'] },
-        self_drive: { user_reported: { experience: 'Y1_TO_3', license_status: 'HAS_IDP', car_type: 'VAN_7' } },
+        self_drive: {
+          user_reported: { experience: 'Y1_TO_3', license_status: 'HAS_IDP', car_type: 'VAN_7' },
+        },
         luggage_profile: { large_items: ['SPORTS_GEAR'] },
       },
       lodging: {
@@ -419,7 +438,9 @@ describe('文案表按字段分层，重名值不串味', () => {
       food: {
         experience_tags: ['BAR_IZAKAYA', 'CAFE_DESSERT'],
         dietary_requirements: { values: ['KOSHER'] },
-        allergy_details: { allergens: [{ allergen: '花生', severity: 'MODERATE', avoid_cross_contamination: false }] },
+        allergy_details: {
+          allergens: [{ allergen: '花生', severity: 'MODERATE', avoid_cross_contamination: false }],
+        },
         dining_style: { budget_level: 'MOSTLY_CASUAL', queue_attitude: ['WILL_BOOK_AHEAD'] },
       },
       special: {

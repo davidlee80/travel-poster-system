@@ -93,7 +93,12 @@ describe('两个可选字段缺省读作 0', () => {
   it('只不含市内交通时，扣的是交通桶减去大交通那部分', () => {
     const plan = makeValidPlan();
     plan.total_budget.intercity_transport = 100;
-    const scope: BudgetIncludedItem[] = ['ACCOMMODATION', 'MEALS', 'TICKETS', 'INTERCITY_TRANSPORT'];
+    const scope: BudgetIncludedItem[] = [
+      'ACCOMMODATION',
+      'MEALS',
+      'TICKETS',
+      'INTERCITY_TRANSPORT',
+    ];
     expect(comparableTotal(plan, scope)).toBe(BASE.total - (BASE.transport - 100));
   });
 
@@ -126,7 +131,10 @@ describe('V-21 / V-22 按口径判定', () => {
      */
     return {
       ...ctx,
-      normalized: { ...ctx.normalized, budget: { ...ctx.normalized.budget, included_items: [...scope] } },
+      normalized: {
+        ...ctx.normalized,
+        budget: { ...ctx.normalized.budget, included_items: [...scope] },
+      },
     };
   }
 
@@ -226,7 +234,10 @@ describe('修复与校验用同一个基准', () => {
     const ctx = makeValidContext({ budget: { min: 1, max: 40 } });
     const narrowed = {
       ...ctx,
-      normalized: { ...ctx.normalized, budget: { ...ctx.normalized.budget, included_items: scope } },
+      normalized: {
+        ...ctx.normalized,
+        budget: { ...ctx.normalized.budget, included_items: scope },
+      },
     };
 
     const before = makeValidPlan();

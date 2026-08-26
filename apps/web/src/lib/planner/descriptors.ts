@@ -260,7 +260,10 @@ export type FieldDescriptor =
 
 /** 单部件字段的简写。绝大多数字段是这一种 */
 function one(primitive: ControlPrimitive, extra: Omit<FieldPart, 'key' | 'primitive'> = {}) {
-  return { kind: 'parts', parts: [{ key: null, primitive, ...extra }] } as const satisfies FieldDescriptor;
+  return {
+    kind: 'parts',
+    parts: [{ key: null, primitive, ...extra }],
+  } as const satisfies FieldDescriptor;
 }
 
 /**
@@ -293,14 +296,35 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
         primitive: 'object-list',
         max: 20,
         add_label: '添加一张订单',
-        item_defaults: { type: 'LODGING', name: '', datetime_text: '', place_text: '', changeability: 'UNKNOWN' },
+        item_defaults: {
+          type: 'LODGING',
+          name: '',
+          datetime_text: '',
+          place_text: '',
+          changeability: 'UNKNOWN',
+        },
         item_parts: [
           { key: 'type', primitive: 'choice', label: '类型', options: LOCKED_ORDER_TYPE_VALUES },
-          { key: 'name', primitive: 'text', label: '名称', placeholder: '航班号 / 酒店名 / 演出名' },
-          { key: 'datetime_text', primitive: 'text', label: '时间', placeholder: '10/05 10:00 起飞' },
+          {
+            key: 'name',
+            primitive: 'text',
+            label: '名称',
+            placeholder: '航班号 / 酒店名 / 演出名',
+          },
+          {
+            key: 'datetime_text',
+            primitive: 'text',
+            label: '时间',
+            placeholder: '10/05 10:00 起飞',
+          },
           { key: 'place_text', primitive: 'text', label: '地点', placeholder: '成田机场 T1' },
           { key: 'reference', primitive: 'text', label: '订单号（可选）' },
-          { key: 'changeability', primitive: 'choice', label: '可改退', options: CHANGEABILITY_VALUES },
+          {
+            key: 'changeability',
+            primitive: 'choice',
+            label: '可改退',
+            options: CHANGEABILITY_VALUES,
+          },
         ],
       },
     ],
@@ -319,7 +343,12 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
         add_label: '添加一位旅行者',
         item_defaults: { relation: 'SELF', age_band: 'ADULT' },
         item_parts: [
-          { key: 'relation', primitive: 'choice', label: '同行关系', options: TRAVELER_RELATION_VALUES },
+          {
+            key: 'relation',
+            primitive: 'choice',
+            label: '同行关系',
+            options: TRAVELER_RELATION_VALUES,
+          },
           { key: 'age_band', primitive: 'choice', label: '年龄段', options: AGE_BAND_VALUES },
           {
             key: 'age',
@@ -328,7 +357,12 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
             min: 0,
             max: 120,
           },
-          { key: 'relation_other', primitive: 'text', label: '关系补充', requires: { key: 'relation', value: 'OTHER' } },
+          {
+            key: 'relation_other',
+            primitive: 'text',
+            label: '关系补充',
+            requires: { key: 'relation', value: 'OTHER' },
+          },
         ],
       },
     ],
@@ -494,7 +528,12 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   'PV2-06-008': {
     kind: 'parts',
     parts: [
-      { key: 'needs', primitive: 'check', label: '睡眠与入住要求', options: SLEEP_CHECKIN_NEED_VALUES },
+      {
+        key: 'needs',
+        primitive: 'check',
+        label: '睡眠与入住要求',
+        options: SLEEP_CHECKIN_NEED_VALUES,
+      },
       {
         key: 'arrival_time',
         primitive: 'time',
@@ -521,7 +560,12 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
         item_defaults: { allergen: '', severity: 'MODERATE', avoid_cross_contamination: false },
         item_parts: [
           { key: 'allergen', primitive: 'text', label: '过敏原', placeholder: '花生、甲壳类…' },
-          { key: 'severity', primitive: 'choice', label: '严重程度', options: ALLERGY_SEVERITY_VALUES },
+          {
+            key: 'severity',
+            primitive: 'choice',
+            label: '严重程度',
+            options: ALLERGY_SEVERITY_VALUES,
+          },
           { key: 'avoid_cross_contamination', primitive: 'bool', label: '需避免交叉污染' },
         ],
       },
@@ -531,7 +575,12 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   'PV2-07-005': {
     kind: 'parts',
     parts: [
-      { key: 'budget_level', primitive: 'choice', label: '用餐预算', options: DINING_BUDGET_VALUES },
+      {
+        key: 'budget_level',
+        primitive: 'choice',
+        label: '用餐预算',
+        options: DINING_BUDGET_VALUES,
+      },
       {
         key: 'queue_attitude',
         primitive: 'check',
@@ -584,7 +633,11 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   'PV2-08-001': one('choice', { options: TRISTATE_ANSWER_VALUES }),
   'PV2-08-002': one('check-other', { options: HEALTH_NEED_VALUES }),
   'PV2-08-003': one('check', { options: HIGH_RISK_ACTIVITY_VALUES }),
-  'PV2-08-004': { kind: 'parts', reported: true, parts: [{ key: null, primitive: 'choice', options: TRISTATE_ANSWER_VALUES }] },
+  'PV2-08-004': {
+    kind: 'parts',
+    reported: true,
+    parts: [{ key: null, primitive: 'choice', options: TRISTATE_ANSWER_VALUES }],
+  },
   'PV2-08-005': {
     kind: 'parts',
     parts: [
@@ -608,7 +661,11 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
       { key: 'valid_until', primitive: 'date', label: '有效期至（可选）' },
     ],
   },
-  'PV2-08-008': { kind: 'parts', reported: true, parts: [{ key: null, primitive: 'choice', options: INSURANCE_STATUS_VALUES }] },
+  'PV2-08-008': {
+    kind: 'parts',
+    reported: true,
+    parts: [{ key: null, primitive: 'choice', options: INSURANCE_STATUS_VALUES }],
+  },
   'PV2-08-009': one('check', { options: SAFETY_CONTEXT_VALUES }),
   'PV2-08-010': {
     kind: 'parts',
@@ -622,7 +679,12 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
         item_defaults: { when_text: '' },
         item_parts: [
           { key: 'when_text', primitive: 'text', label: '时间', placeholder: '10/06 09:00–11:00' },
-          { key: 'requirement_text', primitive: 'text', label: '要求', placeholder: '需要安静网络' },
+          {
+            key: 'requirement_text',
+            primitive: 'text',
+            label: '要求',
+            placeholder: '需要安静网络',
+          },
         ],
       },
     ],

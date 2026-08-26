@@ -76,7 +76,9 @@ function registeredOptions(): readonly RegisteredOption[] {
   const dir = migrationsDirectory();
   const out: RegisteredOption[] = [];
 
-  for (const file of readdirSync(dir).filter((name) => name.endsWith('.sql')).sort()) {
+  for (const file of readdirSync(dir)
+    .filter((name) => name.endsWith('.sql'))
+    .sort()) {
     const sql = readFileSync(path.join(dir, file), 'utf8');
     /* 第 0 块是第一条 INSERT 之前的内容（建表、函数），里面没有选项元组 */
     for (const block of sql.split('INSERT INTO planner_config_options').slice(1)) {
@@ -100,7 +102,11 @@ function registeredOptions(): readonly RegisteredOption[] {
 }
 
 function registeredConditionCodes(): ReadonlySet<string> {
-  return new Set(registeredOptions().filter((o) => o.isCode).map((o) => o.optionKey));
+  return new Set(
+    registeredOptions()
+      .filter((o) => o.isCode)
+      .map((o) => o.optionKey),
+  );
 }
 
 describe('配置中心注册的条件码覆盖内置字典（陷阱 1）', () => {

@@ -99,11 +99,7 @@ export function loadJobLimits(): JobLimits {
  * 因此按首选模型估算是偏保守的一侧。真要遇到「后面的候选更贵」，
  * `holdBufferPercent` 兜住。
  */
-export function estimateUsage(
-  totalDays: number,
-  model: string,
-  limits: JobLimits,
-): UsageSnapshot {
+export function estimateUsage(totalDays: number, model: string, limits: JobLimits): UsageSnapshot {
   const segments = Math.max(1, Math.ceil(totalDays / MAX_DAYS_PER_SEGMENT));
   /*
    * `1 + maxRegenerations`：一次成功 + 最多两次重生成。重生成重跑的是整份
@@ -134,12 +130,7 @@ export interface JobQuote {
   readonly ceiling: JobEstimate;
 }
 
-function priced(
-  totalDays: number,
-  model: string,
-  book: PriceBook,
-  limits: JobLimits,
-): JobEstimate {
+function priced(totalDays: number, model: string, book: PriceBook, limits: JobLimits): JobEstimate {
   const usage = estimateUsage(totalDays, model, limits);
   return { usage, ...priceUsage(usage, book, { includeBaseFee: true }) };
 }
