@@ -1735,6 +1735,19 @@
   font-size: 11px;
 }
 
+/* CR 报价（C-6）：副句比主句再小一号，同一行读下来是「多少钱 / 上界与余额」 */
+.planner-actions__note small {
+  display: block;
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+/* 余额不足。它解释了「为什么按钮点不了」，因此不是灰的辅助文字 */
+.planner-actions__note--warn {
+  color: #a4442f;
+  font-weight: 600;
+}
+
 /* ── 右栏：旅行画像（规范 17）──────────────────────────────── */
 
 .planner-right {
@@ -2405,6 +2418,15 @@
 
   .planner-actions__note {
     display: none;
+  }
+
+  /*
+   * 但余额不足那一条要留着。吸底条上隐藏辅助文字是为了省高度，
+   * 而这一条不是辅助文字 —— 它是**按钮为什么点不了**的唯一解释，
+   * 隐掉之后窄屏用户面对的是一个灰掉且毫无说明的生成按钮。
+   */
+  .planner-actions__note--warn {
+    display: block;
   }
 
   .planner-research ul {

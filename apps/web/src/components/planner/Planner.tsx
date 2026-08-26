@@ -4,6 +4,7 @@ import { PLANNER_STEPS, type PlannerFieldId, type PlannerStepId } from '@tps/sch
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import { generatePlan, getJobStatus } from '@/lib/api-client';
+import { CreditHint, useCreditQuote } from './CreditHint';
 import type { GenerationPhase } from '@/lib/generation-dialog';
 import { buildPlannerRequest } from '@/lib/planner/request';
 import { buildSummary } from '@/lib/planner/summary';
@@ -181,6 +182,20 @@ export function Planner(): React.ReactElement {
   );
   const metrics = useMemo(() => buildMetrics(state), [state]);
 
+  /*
+   * ── CR 报价（C-6）──
+   *
+   * 只在**装配了计费**（会话里带 `wallet`）时请求。没装配的部署里 CR 这个
+   * 概念对用户根本不存在，而一次必然失败的请求（那三个端点没注册，404）
+   * 只会在控制台里留下一条让人以为出了故障的报错。
+   */
+  const totalDays = useMemo(
+    () => tripDays(readAnswer(state.answers, 'trip.dates')),
+    [state.answers],
+  );
+  const billingOn = status.kind === 'ready' && status.session.wallet !== undefined;
+  const credits = useCreditQuote(totalDays, billingOn);
+
   const registerField = useCallback((fieldId: PlannerFieldId, node: HTMLElement | null) => {
     if (node === null) fieldNodes.current.delete(fieldId);
     else fieldNodes.current.set(fieldId, node);
@@ -306,6 +321,12 @@ export function Planner(): React.ReactElement {
           message: result.message,
           retryable: result.retryable,
           needsAuth: result.status === 401,
+          /*
+           * 402 带着 `required_cr` / `balance_cr`（13.0 的 `details`）。
+           * 用它算「还差多少」而不是再发一次报价请求 —— 这是用户最需要
+           * 那个数的时刻，多一次往返多一次失败机会。
+           */
+          ...shortfallOf(result),
         });
         return;
       }
@@ -446,7 +467,8 @@ export function Planner(): React.ReactElement {
            */
           onGenerate={() => void submit()}
           onJumpToVerify={() => goToStep('09')}
-          generateDisabled={busy || !signedIn}
+          generateDisabled={busy || !signedIn || credits.insufficient}
+          generateNote={<CreditHint hint={credits.hint} />}
           open={summaryOpen}
         />
       </div>
@@ -480,13 +502,14 @@ export function Planner(): React.ReactElement {
           type="button"
           className="planner-button planner-button--primary planner-button--large"
           onClick={() => void submit()}
-          disabled={busy || !signedIn}
+          disabled={busy || !signedIn || credits.insufficient}
         >
           {generateButtonLabel(snapshot.tripState, snapshot.verifyCount)}
         </button>
         {signedIn ? null : (
           <span className="planner-actions__note">登录后才能生成 —— 右上角可以登录或注册。</span>
         )}
+        <CreditHint hint={credits.hint} />
       </>
     );
   }
@@ -543,3 +566,20 @@ const WALKING_LABEL: Record<string, string> = {
   KM_8_TO_12: '8–12 km',
   OVER_12KM: '12 km+',
 };
+
+/**
+ * 从 402 的 `details` 里取「还差多少 CR」。
+ *
+ * 只在真的是 402 且两个数都在时返回 —— 缺一个就退回通用文案，
+ * 而不是显示一个 `NaN CR`。
+ */
+function shortfallOf(result: {
+  readonly status: number;
+  readonly details?: Readonly<Record<string, number>>;
+}): { readonly shortfallCr?: number } {
+  if (result.status !== 402) return {};
+  const required = result.details?.['required_cr'];
+  const balance = result.details?.['balance_cr'];
+  if (typeof required !== 'number' || typeof balance !== 'number') return {};
+  return { shortfallCr: Math.max(0, required - balance) };
+}

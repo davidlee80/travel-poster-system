@@ -45,6 +45,14 @@ export interface SummaryRailProps {
   readonly onGenerate: () => void;
   readonly onJumpToVerify: () => void;
   readonly generateDisabled: boolean;
+  /**
+   * 生成按钮下方的一句话（C-6 的 CR 报价）。
+   *
+   * 由调用方传节点而不是让本组件去请求报价：右栏的职责是「把画像与入口
+   * 摆出来」，让它认识钱包会把一个纯展示组件变成一个有网络依赖的组件，
+   * 而它同时也被没装配计费的部署渲染。
+   */
+  readonly generateNote?: React.ReactNode;
   /** 窄屏抽屉是否展开 */
   readonly open: boolean;
 }
@@ -57,6 +65,7 @@ export function SummaryRail({
   onGenerate,
   onJumpToVerify,
   generateDisabled,
+  generateNote,
   open,
 }: SummaryRailProps): React.ReactElement {
   const total = sections.reduce((sum, section) => sum + section.chips.length, 0);
@@ -126,6 +135,7 @@ export function SummaryRail({
             查看待确认项
           </button>
         ) : null}
+        {generateNote}
       </div>
 
       <p className="planner-right__note">{TRIP_STATE_LABEL[snapshot.tripState]}</p>

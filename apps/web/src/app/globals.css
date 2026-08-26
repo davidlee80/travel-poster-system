@@ -653,3 +653,110 @@ body {
   background: #f0eee8;
   font-size: 13px;
 }
+
+/* ── CR 消费明细页（/credits，C-6）──────────────────────── */
+
+/*
+ * 与 `.legal` 同一条约束：**不写裸元素选择器**。这一页的内容全由组件产出，
+ * 因此每一条都挂在 `.credits*` 类上 —— 裸的 `li { }` 会漏到 `/render/**`
+ * 的信息图模板上，而那会让导出的 PNG 悄悄变样。
+ */
+.credits {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+}
+
+.credits__back {
+  margin: 0 0 20px;
+  font-size: 14px;
+}
+
+.credits__back a {
+  color: #2f6b4f;
+}
+
+.credits h1 {
+  margin: 0 0 24px;
+  font-size: 24px;
+}
+
+.credits__summary {
+  display: flex;
+  gap: 24px;
+  margin: 0 0 24px;
+  padding: 16px;
+  border: 1px solid #e4e0d8;
+  border-radius: 10px;
+  background: #fbfaf7;
+}
+
+.credits__summary div {
+  display: flex;
+  flex-direction: column;
+}
+
+.credits__summary strong {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.credits__summary span {
+  font-size: 12px;
+  color: #6a6a6a;
+}
+
+.credits__status {
+  margin: 16px 0;
+  color: #6a6a6a;
+  font-size: 14px;
+}
+
+.credits__status a {
+  color: #2f6b4f;
+}
+
+.credits__status--error {
+  color: #a4442f;
+}
+
+.credits__list {
+  margin: 0 0 20px;
+  padding: 0;
+  list-style: none;
+}
+
+.credits__row {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 12px 0;
+  border-bottom: 1px solid #efece5;
+}
+
+.credits__kind {
+  font-size: 13px;
+  color: #33322e;
+}
+
+/* 金额等宽：一列数字不对齐时，看一眼「花了多少」要逐行对焦 */
+.credits__amount {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: #2f6b4f;
+}
+
+.credits__amount--out {
+  color: #33322e;
+}
+
+.credits__meta {
+  text-align: right;
+  font-size: 12px;
+  color: #6a6a6a;
+}
+
+.credits__meta small {
+  display: block;
+}

@@ -168,17 +168,47 @@ export function AuthPanel(): React.ReactElement {
                   <span>{maskedPhone ?? session.email}</span>
                 </div>
               </div>
-              <div className="planner-user__quota">
-                <div>
-                  <strong>{session.quota.daily_remaining}</strong>
-                  <span>今日剩余</span>
+              {/*
+                装配了计费时显示 CR，否则显示原来的两个次数（C-6）。
+                产品口径是「用户只看 CR，不看次数」—— 次数配额仍然存在
+                （防滥用），但它不再作为产品概念展示。判据是会话里有没有
+                `wallet`：计费关着的部署里 CR 这个概念对用户根本不存在。
+              */}
+              {session.wallet === undefined ? (
+                <div className="planner-user__quota">
+                  <div>
+                    <strong>{session.quota.daily_remaining}</strong>
+                    <span>今日剩余</span>
+                  </div>
+                  <div>
+                    <strong>{session.quota.monthly_remaining}</strong>
+                    <span>本月剩余</span>
+                  </div>
                 </div>
-                <div>
-                  <strong>{session.quota.monthly_remaining}</strong>
-                  <span>本月剩余</span>
+              ) : (
+                <div className="planner-user__quota">
+                  <div>
+                    <strong>{session.wallet.balance_cr}</strong>
+                    <span>剩余 CR ≈ {session.wallet.balance_cny} 元</span>
+                  </div>
+                  {/*
+                    冻结额只在非 0 时占一格：它是「有任务正在生成」的临时状态，
+                    平时恒为 0，常驻一个 0 会让人以为那笔钱被扣住了。
+                  */}
+                  {session.wallet.held_cr > 0 ? (
+                    <div>
+                      <strong>{session.wallet.held_cr}</strong>
+                      <span>生成中冻结</span>
+                    </div>
+                  ) : null}
                 </div>
-              </div>
+              )}
               <div className="planner-user__actions">
+                {session.wallet === undefined ? null : (
+                  <a className="auth-panel__link" href="/credits">
+                    消费明细
+                  </a>
+                )}
                 {session.has_password ? (
                   <button
                     type="button"

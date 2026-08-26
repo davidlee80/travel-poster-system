@@ -39,6 +39,14 @@ export type GenerationPhase =
        * —— 而未登录不是条件问题，调整条件一万次也不会好。
        */
       readonly needsAuth?: boolean;
+      /**
+       * CR 余额不足时还差多少（HTTP 402 的 `details`，C-6）。
+       *
+       * 又一位而不是复用 `retryable: false`：那一档给的建议是「按提示调整
+       * 条件」，而余额不足调一万次条件也不会好 —— 与 `needsAuth` 是同一类
+       * 错误建议。有它才能说出真正的下一步。
+       */
+      readonly shortfallCr?: number;
     };
 
 export interface GenerationDialogView {
@@ -149,9 +157,23 @@ export function dialogViewFor(phase: GenerationPhase): GenerationDialogView | nu
  * 「已填写的内容不会丢」是必须说的：关掉弹层去登录时表单状态确实还在
  * （`Planner` 的 reducer 不因 401 重置），不说的话用户不敢关。
  */
-function errorHint(phase: { readonly retryable: boolean; readonly needsAuth?: boolean }): string {
+function errorHint(phase: {
+  readonly retryable: boolean;
+  readonly needsAuth?: boolean;
+  readonly shortfallCr?: number;
+}): string {
   if (phase.needsAuth === true) {
     return '在右上角登录后可以直接重新提交，已填写的内容不会丢。';
+  }
+  if (phase.shortfallCr !== undefined) {
+    /*
+     * 不写「请去充值」：支付入口本轮不存在（见 docs 的「明确不在范围」）。
+     * 指一个不存在的入口，用户会在界面上找它，找不到之后才是真正的困惑。
+     */
+    return (
+      `还差 ${phase.shortfallCr} CR。充值入口内测期尚未开放，` +
+      '可联系我们补充额度；已填写的内容不会丢。'
+    );
   }
   return phase.retryable ? '这类问题多是临时的，可以直接重试。' : '请按上面的提示调整条件后再试。';
 }

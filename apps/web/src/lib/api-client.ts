@@ -19,6 +19,22 @@ export interface SessionInfo {
     readonly monthly_remaining: number;
     readonly reset_at: string;
   };
+  /**
+   * CR 钱包（C-3）。**只在服务端装配了计费、且身份是注册用户时出现。**
+   *
+   * 可选而不是补一个 `balance_cr: 0`：计费关着的部署里 CR 这个概念
+   * 对用户根本不存在，而一个恒为 0 的余额会让界面画出一个永远不够用的钱包。
+   * 判据因此是「有没有这个字段」。
+   */
+  readonly wallet?: WalletInfo;
+}
+
+export interface WalletInfo {
+  readonly balance_cr: number;
+  /** 生成中的任务冻结的额度。展示成「处理中」而不是从余额里消失 */
+  readonly held_cr: number;
+  /** 人民币等值。由服务端算 —— 前端没有兑换比率，硬编码一个就会漂移 */
+  readonly balance_cny: string;
 }
 
 export interface ApiErrorBody {
@@ -27,6 +43,7 @@ export interface ApiErrorBody {
     readonly message: string;
     readonly retryable: boolean;
     readonly field?: string;
+    readonly details?: Readonly<Record<string, number>>;
     readonly request_id: string;
     readonly trace_id: string;
   };
@@ -41,6 +58,11 @@ export type ApiResult<T> =
       readonly message: string;
       readonly retryable: boolean;
       readonly field?: string;
+      /**
+       * 让错误可被行动的数值。目前只有 402 用它
+       * （`required_cr` / `balance_cr`），见 13.0 的错误信封。
+       */
+      readonly details?: Readonly<Record<string, number>>;
     };
 
 const API_BASE = process.env['NEXT_PUBLIC_API_BASE'] ?? '';
@@ -111,6 +133,7 @@ async function request<T>(
     message: error?.message ?? '服务暂时不可用，请稍后重试。',
     retryable: error?.retryable ?? true,
     ...(error?.field === undefined ? {} : { field: error.field }),
+    ...(error?.details === undefined ? {} : { details: error.details }),
   };
 }
 
@@ -413,4 +436,65 @@ export function listPlans(
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
   return request<PlanListResponse>(`/api/v1/travel-plans${suffix}`, { method: 'GET' });
+}
+
+// ── CR 钱包（C-6）──────────────────────────────────────────
+
+export interface CreditQuoteResponse {
+  /** `null` = 一版价目表都没发布，本次生成不计费 */
+  readonly price_version: number | null;
+  readonly typical_cr: number;
+  readonly ceiling_cr: number;
+  /** 实际会冻结的额度。「够不够」比的是它 */
+  readonly hold_cr: number;
+  readonly typical_cny: string;
+  readonly ceiling_cny: string;
+  readonly balance_cr: number;
+  readonly held_cr: number;
+  /**
+   * 结论由服务端给。前端**不自己拿单价算** ——
+   * 两处各算一份的表现是「按钮说够、提交被拒」。
+   */
+  readonly sufficient: boolean;
+}
+
+/**
+ * 一次生成的报价。
+ *
+ * 只传天数：报价是展示用的估算，用户还在填表时就想看到「大概多少钱」，
+ * 而那时表单必然不完整。权威金额在生成端点按标准化后的天数现算。
+ */
+export function quoteCredits(totalDays: number): Promise<ApiResult<CreditQuoteResponse>> {
+  return request<CreditQuoteResponse>('/api/v1/credits/quote', {
+    method: 'POST',
+    body: JSON.stringify({ total_days: totalDays }),
+  });
+}
+
+export interface LedgerEntryView {
+  readonly entry_id: string;
+  readonly kind: string;
+  /** 有符号：进账为正、消费为负 */
+  readonly amount_cr: number;
+  readonly balance_after_cr: number;
+  readonly ref_type: string | null;
+  readonly ref_id: string | null;
+  readonly created_at: string;
+}
+
+export interface CreditLedgerResponse {
+  readonly items: readonly LedgerEntryView[];
+  /** 下一页的游标（上一页最后一条的 `created_at`）。`null` = 没有下一页 */
+  readonly next_cursor: string | null;
+}
+
+/** 消费流水。游标用时间而不是 offset，理由见服务端 */
+export function getCreditLedger(
+  input: { readonly limit?: number; readonly before?: string } = {},
+): Promise<ApiResult<CreditLedgerResponse>> {
+  const params = new URLSearchParams();
+  if (input.limit !== undefined) params.set('limit', String(input.limit));
+  if (input.before !== undefined) params.set('before', input.before);
+  const query = params.size === 0 ? '' : `?${params.toString()}`;
+  return request<CreditLedgerResponse>(`/api/v1/credits/ledger${query}`, { method: 'GET' });
 }
