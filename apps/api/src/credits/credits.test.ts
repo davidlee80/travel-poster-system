@@ -1,4 +1,9 @@
-import { DEFAULT_JOB_LIMITS, loadCreditConfig, type CreditConfig } from '@tps/billing';
+import {
+  DEFAULT_JOB_LIMITS,
+  SEED_PRICE_VERSION,
+  loadCreditConfig,
+  type CreditConfig,
+} from '@tps/billing';
 import {
   COOKIE_NAMES,
   GracefulShutdown,
@@ -117,6 +122,57 @@ describe('CreditsService 报价', () => {
   it('人民币等值由服务端算（前端没有兑换比率）', () => {
     const { service } = makeService();
     expect(service.cnyText(9_900)).toBe('9.90');
+  });
+
+  it('占位版（版本 1）算「还没配价」→ 不计费', async () => {
+    /*
+     * 迁移 0013 种下的那一版全是占位值。带着它计费有两个后果：
+     *
+     * 1. **收错钱** —— 而收错钱要到对账时才发现，比不收钱严重得多；
+     * 2. **卡流程** —— 占位价与赠送额（9900）是两个互不相干的占位数，
+     *    实测占位价下一次 14 天行程要冻 10578 CR，也就是刚注册的用户
+     *    点 14 天直接拿到 402。
+     *
+     * 因此定价是运营的前置动作，而在那之前系统照常跑、不收费。
+     */
+    const { service, wallet } = makeService();
+    wallet.priceBook = samplePriceBook({ version: SEED_PRICE_VERSION });
+
+    expect((await service.quote(5)).priceVersion).toBeNull();
+    expect(await service.checkJob({ userId: 'u1', totalDays: 5 })).toEqual({
+      kind: 'free',
+      reason: 'NO_PRICE_BOOK',
+    });
+  });
+
+  it('发布任何 2 以上的版本，计费立刻生效（不改代码、不重启）', async () => {
+    const { service, wallet, time } = makeService();
+    wallet.priceBook = samplePriceBook({ version: SEED_PRICE_VERSION });
+    expect((await service.quote(5)).priceVersion).toBeNull();
+
+    /* 运营 clone 到版本 2 改价并发布 */
+    wallet.priceBook = samplePriceBook({ version: 2 });
+    time.advance(60_001);
+
+    const quote = await service.quote(5);
+    expect(quote.priceVersion).toBe(2);
+    expect(quote.holdCr).toBeGreaterThan(0);
+  });
+
+  it('占位价下导出也不收费', async () => {
+    const { service, wallet } = makeService();
+    wallet.priceBook = samplePriceBook({ version: SEED_PRICE_VERSION });
+    wallet.seed('u1', 500);
+
+    expect(
+      await service.chargeExport({
+        userId: 'u1',
+        exportId: 'e1',
+        format: 'PDF',
+        exportIdempotencyKey: 'k1',
+      }),
+    ).toEqual({ kind: 'free' });
+    expect((await service.balance('u1')).balanceCr).toBe(500);
   });
 
   it('价目表缓存 60 秒，到期后重新读', async () => {
