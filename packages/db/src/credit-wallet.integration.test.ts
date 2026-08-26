@@ -1,10 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
 
-import {
-  createCreditWalletRepository,
-  type CreditWalletRepository,
-} from './credit-wallet.js';
+import { createCreditWalletRepository, type CreditWalletRepository } from './credit-wallet.js';
 import { migrate } from './migrate.js';
 import { migrationsDirectory } from './migrations-dir.js';
 import { createPool } from './pool.js';
@@ -294,8 +291,9 @@ describeIntegration('CR 钱包（集成，需 PostgreSQL）', () => {
       expect(second.replayed).toBe(true);
       expect(second.chargedCr).toBe(250);
       expect(await raw()).toEqual({ balance: 750, held: 0 });
-      expect((await wallet.history({ userId, limit: 10 })).filter((e) => e.kind === 'SPEND'))
-        .toHaveLength(1);
+      expect(
+        (await wallet.history({ userId, limit: 10 })).filter((e) => e.kind === 'SPEND'),
+      ).toHaveLength(1);
     });
 
     it('并发结算只有一条生效', async () => {
@@ -494,6 +492,62 @@ describeIntegration('CR 钱包（集成，需 PostgreSQL）', () => {
       /* 两页不重叠 */
       const ids = new Set([...firstPage, ...secondPage].map((e) => e.entryId));
       expect(ids.size).toBe(4);
+    });
+  });
+
+  describe('预留回查（C-4）', () => {
+    it('读到金额、锁定的价目版本与状态', async () => {
+      await grant(2_000);
+      const jobId = crypto.randomUUID();
+      await wallet.reserve({ userId, jobId, amountCr: 600, priceVersion: 1, expiresAt: future() });
+
+      const hold = await wallet.findHold(jobId);
+      expect(hold).toMatchObject({ amountCr: 600, priceVersion: 1, status: 'ACTIVE' });
+      expect(hold?.userId).toBe(userId);
+    });
+
+    it('结算后状态变 SETTLED（结算幂等的判据）', async () => {
+      await grant(2_000);
+      const jobId = crypto.randomUUID();
+      await wallet.reserve({ userId, jobId, amountCr: 600, priceVersion: 1, expiresAt: future() });
+      await wallet.settle({ jobId, actualCr: 300, lines: [], unpriced: [] });
+
+      expect((await wallet.findHold(jobId))?.status).toBe('SETTLED');
+    });
+
+    it('没预留过的任务返回 null（0013 之前入队的任务走这条）', async () => {
+      expect(await wallet.findHold(crypto.randomUUID())).toBeNull();
+    });
+  });
+
+  describe('按版本取价目（C-4）', () => {
+    it('取得到尚未发布的草稿版 —— 结算要的正是「可能已不是发布版」的那一版', async () => {
+      /*
+       * 这条断言是「已提交的任务不受调价影响」那句承诺的落点：
+       * `credit_prices_current` 视图只含发布版，而结算要按预留锁定的版本算钱。
+       * 用视图实现的话，运营一发布新版，在途任务全部按新价结算。
+       */
+      await pool.query(`SELECT clone_credit_prices(1, 2, '测试用草稿')`);
+      await pool.query(
+        `UPDATE credit_price_items i SET price_cr = 12345
+         FROM credit_price_versions v
+         WHERE i.version_id = v.id AND v.version = 2 AND i.sku = 'llm.out:*'`,
+      );
+
+      const draft = await wallet.pricesForVersion(2);
+      expect(draft?.version).toBe(2);
+      expect(draft?.items['llm.out:*']?.priceCr).toBe(12_345);
+
+      /* 发布版仍是 1，且它的价格没被改动 */
+      const published = await wallet.publishedPrices();
+      expect(published?.version).toBe(1);
+      expect(published?.items['llm.out:*']?.priceCr).toBe(60_000);
+
+      await pool.query(`DELETE FROM credit_price_versions WHERE version = 2`);
+    });
+
+    it('不存在的版本返回 null（调用方据此不计费）', async () => {
+      expect(await wallet.pricesForVersion(9_999)).toBeNull();
     });
   });
 

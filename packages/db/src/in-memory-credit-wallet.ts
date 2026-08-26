@@ -1,15 +1,18 @@
-import type { PriceBook, PricedLine } from '@tps/billing';
+import type { PriceBook } from '@tps/billing';
+
 import type {
+  CreditHold,
   CreditWalletRepository,
   LedgerEntry,
   LedgerKind,
   ReserveResult,
   SettleResult,
   WalletBalance,
-} from '@tps/db';
+} from './credit-wallet.js';
 
 /**
- * 内存钱包（测试用），形态照 `FakeUsersRepository`。
+ * 内存钱包，形态照 `InMemoryPlanQueue` / `InMemoryCounterStore`
+ * —— 在途实现与它的内存版住在同一个包里，这样接口加一个方法时两边一起报错。
  *
  * ## 它刻意**不**复刻 SQL 的原子性
  *
@@ -18,11 +21,11 @@ import type {
  * 的 26 项就是为此存在的。在这里用 JS 重写一遍，测到的只是我对「原子」
  * 这个词的理解。
  *
- * 因此这个假实现的用途只有一个：让**端点层**的测试能覆盖 HTTP 契约 ——
- * 402 的时机、`details` 的数值、幂等命中不扣费、取消刚建的任务。
+ * 因此它的用途是让**调用方**的测试能覆盖自己那一层的契约：
+ * API 侧的 402 时机与 `details` 数值、Worker 侧的结算口径与失败退款。
  * 那些分支与 SQL 无关，却是用户唯一能看到的部分。
  */
-export class FakeCreditWalletRepository implements CreditWalletRepository {
+export class InMemoryCreditWalletRepository implements CreditWalletRepository {
   private readonly wallets = new Map<string, { balanceCr: number; heldCr: number }>();
   private readonly ledger: LedgerEntry[] = [];
   private readonly keys = new Set<string>();
@@ -51,6 +54,7 @@ export class FakeCreditWalletRepository implements CreditWalletRepository {
     refType?: string;
     refId?: string;
     priceVersion?: number;
+    metadata?: Readonly<Record<string, unknown>>;
   }): boolean {
     if (this.keys.has(input.idempotencyKey)) return false;
     this.keys.add(input.idempotencyKey);
@@ -58,14 +62,20 @@ export class FakeCreditWalletRepository implements CreditWalletRepository {
     this.ledger.push({
       entryId: `entry-${this.sequence}`,
       kind: input.kind,
-      amountCr: input.amountCr,
+      /*
+       * `+ 0` 把 `-0` 归一成 `0`。BIGINT 列里没有负零，而 JS 里
+       * `Object.is(-0, 0)` 为 false —— 少了这一下，「结算金额为 0」这类断言
+       * 会在内存版上红、在真库上绿，而红的原因与被测行为毫无关系。
+       */
+      amountCr: input.amountCr + 0,
       balanceAfterCr: this.wallet(input.userId).balanceCr,
       refType: input.refType ?? null,
       refId: input.refId ?? null,
       priceVersion: input.priceVersion ?? null,
       /* 递增时刻：翻页游标按时间倒序，同一毫秒的多条会让分页断言不稳定 */
       createdAt: new Date(Date.UTC(2026, 3, 1, 0, 0, this.sequence)).toISOString(),
-      metadata: {},
+      /* 逐项明细要留住：调用方（Worker 的结算）靠它证明按哪个模型计的价 */
+      metadata: input.metadata ?? {},
     });
     return true;
   }
@@ -87,11 +97,9 @@ export class FakeCreditWalletRepository implements CreditWalletRepository {
     });
   }
 
-  history(input: {
-    readonly userId: string;
-    readonly limit: number;
-    readonly before?: string;
-  }): Promise<readonly LedgerEntry[]> {
+  history(
+    input: Parameters<CreditWalletRepository['history']>[0],
+  ): Promise<readonly LedgerEntry[]> {
     const rows = [...this.ledger]
       .reverse()
       .filter((entry) => input.before === undefined || entry.createdAt < input.before)
@@ -99,12 +107,9 @@ export class FakeCreditWalletRepository implements CreditWalletRepository {
     return Promise.resolve(rows);
   }
 
-  credit(input: {
-    readonly userId: string;
-    readonly amountCr: number;
-    readonly kind: 'TOPUP' | 'GRANT' | 'ADJUST';
-    readonly idempotencyKey: string;
-  }): Promise<{ readonly balanceCr: number; readonly replayed: boolean }> {
+  credit(
+    input: Parameters<CreditWalletRepository['credit']>[0],
+  ): Promise<{ readonly balanceCr: number; readonly replayed: boolean }> {
     const wallet = this.wallet(input.userId);
     if (this.keys.has(input.idempotencyKey)) {
       return Promise.resolve({ balanceCr: wallet.balanceCr, replayed: true });
@@ -114,12 +119,7 @@ export class FakeCreditWalletRepository implements CreditWalletRepository {
     return Promise.resolve({ balanceCr: wallet.balanceCr, replayed: false });
   }
 
-  reserve(input: {
-    readonly userId: string;
-    readonly jobId: string;
-    readonly amountCr: number;
-    readonly priceVersion: number;
-  }): Promise<ReserveResult> {
+  reserve(input: Parameters<CreditWalletRepository['reserve']>[0]): Promise<ReserveResult> {
     const held = this.holds.get(input.jobId);
     if (held !== undefined) {
       return Promise.resolve({ ok: false, reason: 'ALREADY_HELD', holdId: held.holdId });
@@ -142,7 +142,7 @@ export class FakeCreditWalletRepository implements CreditWalletRepository {
     return Promise.resolve({ ok: true, holdId, balanceCr: wallet.balanceCr });
   }
 
-  settle(input: { readonly jobId: string; readonly actualCr: number }): Promise<SettleResult> {
+  settle(input: Parameters<CreditWalletRepository['settle']>[0]): Promise<SettleResult> {
     const hold = this.holds.get(input.jobId);
     if (hold === undefined || hold.status !== 'ACTIVE') {
       return Promise.resolve({ chargedCr: 0, refundedCr: 0, writeOffCr: 0, replayed: true });
@@ -163,7 +163,19 @@ export class FakeCreditWalletRepository implements CreditWalletRepository {
       refType: 'JOB',
       refId: input.jobId,
       priceVersion: hold.priceVersion,
+      metadata: { lines: input.lines, unpriced: input.unpriced },
     });
+    if (overage - fromBalance > 0) {
+      this.append({
+        userId: hold.userId,
+        kind: 'WRITE_OFF',
+        amountCr: 0,
+        idempotencyKey: `writeoff:${input.jobId}`,
+        refType: 'JOB',
+        refId: input.jobId,
+        priceVersion: hold.priceVersion,
+      });
+    }
     return Promise.resolve({
       chargedCr: fromHold + fromBalance,
       refundedCr,
@@ -172,11 +184,9 @@ export class FakeCreditWalletRepository implements CreditWalletRepository {
     });
   }
 
-  releaseFailed(input: {
-    readonly jobId: string;
-    readonly burnedCr: number;
-    readonly lines: readonly PricedLine[];
-  }): Promise<{ readonly refundedCr: number; readonly replayed: boolean }> {
+  releaseFailed(
+    input: Parameters<CreditWalletRepository['releaseFailed']>[0],
+  ): Promise<{ readonly refundedCr: number; readonly replayed: boolean }> {
     const hold = this.holds.get(input.jobId);
     if (hold === undefined || hold.status !== 'ACTIVE') {
       return Promise.resolve({ refundedCr: 0, replayed: true });
@@ -193,17 +203,23 @@ export class FakeCreditWalletRepository implements CreditWalletRepository {
       refType: 'JOB',
       refId: input.jobId,
     });
+    /* 与真实实现一致：坏账单独一条，金额恒 0（金额本身在 metadata 里） */
+    if (input.burnedCr > 0) {
+      this.append({
+        userId: hold.userId,
+        kind: 'WRITE_OFF',
+        amountCr: 0,
+        idempotencyKey: `writeoff:${input.jobId}`,
+        refType: 'JOB',
+        refId: input.jobId,
+      });
+    }
     return Promise.resolve({ refundedCr: hold.amountCr, replayed: false });
   }
 
-  charge(input: {
-    readonly userId: string;
-    readonly amountCr: number;
-    readonly idempotencyKey: string;
-    readonly refType: string;
-    readonly refId: string;
-    readonly priceVersion: number;
-  }): Promise<{ readonly ok: boolean; readonly balanceCr: number }> {
+  charge(
+    input: Parameters<CreditWalletRepository['charge']>[0],
+  ): Promise<{ readonly ok: boolean; readonly balanceCr: number }> {
     const wallet = this.wallet(input.userId);
     if (this.keys.has(input.idempotencyKey)) {
       return Promise.resolve({ ok: true, balanceCr: wallet.balanceCr });
@@ -216,13 +232,9 @@ export class FakeCreditWalletRepository implements CreditWalletRepository {
     return Promise.resolve({ ok: true, balanceCr: wallet.balanceCr });
   }
 
-  refund(input: {
-    readonly userId: string;
-    readonly amountCr: number;
-    readonly idempotencyKey: string;
-    readonly refType: string;
-    readonly refId: string;
-  }): Promise<{ readonly balanceCr: number; readonly replayed: boolean }> {
+  refund(
+    input: Parameters<CreditWalletRepository['refund']>[0],
+  ): Promise<{ readonly balanceCr: number; readonly replayed: boolean }> {
     const wallet = this.wallet(input.userId);
     if (this.keys.has(input.idempotencyKey)) {
       return Promise.resolve({ balanceCr: wallet.balanceCr, replayed: true });
@@ -235,10 +247,40 @@ export class FakeCreditWalletRepository implements CreditWalletRepository {
   publishedPrices(): Promise<PriceBook | null> {
     return Promise.resolve(this.priceBook);
   }
+
+  findHold(jobId: string): Promise<CreditHold | null> {
+    const hold = this.holds.get(jobId);
+    if (hold === undefined) return Promise.resolve(null);
+    return Promise.resolve({
+      holdId: hold.holdId,
+      userId: hold.userId,
+      amountCr: hold.amountCr,
+      priceVersion: hold.priceVersion,
+      status: hold.status as CreditHold['status'],
+    });
+  }
+
+  /**
+   * 按版本取价目表。
+   *
+   * 内存版只装得下 `priceBook` 一版，因此这里按版本号比对而不是真的存多版：
+   * 被测的行为是「结算用预留锁定的那一版」，而版本号对不上时返回 null
+   * 恰好覆盖了「那一版查不到 → 不计费」这条降级分支。
+   */
+  pricesForVersion(version: number): Promise<PriceBook | null> {
+    const book = this.priceBook;
+    return Promise.resolve(book !== null && book.version === version ? book : null);
+  }
 }
 
-/** 端点测试用的最小价目表：只登记会被走到的那几项 */
-export function fakePriceBook(overrides: Partial<PriceBook> = {}): PriceBook {
+/**
+ * 测试用的最小价目表：只登记会被走到的那几项。
+ *
+ * **数字是示意值，不是迁移 0013 的种子价。** 用另一套数让测试里的断言
+ * （比如「PDF 扣 80」）不会因为运营调价而变红 —— 那些断言测的是
+ * 「按格式取对应 SKU」，不是「PDF 值多少钱」。
+ */
+export function samplePriceBook(overrides: Partial<PriceBook> = {}): PriceBook {
   return {
     version: 7,
     publishedAt: '2026-04-01T00:00:00.000Z',

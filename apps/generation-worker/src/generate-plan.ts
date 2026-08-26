@@ -31,8 +31,10 @@ import {
   type TravelPlanLlmOutput,
 } from '@tps/schemas';
 import type { GenerationJobPayload } from '@tps/queue';
+import { UsageMeter } from '@tps/billing';
 import { uuidv7, type Logger, type UserType } from '@tps/shared';
 
+import type { JobBilling } from './billing.js';
 import type { AiLayerDeps } from './assets/resolve-assets.js';
 import type { LicensedSourceLayerDeps } from './assets/resolvers/licensed-source.js';
 import {
@@ -53,6 +55,7 @@ import {
   type BuildPresentationDeps,
 } from './presentation/build-presentation.js';
 import { retrieveReferences, type RetrievalDeps } from './retrieval.js';
+import { isUnrecoverable } from './retry-policy.js';
 import { StageTimer } from './stage-timer.js';
 
 /**
@@ -157,6 +160,15 @@ export interface GeneratePlanDeps {
    * 缺省时降级链没有搜索层（等价于 9.6 的全局熔断已打开）。
    */
   readonly searchAssets?: () => LicensedSourceLayerDeps;
+
+  /**
+   * CR 结算（C-4）。
+   *
+   * 缺省时**完全不计费**，也不读钱包表 —— 与 API 侧的同名开关
+   * （`CREDIT_BILLING_ENABLED`）成对：库还没迁到 0013 的部署里那些表不存在，
+   * 而一次生成任务不该因为计费表缺失而失败。
+   */
+  readonly billing?: JobBilling;
 }
 
 export type JobFailureCode = PlanErrorCode | 'JOB_TIMEOUT' | 'JOB_QUEUE_TIMEOUT';
@@ -261,6 +273,7 @@ async function callModel(
   maxTokens: number,
   purpose: 'plan' | 'repair',
   deadline: JobDeadline,
+  meter: UsageMeter,
 ): Promise<{ output: TravelPlanLlmOutput; inputTokens: number; outputTokens: number }> {
   /*
    * 单次超时压到任务剩余预算内（16.3）。剩 8 秒时不该再发一个 30 秒超时的
@@ -319,6 +332,15 @@ async function callModel(
     outputTokens: result.usage.outputTokens,
   });
 
+  /*
+   * 计费打点（C-4）。与上面那次指标打点同一位置、同一理由：钱已经花了。
+   *
+   * 用 `result.model` 而不是 `llm.model`：故障转移下前者是**真正出活的那个
+   * 候选**，而后者恒为主候选的名字（见 wrapLlmFailover）。价目表按模型定价，
+   * 拿主候选的名字计费会让「主候选挂了、由更贵的备选顶上」被按主候选的价收。
+   */
+  meter.addLlm(result.model, result.usage.inputTokens, result.usage.outputTokens);
+
   const parsed = TravelPlanLlmOutputSchema.safeParse(result.data);
   if (!parsed.success) {
     throw new PlanSchemaInvalidError(parsed.error.issues[0]?.message ?? '结构不符');
@@ -354,6 +376,7 @@ async function generateContent(
   normalized: NormalizedTravelRequest,
   references: Awaited<ReturnType<typeof retrieveReferences>>['references'],
   deadline: JobDeadline,
+  meter: UsageMeter,
 ): Promise<{ output: TravelPlanLlmOutput; inputTokens: number; outputTokens: number }> {
   const segments = planSegments(normalized.total_days);
   const maxTokens = maxTokensForDays(normalized.total_days);
@@ -376,7 +399,7 @@ async function generateContent(
       totalSegments: segments.length,
       references: references.map((reference) => reference.projection),
     });
-    const result = await callModel(deps, llm, messages, maxTokens, 'plan', deadline);
+    const result = await callModel(deps, llm, messages, maxTokens, 'plan', deadline, meter);
     outputs.push(result.output);
     inputTokens += result.inputTokens;
     outputTokens += result.outputTokens;
@@ -385,9 +408,17 @@ async function generateContent(
   return { output: mergeSegments(outputs), inputTokens, outputTokens };
 }
 
-export async function generatePlan(
+/**
+ * 一次生成任务。
+ *
+ * `meter` 由 `generatePlan` 创建并在结算时读取 —— 每任务一个实例，
+ * 与 `AiImageBudget` / `ImageSearchBudget` 同一形态。共享实例的表现是
+ * 「用户被收了别人的钱」。
+ */
+async function runJob(
   deps: GeneratePlanDeps,
   payload: GenerationJobPayload,
+  meter: UsageMeter,
 ): Promise<GenerateOutcome> {
   const context = await deps.plans.findJobContext(payload.jobId);
   if (context === null) {
@@ -553,7 +584,7 @@ export async function generatePlan(
   if (!(await step('GENERATING_PLAN'))) return cancelled('GENERATING_PLAN');
   let generated;
   try {
-    generated = await generateContent(deps, llm, normalized, retrieved.references, deadline);
+    generated = await generateContent(deps, llm, normalized, retrieved.references, deadline, meter);
   } catch (error) {
     const code = errorCodeFor(error);
     log.error({ stage: 'GENERATING_PLAN', error_code: code }, '计划生成失败');
@@ -602,6 +633,7 @@ export async function generatePlan(
           maxTokensForDays(normalized.total_days),
           'repair',
           deadline,
+          meter,
         );
         generated.inputTokens += result.inputTokens;
         generated.outputTokens += result.outputTokens;
@@ -757,6 +789,28 @@ export async function generatePlan(
     return { outcome: 'saved', versionId: saved.versionId, status: finalStatus };
   }
 
+  /*
+   * 两个预算实例提到 try 之外：它们的计数就是计费口径（见下面的 `meterAssets`），
+   * 而编排抛异常时那些 AI 图已经生成、钱已经花了 —— catch 分支里读不到它们的话，
+   * 「编排崩了」会变成「这次生成的图不要钱」。
+   */
+  let ai: AiLayerDeps | undefined;
+  let licensedSource: LicensedSourceLayerDeps | undefined;
+
+  /**
+   * 素材侧的计费打点（C-4 的三处之一，另一处是 `callModel` 里的 token）。
+   *
+   * 读预算对象的 `used` 而不是在素材管线里再埋一层：`AiImageBudget` 的
+   * `images` 恰好就是「真的生成出来的张数」—— 失败与同键去重都调了 `refund`，
+   * 不计在内。这与 docs 里那条施工注意（打点必须挂在图真的生成成功处，
+   * 不能挂在 `reserve`）说的是同一件事，而这里不需要改动素材管线就已经满足。
+   */
+  const meterAssets = (pages: number): void => {
+    meter.addAiImages(ai?.budget.used.images ?? 0);
+    meter.addImageSearches(licensedSource?.searchBudget.used.searches ?? 0);
+    meter.addRenderPages(pages);
+  };
+
   try {
     await step('BUILDING_PRESENTATION');
 
@@ -768,8 +822,8 @@ export async function generatePlan(
     };
 
     await step('RESOLVING_ASSETS');
-    const ai = deps.aiAssets === undefined ? undefined : await deps.aiAssets(modelContext);
-    const licensedSource = deps.searchAssets?.();
+    ai = deps.aiAssets === undefined ? undefined : await deps.aiAssets(modelContext);
+    licensedSource = deps.searchAssets?.();
     const result = await buildAndSavePresentations(
       {
         ...presentation,
@@ -779,6 +833,8 @@ export async function generatePlan(
       },
       plan,
     );
+
+    meterAssets(result.pages);
 
     log.info(
       {
@@ -891,10 +947,99 @@ export async function generatePlan(
       },
     };
   } catch (error) {
+    /* 页数按 0：一页都没落库。但已经生成的 AI 图仍要计费，钱已经花了 */
+    meterAssets(0);
     log.error(
       { stage: 'RESOLVING_ASSETS', plan_version_id: saved.versionId },
       `展示编排失败，计划仍可通过 13.3 读取：${String(error)}`,
     );
     return { outcome: 'saved', versionId: saved.versionId, status: finalStatus };
   }
+}
+
+/**
+ * 任务终态的 CR 结算（C-4）。
+ *
+ * 单一出口：`runJob` 有十来个 return，逐个接结算迟早漏掉一条 ——
+ * 而漏掉的表现是那条路径上的预留永远挂着，用户的钱冻到过期。
+ *
+ * ## 四条分支的口径
+ *
+ * ```text
+ * saved              settle    用户拿到了计划（13.3 可读即算拿到）
+ * rejected           release   队列不重试它（main.ts 只对 failed 抛错）→ 已是终态
+ * failed 不可重试    release   重试也是同样的结论，不会再有下一次
+ * failed 可重试      保留      预留留给重试，理由见 billing.ts 文件头
+ * cancelled          release   用户主动放弃，不该为没要的东西付费
+ * not_found          什么都不做  用户已被清理，钱包与预留随 FK 级联删除了
+ * already_terminal   什么都不做  另一个消费者已经结过
+ * ```
+ *
+ * ## 结算失败不改变任务结果
+ *
+ * 整段包在 try 里：计划已经生成、已经落库、用户已经能看到。此刻因为一次
+ * 数据库抖动把任务判成失败，是拿一份做好的产物去换一条账目 ——
+ * 而账目还能靠预留过期与对账补，产物补不回来。
+ */
+async function settleBilling(
+  deps: GeneratePlanDeps,
+  jobId: string,
+  outcome: GenerateOutcome,
+  meter: UsageMeter,
+): Promise<void> {
+  const billing = deps.billing;
+  if (billing === undefined) return;
+
+  const usage = meter.snapshot();
+  try {
+    switch (outcome.outcome) {
+      case 'saved':
+        await billing.settle({ jobId, usage });
+        return;
+      case 'rejected':
+        await billing.release({ jobId, usage });
+        return;
+      case 'failed': {
+        if (isUnrecoverable(outcome.errorCode)) {
+          await billing.release({ jobId, usage });
+          return;
+        }
+        const priced = await billing.priceOf({ jobId, usage });
+        if (priced !== null) {
+          deps.logger.info(
+            {
+              job_id: jobId,
+              stage: 'billing',
+              error_code: outcome.errorCode,
+              burned_cr: priced.totalCr,
+            },
+            '可重试的失败：预留保留给重试，本次烧掉的成本只记日志',
+          );
+        }
+        return;
+      }
+      case 'skipped':
+        if (outcome.reason === 'cancelled') await billing.release({ jobId, usage });
+        return;
+    }
+  } catch (error) {
+    deps.logger.error(
+      { job_id: jobId, stage: 'billing' },
+      `CR 结算失败，任务结果不受影响（预留将由过期清理兜住）：${String(error)}`,
+    );
+  }
+}
+
+export async function generatePlan(
+  deps: GeneratePlanDeps,
+  payload: GenerationJobPayload,
+): Promise<GenerateOutcome> {
+  const meter = new UsageMeter();
+  const outcome = await runJob(deps, payload, meter);
+  /*
+   * `runJob` 抛异常时**不**结算：那时任务不在终态，BullMQ 会重试，
+   * 而预留正是要留给那次重试的（与「可重试的失败」同一条口径）。
+   */
+  await settleBilling(deps, payload.jobId, outcome, meter);
+  return outcome;
 }

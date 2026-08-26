@@ -8,13 +8,13 @@ import {
   type QuotaConfig,
   type ServiceConfig,
 } from '@tps/shared';
+import { InMemoryCreditWalletRepository, samplePriceBook } from '@tps/db';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { FakeUsersRepository } from '../identity/fake-users-repository.js';
 import { InMemorySessionStore } from '../identity/session-store.js';
 import { IdentityService } from '../identity/service.js';
 import { buildServer } from '../server.js';
-import { FakeCreditWalletRepository, fakePriceBook } from './fake-wallet-repository.js';
 import { CreditsService } from './service.js';
 
 /**
@@ -62,11 +62,11 @@ function clock(start = NOW): { now: () => Date; advance: (ms: number) => void } 
 
 function makeService(options: { readonly priceCacheMs?: number } = {}): {
   readonly service: CreditsService;
-  readonly wallet: FakeCreditWalletRepository;
+  readonly wallet: InMemoryCreditWalletRepository;
   readonly time: ReturnType<typeof clock>;
 } {
-  const wallet = new FakeCreditWalletRepository();
-  wallet.priceBook = fakePriceBook();
+  const wallet = new InMemoryCreditWalletRepository();
+  wallet.priceBook = samplePriceBook();
   const time = clock();
   const service = new CreditsService({
     wallet,
@@ -123,7 +123,7 @@ describe('CreditsService 报价', () => {
     const { service, wallet, time } = makeService();
     const first = await service.quote(5);
 
-    wallet.priceBook = fakePriceBook({ version: 8 });
+    wallet.priceBook = samplePriceBook({ version: 8 });
     expect((await service.quote(5)).priceVersion).toBe(first.priceVersion);
 
     time.advance(60_001);
@@ -164,7 +164,7 @@ describe('CreditsService.checkJob 预检', () => {
 
   it('价目表把所有项配成 0 时不预留（预留 0 会撞 amount_cr > 0 的 CHECK）', async () => {
     const { service, wallet } = makeService();
-    wallet.priceBook = fakePriceBook({ items: {} });
+    wallet.priceBook = samplePriceBook({ items: {} });
 
     expect(await service.checkJob({ userId: 'u1', totalDays: 5 })).toEqual({
       kind: 'free',
@@ -227,7 +227,7 @@ describe('CreditsService 导出扣费', () => {
 
   it('导出的价目缺失时不收费（少收一笔好过让用户导不出来）', async () => {
     const { service, wallet } = makeService();
-    wallet.priceBook = fakePriceBook({ items: {} });
+    wallet.priceBook = samplePriceBook({ items: {} });
     wallet.seed('u1', 500);
 
     expect(
@@ -246,7 +246,7 @@ describe('CreditsService 导出扣费', () => {
 
 interface Harness {
   readonly app: ReturnType<typeof buildServer>;
-  readonly wallet: FakeCreditWalletRepository;
+  readonly wallet: InMemoryCreditWalletRepository;
 }
 
 let harness: Harness | null = null;
@@ -257,8 +257,8 @@ afterEach(async () => {
 });
 
 function build(): Harness {
-  const wallet = new FakeCreditWalletRepository();
-  wallet.priceBook = fakePriceBook();
+  const wallet = new InMemoryCreditWalletRepository();
+  wallet.priceBook = samplePriceBook();
 
   const users = new FakeUsersRepository(() => NOW);
   const sessions = new InMemorySessionStore(() => NOW.getTime());

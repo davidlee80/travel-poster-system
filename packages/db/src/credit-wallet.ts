@@ -68,6 +68,15 @@ export interface SettleResult {
   readonly replayed: boolean;
 }
 
+export interface CreditHold {
+  readonly holdId: string;
+  readonly userId: string;
+  readonly amountCr: number;
+  /** 预留时锁定的价目版本。**结算必须按它算钱**，理由见 `pricesForVersion` */
+  readonly priceVersion: number;
+  readonly status: 'ACTIVE' | 'SETTLED' | 'RELEASED' | 'EXPIRED';
+}
+
 export interface CreditWalletRepository {
   balance(userId: string): Promise<WalletBalance>;
   history(input: {
@@ -135,6 +144,18 @@ export interface CreditWalletRepository {
 
   /** 当前发布的价目表。`null` = 一版都没发布 */
   publishedPrices(): Promise<PriceBook | null>;
+
+  /** 这个任务的预留。`null` = 没预留过（0013 之前入队，或计费当时关着） */
+  findHold(jobId: string): Promise<CreditHold | null>;
+
+  /**
+   * 指定版本的价目表，**不看它是否仍是发布版**。
+   *
+   * 结算必须用 `credit_holds.price_version` 那一版，而不是当前发布版：
+   * 运营在任务在途时调价，用当前版结算会让用户按他提交时看不到的价格被扣。
+   * 「已提交的任务不受调价影响」这条承诺就落在这个方法上。
+   */
+  pricesForVersion(version: number): Promise<PriceBook | null>;
 }
 
 // ── 实现 ────────────────────────────────────────────────────
@@ -417,10 +438,10 @@ export function createCreditWalletRepository(pool: Pool): CreditWalletRepository
         const key = `job:${input.jobId}`;
         if (hold.status !== 'ACTIVE') {
           /* 已结算过。返回原来那次的金额，从流水里读回来 */
-          const prior = await client.query<{ amount_cr: string; metadata: Record<string, unknown> }>(
-            `SELECT amount_cr, metadata FROM credit_ledger WHERE idempotency_key = $1`,
-            [key],
-          );
+          const prior = await client.query<{
+            amount_cr: string;
+            metadata: Record<string, unknown>;
+          }>(`SELECT amount_cr, metadata FROM credit_ledger WHERE idempotency_key = $1`, [key]);
           const row = prior.rows[0];
           const meta = (row?.metadata ?? {}) as { refunded_cr?: number; write_off_cr?: number };
           return {
@@ -674,33 +695,79 @@ export function createCreditWalletRepository(pool: Pool): CreditWalletRepository
     },
 
     async publishedPrices() {
-      const result = await pool.query<{
-        version: string;
-        published_at: Date;
-        sku: string;
-        unit: string;
-        price_cr: string;
-      }>(
+      const result = await pool.query<PriceRow>(
         `SELECT version, published_at, sku, unit, price_cr
          FROM credit_prices_current
          ORDER BY sku`,
       );
-      const first = result.rows[0];
-      if (first === undefined) return null;
+      return toPriceBook(result.rows);
+    },
 
-      const items: Record<string, PriceItem> = {};
-      for (const row of result.rows) {
-        items[row.sku] = {
-          sku: row.sku,
-          unit: row.unit as BillingUnit,
-          priceCr: big(row.price_cr),
-        };
-      }
+    async findHold(jobId) {
+      const result = await pool.query<{
+        hold_id: string;
+        user_id: string;
+        amount_cr: string;
+        price_version: string;
+        status: CreditHold['status'];
+      }>(
+        `SELECT hold_id, user_id, amount_cr, price_version, status
+         FROM credit_holds WHERE job_id = $1`,
+        [jobId],
+      );
+      const row = result.rows[0];
+      if (row === undefined) return null;
       return {
-        version: big(first.version),
-        publishedAt: first.published_at.toISOString(),
-        items,
+        holdId: row.hold_id,
+        userId: row.user_id,
+        amountCr: big(row.amount_cr),
+        priceVersion: big(row.price_version),
+        status: row.status,
       };
     },
+
+    async pricesForVersion(version) {
+      /*
+       * 直接查两张表而不是 `credit_prices_current` 视图：那个视图只含发布版，
+       * 而这里要的恰恰是「可能已经被归档的那一版」。
+       */
+      const result = await pool.query<PriceRow>(
+        `SELECT v.version, COALESCE(v.published_at, v.created_at) AS published_at,
+                i.sku, i.unit, i.price_cr
+         FROM credit_price_versions v
+         JOIN credit_price_items i ON i.version_id = v.id
+         WHERE v.version = $1
+         ORDER BY i.sku`,
+        [version],
+      );
+      return toPriceBook(result.rows);
+    },
+  };
+}
+
+interface PriceRow {
+  readonly version: string;
+  readonly published_at: Date;
+  readonly sku: string;
+  readonly unit: string;
+  readonly price_cr: string;
+}
+
+function toPriceBook(rows: readonly PriceRow[]): PriceBook | null {
+  const first = rows[0];
+  if (first === undefined) return null;
+
+  const items: Record<string, PriceItem> = {};
+  for (const row of rows) {
+    items[row.sku] = {
+      sku: row.sku,
+      unit: row.unit as BillingUnit,
+      priceCr: big(row.price_cr),
+    };
+  }
+  return {
+    version: big(first.version),
+    publishedAt: first.published_at.toISOString(),
+    items,
   };
 }

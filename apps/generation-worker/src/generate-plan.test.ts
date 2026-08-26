@@ -1,3 +1,4 @@
+import { InMemoryCreditWalletRepository, samplePriceBook } from '@tps/db';
 import type {
   JobContext,
   RetrievalCandidate,
@@ -7,7 +8,12 @@ import type {
   TravelPlansRepository,
   UpdateJobStateInput,
 } from '@tps/db';
-import { FakeLlmClient, LocalHashingEmbeddingClient, LlmUnavailableError } from '@tps/llm';
+import {
+  FakeLlmClient,
+  LocalHashingEmbeddingClient,
+  LlmUnavailableError,
+  type LlmClient,
+} from '@tps/llm';
 import { makeValidContext, makeValidPlan } from '@tps/planning';
 import {
   findForbiddenProjectionKeys,
@@ -18,6 +24,7 @@ import {
 import { createSilentLogger } from '@tps/shared';
 import { describe, expect, it } from 'vitest';
 
+import { createJobBilling } from './billing.js';
 import { PLAN_PROMPT_VERSION, generatePlan, type GeneratePlanDeps } from './generate-plan.js';
 
 /**
@@ -162,6 +169,8 @@ interface Harness {
   readonly plans: FakePlans;
   readonly llm: FakeLlmClient;
   readonly retrievalQueries: RetrievalQuery[];
+  /** C-4：装配了计费时的钱包，否则是一个没人读的空钱包 */
+  readonly wallet: InMemoryCreditWalletRepository;
 }
 
 function harness(
@@ -169,17 +178,32 @@ function harness(
     readonly responses?: readonly unknown[];
     readonly context?: JobContext | null;
     readonly candidates?: readonly RetrievalCandidate[];
+    /** C-4：装配 CR 结算。缺省不装 —— 既有用例测的是编排决策，与钱无关 */
+    readonly billing?: boolean;
+    /** 替换模型客户端（验证「按真正出活的候选计价」用） */
+    readonly client?: LlmClient;
   } = {},
 ): Harness {
   const plans = new FakePlans(options.context === undefined ? jobContext() : options.context);
   const llm = new FakeLlmClient(options.responses ?? [llmOutputOf(makeValidPlan())]);
+  /* `client` 给的是「主候选名与出活者不同」的桩，只有计费那一组用它 */
+  const client: LlmClient = options.client ?? llm;
   const retrievalQueries: RetrievalQuery[] = [];
+
+  const wallet = new InMemoryCreditWalletRepository();
+  wallet.priceBook = samplePriceBook();
+  const billing =
+    options.billing === true
+      ? createJobBilling({ wallet, logger: createSilentLogger(), priceCacheMs: 0 })
+      : undefined;
 
   return {
     plans,
     llm,
     retrievalQueries,
+    wallet,
     deps: {
+      ...(billing === undefined ? {} : { billing }),
       plans,
       retrieval: {
         repository: {
@@ -190,7 +214,7 @@ function harness(
         },
         embedding: new LocalHashingEmbeddingClient(),
       },
-      llm,
+      llm: client,
       embedding: new LocalHashingEmbeddingClient(),
       logger: createSilentLogger(),
       llmTimeoutMs: 30_000,
@@ -711,5 +735,151 @@ describe('16.1 推进到 COMPLETED 与 T1/T2 里程碑（TP-4-08/14）', () => {
      */
     await generatePlan(deps, payload);
     expect(plans.milestones).toContain('t1');
+  });
+});
+
+describe('CR 结算（C-4）', () => {
+  const HOLD_CR = 5_000;
+
+  /** 装配计费并预留一笔，返回夹具 */
+  async function withHold(
+    options: Parameters<typeof harness>[0] = {},
+  ): Promise<ReturnType<typeof harness>> {
+    const built = harness({ ...options, billing: true });
+    built.wallet.seed('user-1', 100_000);
+    const reserved = await built.wallet.reserve({
+      userId: 'user-1',
+      jobId: 'job-1',
+      amountCr: HOLD_CR,
+      priceVersion: 7,
+      expiresAt: new Date('2026-04-01T12:00:00Z'),
+    });
+    expect(reserved.ok).toBe(true);
+    return built;
+  }
+
+  const kinds = async (wallet: ReturnType<typeof harness>['wallet']): Promise<string[]> =>
+    (await wallet.history({ userId: 'user-1', limit: 20 })).map((entry) => entry.kind);
+
+  it('任务成功 → 结算，冻结归零', async () => {
+    const { deps, wallet } = await withHold();
+
+    const result = await generatePlan(deps, payload);
+    expect(result.outcome).toBe('saved');
+
+    const balance = await wallet.balance('user-1');
+    expect(balance.heldCr).toBe(0);
+    /*
+     * 没装展示编排，因此只有 `plan.base_fee`（100）—— `FakeLlmClient` 报
+     * 0 token（假调用不花钱，见 client.ts），也没有 AI 图与页面。
+     * 断言那个 100 而不是「大于 0」：它证明服务费真的收了，
+     * 而「大于 0」在任何一项被误算时也成立。
+     */
+    expect(balance.balanceCr).toBe(100_000 - 100);
+    expect(await kinds(wallet)).toEqual(['SPEND']);
+  });
+
+  it('token 按真正出活的候选计价，而不是主候选', async () => {
+    /*
+     * 故障转移下 `llm.model` 恒为主候选的名字，而出活的可能是更贵的备选
+     * （见 wrapLlmFailover）。拿主候选的名字计费会让「主候选挂了、备选顶上」
+     * 这次调用按主候选的价收 —— 而两者能差一个数量级。
+     */
+    const client: LlmClient = {
+      model: 'primary-cheap',
+      complete: () =>
+        Promise.resolve({
+          data: llmOutputOf(makeValidPlan()),
+          model: 'backup-expensive',
+          usage: { inputTokens: 1_000_000, outputTokens: 0 },
+        }),
+    };
+    const { deps, wallet } = await withHold({ client });
+
+    await generatePlan(deps, payload);
+
+    /* 价目表只登记了 `llm.in:*`（15000/百万）→ 100 服务费 + 15000 */
+    const spend = (await wallet.history({ userId: 'user-1', limit: 10 })).find(
+      (entry) => entry.kind === 'SPEND',
+    );
+    expect(spend?.amountCr).toBe(-15_100);
+    const meta = spend?.metadata as { lines?: { sku: string }[] };
+    expect(meta.lines?.map((line) => line.sku)).toContain('llm.in:backup-expensive');
+  });
+
+  it('计划被拒（REJECTED）→ 预留全额退 + 记坏账', async () => {
+    /*
+     * 这条路径**队列不会重试**（main.ts 只对 `outcome === 'failed'` 抛错），
+     * 因此它就是终态，钱必须当场还。不还的话用户为一份他永远看不到的
+     * REJECTED 草稿被冻了两小时的钱。
+     *
+     * 拿 `rejected` 而不是「不可重试的 failed」来验这条口径，是因为后者在
+     * 生成链路上几乎不可达：`PLAN_HARD_CONSTRAINT_UNSATISFIABLE` 是 13.7 里
+     * 唯一不可重试的生成失败码，而它恰好走的就是 `rejected` 这条路。
+     */
+    const unsatisfiable = makeValidPlan();
+    unsatisfiable.constraint_report.satisfied = [];
+    const { deps, wallet } = await withHold({
+      responses: [
+        llmOutputOf(unsatisfiable),
+        llmOutputOf(unsatisfiable),
+        llmOutputOf(unsatisfiable),
+      ],
+    });
+
+    const result = await generatePlan(deps, payload);
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      errorCode: 'PLAN_HARD_CONSTRAINT_UNSATISFIABLE',
+    });
+
+    expect(await wallet.balance('user-1')).toEqual({ balanceCr: 100_000, heldCr: 0 });
+    expect(await kinds(wallet)).toContain('REFUND');
+  });
+
+  it('可重试的失败 → 预留保留给重试（否则重试成功就免费了）', async () => {
+    /*
+     * **这是 C-4 最容易写反的一条。** 释放了的话，BullMQ 重试成功时
+     * `settle` 找不到 ACTIVE 的预留，按 C-2 的设计不扣费 ——
+     * 于是「失败一次然后成功」的任务全部免费，而 LLM 超时导致的重试并不罕见。
+     */
+    const { deps, wallet } = await withHold({
+      responses: [new LlmUnavailableError('上游 503')],
+    });
+
+    const result = await generatePlan(deps, payload);
+    expect(result).toMatchObject({ outcome: 'failed', errorCode: 'PLAN_LLM_UNAVAILABLE' });
+
+    /* 钱还冻着，一条流水都没有 */
+    expect(await wallet.balance('user-1')).toEqual({ balanceCr: 95_000, heldCr: HOLD_CR });
+    expect(await kinds(wallet)).toEqual([]);
+  });
+
+  it('用户取消 → 预留全额退', async () => {
+    const { deps, plans, wallet } = await withHold();
+    plans.cancelOnNextTransition = true;
+
+    const result = await generatePlan(deps, payload);
+    expect(result).toMatchObject({ outcome: 'skipped', reason: 'cancelled' });
+
+    expect(await wallet.balance('user-1')).toEqual({ balanceCr: 100_000, heldCr: 0 });
+    expect(await kinds(wallet)).toContain('REFUND');
+  });
+
+  it('未装配计费时一次都不读钱包', async () => {
+    /* 库还没迁到 0013 的部署：那些表不存在，读一次就是 500 */
+    const { deps, wallet } = harness();
+    await generatePlan(deps, payload);
+    expect(await kinds(wallet)).toEqual([]);
+  });
+
+  it('没有预留时不扣费（0013 之前入队的任务）', async () => {
+    const built = harness({ billing: true });
+    built.wallet.seed('user-1', 100_000);
+
+    await generatePlan(built.deps, payload);
+
+    expect(await built.wallet.balance('user-1')).toEqual({ balanceCr: 100_000, heldCr: 0 });
+    expect(await kinds(built.wallet)).toEqual([]);
   });
 });

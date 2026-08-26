@@ -1,6 +1,7 @@
 import {
   checkDatabase,
   createAssetsRepository,
+  createCreditWalletRepository,
   createModelPoolsRepository,
   createPool,
   createPresentationsRepository,
@@ -8,6 +9,7 @@ import {
   createTravelPlansRepository,
   loadDbConfig,
 } from '@tps/db';
+import { EMPTY_USAGE } from '@tps/billing';
 import {
   FakeLlmClient,
   LocalHashingEmbeddingClient,
@@ -38,10 +40,18 @@ import {
   withRestoredTrace,
 } from '@tps/queue';
 import { S3ObjectStorage, loadAssetsStorageConfig } from '@tps/storage';
-import { loadQuotaConfig, optionalInt, quotaFor, requireString, runWorker } from '@tps/shared';
+import {
+  loadQuotaConfig,
+  optionalBool,
+  optionalInt,
+  quotaFor,
+  requireString,
+  runWorker,
+} from '@tps/shared';
 import { UnrecoverableError, Worker } from 'bullmq';
 
 import { AiImageBudget, DEFAULT_AI_IMAGE_DAILY_BUDGET } from './assets/ai-budget.js';
+import { createJobBilling, type JobBilling } from './billing.js';
 import { selectImageClient, selectLlmClient } from './assets/model-selection.js';
 import { ImageSearchBudget } from './assets/search-budget.js';
 import { isUnrecoverable } from './retry-policy.js';
@@ -109,6 +119,18 @@ const aiDailyBudget = optionalInt('AI_IMAGE_DAILY_BUDGET', DEFAULT_AI_IMAGE_DAIL
 const imageSearchConfig = loadImageSearchConfig();
 const licensedSource = createLicensedSourceClient(imageSearchConfig);
 
+/*
+ * CR 结算（C-4）。默认**关闭**，与 api 侧同一个开关名。
+ *
+ * 两侧必须一起开：只开 api 的话每个任务都会留下一笔永不结算的预留
+ * （钱冻到 2 小时后过期）；只开 worker 的话没有预留可结，`settle` 找不到
+ * hold 就直接返回 —— 一次都不收费。
+ *
+ * 关闭时 `billing` 为 undefined，生成任务一次都不读钱包表 ——
+ * 库还没迁到 0013 的部署里那些表不存在。
+ */
+const billingEnabled = optionalBool('CREDIT_BILLING_ENABLED', false);
+
 await runWorker({
   serviceName: SERVICE_NAME,
   probePort: 3011,
@@ -117,6 +139,13 @@ await runWorker({
   tracing: () => startTracing(loadTracingConfig(SERVICE_NAME)),
 
   start: (handle) => {
+    const billing: JobBilling | undefined = billingEnabled
+      ? createJobBilling({
+          wallet: createCreditWalletRepository(dbPool),
+          logger: handle.logger,
+        })
+      : undefined;
+
     handle.logger.info(
       {
         llm_mode: llmConfig.mode,
@@ -125,6 +154,8 @@ await runWorker({
         image_model: imageConfig.model || '(fake)',
         image_timeout_ms: imageConfig.timeoutMs,
         image_job_ai_budget_ms: imageConfig.jobAiBudgetMs,
+        /* 关闭时生成完全不计费 —— 这一条必须能从启动日志里一眼看到 */
+        credit_billing_enabled: billingEnabled,
       },
       '生成 Worker 就绪，开始消费队列',
     );
@@ -217,6 +248,7 @@ await runWorker({
                     dailyBudget: imageSearchConfig.dailyBudget,
                   }),
                 }),
+                ...(billing === undefined ? {} : { billing }),
                 aiAssets: async ({ userType, tierLevel }) => {
                   /*
                    * 候选模型按 `tier_level` 从池里取（迁移 0009）。
@@ -318,6 +350,29 @@ await runWorker({
 
       const parsed = GenerationJobPayloadSchema.safeParse(job.data);
       if (!parsed.success) return;
+
+      /*
+       * ── 重试耗尽：释放预留（C-4）──
+       *
+       * 可重试的失败刻意**不**释放预留（见 billing.ts 文件头：释放了的话
+       * 重试成功时会免费）。而重试耗尽之后不会再有下一次消费，
+       * 那笔钱必须还给用户 —— 否则它冻到 `expires_at`（2 小时）才回来。
+       *
+       * 这里读不到那次消费的用量（累加器在 `generatePlan` 之内），
+       * 因此坏账按 0 记：烧掉的成本只在日志里。要把它也记进流水，得让
+       * 「记坏账」与「释放预留」变成两个可分开调用的操作，而那会让
+       * 「既结算又坏账」这种自相矛盾的记录成为可能。
+       */
+      if (billing !== undefined) {
+        void billing
+          .release({ jobId: parsed.data.jobId, usage: EMPTY_USAGE })
+          .catch((releaseError: unknown) => {
+            handle.logger.error(
+              { job_id: parsed.data.jobId, stage: 'billing' },
+              `重试耗尽后释放预留失败：${String(releaseError)}`,
+            );
+          });
+      }
 
       void deadLetters
         .push(PLAN_QUEUE_NAME, {

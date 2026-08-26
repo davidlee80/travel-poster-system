@@ -121,6 +121,7 @@ export {
 
 export {
   createCreditWalletRepository,
+  type CreditHold,
   type CreditWalletRepository,
   type LedgerEntry,
   type LedgerKind,
@@ -128,3 +129,5 @@ export {
   type SettleResult,
   type WalletBalance,
 } from './credit-wallet.js';
+
+export { InMemoryCreditWalletRepository, samplePriceBook } from './in-memory-credit-wallet.js';

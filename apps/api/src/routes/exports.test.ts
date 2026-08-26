@@ -1,5 +1,7 @@
 import {
+  InMemoryCreditWalletRepository,
   UniqueViolationError,
+  samplePriceBook,
   type ExportJobRow,
   type ExportRow,
   type ExportsRepository,
@@ -22,7 +24,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { DEFAULT_JOB_LIMITS } from '@tps/billing';
 
-import { FakeCreditWalletRepository, fakePriceBook } from '../credits/fake-wallet-repository.js';
 import { CreditsService } from '../credits/service.js';
 import { FakeUsersRepository } from '../identity/fake-users-repository.js';
 import { InMemorySessionStore } from '../identity/session-store.js';
@@ -146,7 +147,7 @@ interface Harness {
   readonly queue: InMemoryExportQueue;
   readonly storage: InMemoryExportStorage;
   readonly shutdown: GracefulShutdown;
-  readonly wallet: FakeCreditWalletRepository;
+  readonly wallet: InMemoryCreditWalletRepository;
 }
 
 let harness: Harness | null = null;
@@ -190,8 +191,8 @@ function makeHarness(billing: 'off' | 'on' = 'off'): Harness {
     shutdownTimeoutMs: 1_000,
   };
 
-  const wallet = new FakeCreditWalletRepository();
-  wallet.priceBook = fakePriceBook();
+  const wallet = new InMemoryCreditWalletRepository();
+  wallet.priceBook = samplePriceBook();
   const credits =
     billing === 'off'
       ? undefined

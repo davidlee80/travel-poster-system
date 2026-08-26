@@ -20,7 +20,9 @@ import {
   type ServiceConfig,
 } from '@tps/shared';
 import {
+  InMemoryCreditWalletRepository,
   UniqueViolationError,
+  samplePriceBook,
   type CancelJobResult,
   type PresentationDetail,
   type PresentationsRepository,
@@ -30,7 +32,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { DEFAULT_JOB_LIMITS } from '@tps/billing';
 
-import { FakeCreditWalletRepository, fakePriceBook } from '../credits/fake-wallet-repository.js';
 import { CreditsService } from '../credits/service.js';
 import { FakeUsersRepository } from '../identity/fake-users-repository.js';
 import { InMemorySessionStore } from '../identity/session-store.js';
@@ -301,7 +302,7 @@ interface Harness {
   readonly presentations: FakePresentationsRepository;
   readonly queue: InMemoryPlanQueue;
   readonly users: FakeUsersRepository;
-  readonly wallet: FakeCreditWalletRepository;
+  readonly wallet: InMemoryCreditWalletRepository;
 }
 
 let harness: Harness | null = null;
@@ -359,8 +360,8 @@ function build(
   const presentations = new FakePresentationsRepository();
   const queue = new InMemoryPlanQueue();
 
-  const wallet = new FakeCreditWalletRepository();
-  wallet.priceBook = fakePriceBook();
+  const wallet = new InMemoryCreditWalletRepository();
+  wallet.priceBook = samplePriceBook();
   const credits =
     billing === 'off'
       ? undefined
