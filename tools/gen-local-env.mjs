@@ -126,6 +126,19 @@ FEATURE_EXPORT_ENABLED=true
 FEATURE_GENERATION_ROLLOUT_PERCENT=100
 FEATURE_ANONYMOUS_ENABLED=false
 
+# ── 用户货币 CR ───────────────────────────────────────────────
+#
+# 三侧一起开（api / generation-worker / render-worker）：只开一侧各有各的坏处，
+# 见 docs/用户货币与计费.md 的「三侧开关必须一起开」。
+#
+# 打开它**不会立刻开始收费** —— 迁移 0013 种下的价目表是占位版（版本 1），
+# 实现把它视为「还没配价」。运营 clone 到版本 2 并发布后自动生效，
+# 最多 60 秒。因此这里默认 true 是安全的：结构就位，钱不动。
+#
+# 前提是库已迁到 0013（pnpm db:migrate）。没迁就打开的话，
+# 每个生成请求与每次会话查询都会撞一张不存在的表。
+CREDIT_BILLING_ENABLED=true
+
 # ── 可观测性（留空 = 不装配 OTel SDK）────────────────────────
 OTEL_EXPORTER_OTLP_ENDPOINT=
 OTEL_SERVICE_NAME=travel-poster-system
