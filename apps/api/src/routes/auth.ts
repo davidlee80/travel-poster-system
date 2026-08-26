@@ -301,6 +301,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       case 'registered':
         applyCookies(reply, result.cookies, secureCookies);
         recordIdentityEvent(result.upgraded ? 'upgrade' : 'register', 'succeeded');
+        /*
+         * 注册赠送（C-5）。**在 `sessionResponse` 之前** ——
+         * 那一步会读钱包，顺序反了的话新用户拿到的第一份会话里余额是 0，
+         * 而前端据它决定生成按钮禁不禁用：用户注册完看到的是「余额不足」。
+         *
+         * 发放失败不影响这次注册，理由见 `grantSignup`。
+         */
+        await deps.credits?.grantSignup(result.identity.userId);
         return reply.code(201).send(await sessionResponse(result.identity));
     }
   });

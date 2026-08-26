@@ -173,6 +173,62 @@ describe('CreditsService.checkJob 预检', () => {
   });
 });
 
+describe('CreditsService 注册赠送（C-5）', () => {
+  it('发放 signupGrantCr，且一个用户只发一次', async () => {
+    /*
+     * 幂等键是 `signup:<user_id>`。匿名原地升级走的是同一个 user_id，
+     * 因此「先匿名生成、再注册」不会比直接注册多拿一份。
+     */
+    const { service, wallet } = makeService();
+
+    await service.grantSignup('u1');
+    expect((await service.balance('u1')).balanceCr).toBe(9_900);
+
+    await service.grantSignup('u1');
+    expect((await service.balance('u1')).balanceCr).toBe(9_900);
+    expect(wallet.entries().filter((entry) => entry.kind === 'GRANT')).toHaveLength(1);
+  });
+
+  it('赠送额配成 0 时一条流水都不写', async () => {
+    /*
+     * 早退而不是让它撞 `credit()` 的「金额必须为正」—— env 表里写明
+     * 「0 = 不赠送」，那是一个受支持的配置，不该在日志里留下一条异常。
+     */
+    const wallet = new InMemoryCreditWalletRepository();
+    wallet.priceBook = samplePriceBook();
+    const service = new CreditsService({
+      wallet,
+      config: { ...creditConfig, signupGrantCr: 0 },
+      limits: DEFAULT_JOB_LIMITS,
+      logger: createSilentLogger(),
+      now: () => NOW,
+    });
+
+    await service.grantSignup('u1');
+    expect(wallet.entries()).toHaveLength(0);
+  });
+
+  it('发放失败不抛错 —— 注册已经成功了', async () => {
+    /*
+     * 走到这一步时用户行已落库、会话 Cookie 已写进响应头。抛错会让用户看到
+     * 一个失败的注册，而他的账号其实建好了 —— 他会再注册一次，
+     * 然后拿到「该手机号已注册」。
+     */
+    const wallet = new InMemoryCreditWalletRepository();
+    wallet.priceBook = samplePriceBook();
+    wallet.credit = () => Promise.reject(new Error('数据库抖了一下'));
+    const service = new CreditsService({
+      wallet,
+      config: creditConfig,
+      limits: DEFAULT_JOB_LIMITS,
+      logger: createSilentLogger(),
+      now: () => NOW,
+    });
+
+    await expect(service.grantSignup('u1')).resolves.toBeUndefined();
+  });
+});
+
 describe('CreditsService 导出扣费', () => {
   it('按格式扣对应的固定价', async () => {
     const { service, wallet } = makeService();
@@ -356,7 +412,12 @@ describe('GET /api/v1/credits/wallet', () => {
     );
   });
 
-  it('注册用户：没有钱包行时余额为 0，且读取不建行', async () => {
+  it('注册用户读到的是赠送后的余额', async () => {
+    /*
+     * 「没有钱包行时读到 0 且不建行」那条性质在 `@tps/db` 的集成测试里
+     * （真库能断言「表里确实没有那一行」）。这里能验的是端点层：
+     * 一个刚注册的用户读到的就是赠送额，而不是 0。
+     */
     const { cookie } = await registered();
     const response = await h().app.inject({
       method: 'GET',
@@ -365,7 +426,7 @@ describe('GET /api/v1/credits/wallet', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ balance_cr: 0, held_cr: 0, balance_cny: '0.00' });
+    expect(response.json()).toEqual({ balance_cr: 9_900, held_cr: 0, balance_cny: '9.90' });
   });
 
   it('返回余额、冻结额与人民币等值', async () => {
@@ -388,6 +449,8 @@ describe('POST /api/v1/credits/quote', () => {
      * 「按钮说够、提交被拒」，而用户看到的只有一个 402。
      */
     const { cookie, userId } = await registered();
+    /* 把赠送额清掉：这条用例要的是「余额不够」那一侧 */
+    h().wallet.seed(userId, 0);
 
     const poor = await h().app.inject({
       method: 'POST',
@@ -476,10 +539,11 @@ describe('GET /api/v1/credits/ledger', () => {
       items: { kind: string; amount_cr: number; metadata?: unknown }[];
       next_cursor: string | null;
     }>();
-    expect(body.items.map((item) => item.kind)).toEqual(['SPEND', 'GRANT']);
+    /* 倒序：本用例的两条在前，注册赠送那条在最后 */
+    expect(body.items.map((item) => item.kind)).toEqual(['SPEND', 'GRANT', 'GRANT']);
     expect(body.items[0]?.amount_cr).toBe(-50);
     expect(body.items[0]).not.toHaveProperty('metadata');
-    /* 只有两条、页大小 20 → 没有下一页 */
+    /* 三条、页大小 20 → 没有下一页 */
     expect(body.next_cursor).toBeNull();
   });
 
@@ -503,6 +567,47 @@ describe('GET /api/v1/credits/ledger', () => {
 
     expect(body.items).toHaveLength(2);
     expect(body.next_cursor).toBe(body.items[1]?.created_at);
+  });
+});
+
+describe('注册端点发放赠送（C-5）', () => {
+  it('注册成功后余额就是赠送额，第一份会话里就能看到', async () => {
+    /*
+     * **顺序要紧**：发放必须在构造会话响应之前。反了的话新用户拿到的第一份
+     * 会话余额是 0，而前端据它禁用生成按钮 —— 用户注册完看到「余额不足」。
+     */
+    const response = await h().app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: 'gift@example.com', password: 'Corgi-Bicycle-42!' },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json<{ wallet: { balance_cr: number; balance_cny: string } }>().wallet).toEqual(
+      {
+        balance_cr: 9_900,
+        held_cr: 0,
+        balance_cny: '9.90',
+      },
+    );
+  });
+
+  it('登录不再发放（赠送只在注册那一次）', async () => {
+    const { cookie } = await registered('login@example.com');
+    expect(cookie).not.toBe('');
+
+    const login = await h().app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'login@example.com', password: 'Corgi-Bicycle-42!' },
+    });
+    expect(login.statusCode).toBe(200);
+    expect(login.json<{ wallet: { balance_cr: number } }>().wallet.balance_cr).toBe(9_900);
+    expect(
+      h()
+        .wallet.entries()
+        .filter((entry) => entry.kind === 'GRANT'),
+    ).toHaveLength(1);
   });
 });
 

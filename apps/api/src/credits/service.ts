@@ -170,6 +170,49 @@ export class CreditsService {
     return creditsToCnyText(credits, this.deps.config);
   }
 
+  /**
+   * 首次注册赠送（C-5）。
+   *
+   * 幂等键 `signup:<user_id>`，因此一个用户只可能拿到一次 —— 匿名原地升级
+   * 走的是同一个 `user_id`，重复注册也不会再给一次。
+   *
+   * ## 失败不抛错
+   *
+   * 走到这里时注册**已经成功了**：用户行落了库，会话 Cookie 也已经写进
+   * 响应头。此刻抛错会让用户看到一个失败的注册，而他的账号其实建好了 ——
+   * 他会再注册一次，然后拿到「该手机号已注册」。
+   *
+   * 因此吞掉并打 error 级日志。补救是 `pnpm user:credit --phone ... --grant N`，
+   * 而日志里有 `user_id`，那条命令要的就是它。
+   */
+  async grantSignup(userId: string): Promise<void> {
+    const amountCr = this.deps.config.signupGrantCr;
+    /* 0 = 不赠送（env 表里写明了）。不早退的话会撞 `credit()` 的正数校验 */
+    if (amountCr <= 0) return;
+
+    try {
+      const result = await this.deps.wallet.credit({
+        userId,
+        amountCr,
+        kind: 'GRANT',
+        idempotencyKey: `signup:${userId}`,
+        refType: 'SIGNUP',
+        refId: userId,
+      });
+      if (!result.replayed) {
+        this.deps.logger.info(
+          { stage: 'billing', user_id: userId, amount_cr: amountCr },
+          '注册赠送已发放',
+        );
+      }
+    } catch (error) {
+      this.deps.logger.error(
+        { stage: 'billing', user_id: userId, amount_cr: amountCr },
+        `注册赠送发放失败，账号已建好（用 pnpm user:credit 补）：${String(error)}`,
+      );
+    }
+  }
+
   /** 一次生成的报价。`totalDays` 取标准化后的天数 */
   async quote(totalDays: number): Promise<CreditQuote> {
     const book = await this.priceBook();
