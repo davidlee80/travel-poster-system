@@ -9,11 +9,13 @@ export {
 
 export {
   BILLING_UNITS,
+  DEV_PRICE_VERSION,
   FIXED_SKUS,
   MODEL_SKU_PREFIXES,
   SEED_PRICE_VERSION,
   SKU_FALLBACK_MODEL,
   amountFor,
+  isProvisionalPriceBook,
   isSeedPriceBook,
   modelSku,
   priceOf,

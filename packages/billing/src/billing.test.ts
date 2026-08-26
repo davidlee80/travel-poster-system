@@ -8,7 +8,9 @@ import {
   type CreditConfig,
 } from './credits.js';
 import {
+  DEV_PRICE_VERSION,
   amountFor,
+  isProvisionalPriceBook,
   isSeedPriceBook,
   modelSku,
   priceOf,
@@ -285,10 +287,30 @@ describe('生成前的估算：典型值与上界', () => {
   });
 });
 
-describe('占位价目表可被识别', () => {
-  it('种子版本（1）被认出来 —— 带着占位价上线是收错钱，不是报错', () => {
+describe('临时价目表可被识别', () => {
+  it('占位版（1）与开发期版（2）是两个不同的判定', () => {
+    /*
+     * 两者分开是必要的，合成一个会二选一地出错：
+     *
+     *   都不计费   → 计费链路在开发期一次都不被走到，而没人跑的链路会烂掉
+     *   都计费     → 占位价真的去收钱（收错钱），且 14 天必然卡死
+     *
+     * 因此：占位 → 不计费；占位或开发期 → warn「这不是运营定价」。
+     */
     expect(isSeedPriceBook(BOOK)).toBe(true);
-    expect(isSeedPriceBook({ ...BOOK, version: 2 })).toBe(false);
+    expect(isSeedPriceBook({ ...BOOK, version: DEV_PRICE_VERSION })).toBe(false);
+
+    expect(isProvisionalPriceBook(BOOK)).toBe(true);
+    expect(isProvisionalPriceBook({ ...BOOK, version: DEV_PRICE_VERSION })).toBe(true);
+  });
+
+  it('运营定价（版本 3 起）两个判定都为 false —— 那一刻 warn 消失', () => {
+    /*
+     * 也就是说**改价必须换版本号**。原地改版本 2 的价格等于
+     * 「改完了系统仍然认为这是开发期定价」，而那条 warn 会一直响。
+     */
+    expect(isSeedPriceBook({ ...BOOK, version: 3 })).toBe(false);
+    expect(isProvisionalPriceBook({ ...BOOK, version: 3 })).toBe(false);
   });
 });
 

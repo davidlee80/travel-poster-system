@@ -52,17 +52,51 @@ export type ModelSkuPrefix = (typeof MODEL_SKU_PREFIXES)[number];
 export const SKU_FALLBACK_MODEL = '*';
 
 /**
- * 迁移 0013 种下的那一版价目表的版本号。
+ * 迁移 0013 种下的那一版：**占位**。
  *
- * 那一版的价格**全是占位值**，是为了让系统在没有运营配置时也能跑通，
- * 而不是真实定价。用「版本号等于 1」当判据而不是匹配 `note` 里的「占位」字样：
- * 后者一改文案就失效，而运营发布版本 2 时这条告警自然消失。
- *
- * `isSeedPriceBook` 的调用方（api / worker 启动时）应打一条 warn 日志与指标 ——
- * 带着占位价上线的表现不是报错，是收错钱，而收错钱要到对账时才发现。
+ * 九个数是为了让表非空而填的，从来没有与任何东西核对过 —— 而它与注册赠送额
+ * 恰好不兼容（占位价下一次 14 天行程要冻 10578 CR > 9900 CR 的赠送额）。
+ * 因此实现把它视为「还没配价」并不计费，见 api 的 `CreditsService.priceBook`。
  */
 export const SEED_PRICE_VERSION = 1;
 
+/**
+ * 迁移 0014 种下的那一版：**开发期定价**。
+ *
+ * 数字按「能跑通」选而不是按成本选，判据是「连 14 天的最坏上界都落在注册
+ * 赠送额之内」。它存在的理由是：占位版不计费会让**计费链路在开发期一次都
+ * 不被走到**，而一条没人跑的链路会烂掉。
+ */
+export const DEV_PRICE_VERSION = 2;
+
+/**
+ * 这一版是不是**由迁移种下的临时定价**（版本 ≤ 2）。
+ *
+ * 用版本号当判据而不是匹配 `note` 里的字样：后者一改文案就失效。
+ * 运营的动作是 clone 到版本 3 并按真实供应商成本改价，那一刻这个判定
+ * 自然变成 false —— 也就是说**改价必须换版本号**，
+ * 原地改版本 2 等于「改完了系统仍然认为这是开发期定价」。
+ *
+ * 调用方（api 启动时）应打一条 warn：带着临时定价上线的表现不是报错，
+ * 是**收错钱**，而收错钱要到对账时才发现。
+ */
+export function isProvisionalPriceBook(book: PriceBook): boolean {
+  return book.version <= DEV_PRICE_VERSION;
+}
+
+/**
+ * 这一版是不是**占位版**（版本 1）。
+ *
+ * 与 `isProvisionalPriceBook` 是两个不同的判定，因此是两个函数：
+ *
+ * ```text
+ * isSeedPriceBook          占位 → **不计费**（那些数不能拿来收钱）
+ * isProvisionalPriceBook   占位或开发期 → **warn**（这不是运营定价）
+ * ```
+ *
+ * 合成一个的话，要么开发期也不计费（计费链路一次不被走到），
+ * 要么占位价真的去收钱（收错钱 + 14 天必然卡死）。
+ */
 export function isSeedPriceBook(book: PriceBook): boolean {
   return book.version === SEED_PRICE_VERSION;
 }

@@ -4,6 +4,7 @@ import {
   estimateExportCost,
   estimateJobCost,
   holdAmount,
+  isProvisionalPriceBook,
   isSeedPriceBook,
   type CreditConfig,
   type JobLimits,
@@ -157,20 +158,24 @@ export class CreditsService {
     const book = seed ? null : published;
     this.cached = { book, at: nowMs };
 
-    if (seed) {
-      /*
-       * 只打一次：这是配置提醒，不是每分钟一条的运行时告警。
-       * `travel_credit_gate_total{outcome="free"}` 承担持续可见那一半。
-       */
-      if (!this.seedWarned) {
-        this.seedWarned = true;
-        this.deps.logger.warn(
-          { stage: 'billing', price_version: published?.version },
-          '价目表仍是迁移 0013 的占位版本，因此生成与导出**不计费**；' +
-            '运营按真实成本 clone 到版本 2 并发布后自动生效',
-        );
-      }
-    } else if (book === null) {
+    /*
+     * 两条提醒，各自只打一次（这是配置提醒，不是每分钟一条的运行时告警；
+     * 持续可见那一半由 `travel_credit_gate_total` 承担）：
+     *
+     *   占位版         不计费。那九个数从来没与任何东西核对过
+     *   临时定价       计费，但这不是运营定价 —— 上线前必须 clone 到版本 3
+     */
+    if (published !== null && !this.seedWarned && isProvisionalPriceBook(published)) {
+      this.seedWarned = true;
+      this.deps.logger.warn(
+        { stage: 'billing', price_version: published.version },
+        seed
+          ? '价目表仍是迁移 0013 的占位版本，因此生成与导出**不计费**；' +
+              '迁移 0014 的开发期定价（版本 2）或运营定价发布后自动生效'
+          : '价目表是迁移 0014 种下的**开发期定价**，不是按真实供应商成本定的；' +
+              '上线前运营需 clone 到版本 3 并改价（见 docs/用户货币与计费.md 第八节）',
+      );
+    } else if (book === null && published === null) {
       this.deps.logger.warn(
         { stage: 'billing' },
         '没有已发布的价目表，本次起的生成与导出不计费（见 docs/用户货币与计费.md）',
