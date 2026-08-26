@@ -2,6 +2,7 @@ import type { PriceBook } from '@tps/billing';
 
 import type {
   CreditHold,
+  CreditSpend,
   CreditWalletRepository,
   LedgerEntry,
   LedgerKind,
@@ -28,6 +29,14 @@ import type {
 export class InMemoryCreditWalletRepository implements CreditWalletRepository {
   private readonly wallets = new Map<string, { balanceCr: number; heldCr: number }>();
   private readonly ledger: LedgerEntry[] = [];
+  /**
+   * 流水行 → 所属用户。
+   *
+   * `LedgerEntry` 里没有 `user_id`（读路径已经按用户过滤，返回它是多余的），
+   * 而 `findSpend` 恰恰要回答「这笔钱是谁的」—— 那是它唯一的用途：
+   * 导出失败时退给当时被扣的那个人。
+   */
+  private readonly entryOwner = new Map<string, string>();
   private readonly keys = new Set<string>();
   private readonly holds = new Map<
     string,
@@ -59,6 +68,7 @@ export class InMemoryCreditWalletRepository implements CreditWalletRepository {
     if (this.keys.has(input.idempotencyKey)) return false;
     this.keys.add(input.idempotencyKey);
     this.sequence += 1;
+    this.entryOwner.set(`entry-${this.sequence}`, input.userId);
     this.ledger.push({
       entryId: `entry-${this.sequence}`,
       kind: input.kind,
@@ -267,6 +277,25 @@ export class InMemoryCreditWalletRepository implements CreditWalletRepository {
    * 被测的行为是「结算用预留锁定的那一版」，而版本号对不上时返回 null
    * 恰好覆盖了「那一版查不到 → 不计费」这条降级分支。
    */
+  findSpend(input: {
+    readonly refType: string;
+    readonly refId: string;
+  }): Promise<CreditSpend | null> {
+    /* 倒序找最后一笔，与真实实现的 `ORDER BY created_at DESC LIMIT 1` 一致 */
+    const row = [...this.ledger]
+      .reverse()
+      .find(
+        (entry) =>
+          entry.kind === 'SPEND' && entry.refType === input.refType && entry.refId === input.refId,
+      );
+    if (row === undefined) return Promise.resolve(null);
+    return Promise.resolve({
+      userId: this.entryOwner.get(row.entryId) ?? '',
+      chargedCr: Math.abs(row.amountCr),
+      priceVersion: row.priceVersion,
+    });
+  }
+
   pricesForVersion(version: number): Promise<PriceBook | null> {
     const book = this.priceBook;
     return Promise.resolve(book !== null && book.version === version ? book : null);

@@ -11,6 +11,7 @@ import {
 } from '@tps/storage';
 import type { Browser, BrowserContext } from 'playwright-core';
 
+import type { ExportBilling } from './billing.js';
 import { createRenderContext } from './browser.js';
 import { capturePdf, mergePdfs } from './pdf.js';
 import { capturePng } from './png.js';
@@ -58,6 +59,11 @@ export interface RunExportDeps {
   /** 17.1 的渲染令牌签名密钥 */
   readonly signingKey: string;
   readonly logger: Logger;
+  /**
+   * CR 退款（C-4b）。缺省时不退也不读钱包表 ——
+   * 与另两个进程的 `CREDIT_BILLING_ENABLED` 成对，理由同它们。
+   */
+  readonly billing?: ExportBilling;
 }
 
 /**
@@ -150,6 +156,15 @@ export async function runExport(deps: RunExportDeps, exportId: string): Promise<
       errorCode,
       errorDetail: { failed_days: failedDays },
     });
+    /*
+     * 一页都没成功 → 用户什么也没拿到 → 退回当时扣的那一笔（C-4b）。
+     *
+     * 放在 `finish` 之后：用户看到的状态比账目更急，而退款自己吞掉异常
+     * （见 billing.ts），因此这个顺序不会让 FAILED 写不进去。
+     *
+     * `PARTIAL` 那条路径**不退** —— 至少一页成功并上传了，服务确实交付了。
+     */
+    await deps.billing?.refundFailed(exportId);
     return {
       kind: 'failed',
       errorCode,

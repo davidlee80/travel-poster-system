@@ -1,5 +1,6 @@
 import {
   checkDatabase,
+  createCreditWalletRepository,
   createExportsRepository,
   createPool,
   createPresentationsRepository,
@@ -20,12 +21,13 @@ import {
   createRedis,
   withRestoredTrace,
 } from '@tps/queue';
-import { optionalString, requireString, runWorker } from '@tps/shared';
+import { optionalBool, optionalString, requireString, runWorker } from '@tps/shared';
 import { S3ExportStorage, loadExportsStorageConfig } from '@tps/storage';
 import { UnrecoverableError, Worker } from 'bullmq';
 
 import { launchBrowser } from './browser.js';
 import { EXPORT_LABEL_NONE, exportDuration, exportTotal } from './export-metrics.js';
+import { createExportBilling, type ExportBilling } from './billing.js';
 import { runExport } from './run-export.js';
 
 /**
@@ -59,6 +61,15 @@ const redis = createRedis(redisUrl);
 const queueRedis = createQueueRedis(redisUrl);
 
 const exportsRepository = createExportsRepository(dbPool);
+
+/*
+ * CR 退款（C-4b）。默认**关闭**，与 api / generation-worker 同一个开关名。
+ *
+ * 只开这一侧不会出错（没有扣费记录就什么都不退），但只开 api 那一侧的话，
+ * 渲染失败的导出不会退钱 —— 用户为一份拿不到的 PDF 付了费。
+ * 三个进程的启动日志都打了 `credit_billing_enabled`，值不一致时能一眼看到。
+ */
+const billingEnabled = optionalBool('CREDIT_BILLING_ENABLED', false);
 const presentations = createPresentationsRepository(dbPool);
 const storage = new S3ExportStorage(loadExportsStorageConfig());
 const deadLetters = new RedisDeadLetterQueue(redis);
@@ -78,9 +89,21 @@ await runWorker({
   tracing: () => startTracing(loadTracingConfig(SERVICE_NAME)),
 
   start: async (handle) => {
+    const billing: ExportBilling | undefined = billingEnabled
+      ? createExportBilling({
+          wallet: createCreditWalletRepository(dbPool),
+          logger: handle.logger,
+        })
+      : undefined;
+
     const { browser, devShm } = await launchBrowser();
     handle.logger.info(
-      { devShm: devShm.reason, base_url: renderBaseUrl },
+      {
+        devShm: devShm.reason,
+        base_url: renderBaseUrl,
+        /* 关闭时渲染失败不退款 —— 这一条必须能从启动日志里一眼看到 */
+        credit_billing_enabled: billingEnabled,
+      },
       '渲染 Worker 就绪，开始消费导出队列',
     );
 
@@ -105,6 +128,7 @@ await runWorker({
               baseUrl: renderBaseUrl,
               signingKey,
               logger: handle.logger,
+              ...(billing === undefined ? {} : { billing }),
             },
             payload.exportId,
           );

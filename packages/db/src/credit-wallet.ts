@@ -77,6 +77,13 @@ export interface CreditHold {
   readonly status: 'ACTIVE' | 'SETTLED' | 'RELEASED' | 'EXPIRED';
 }
 
+export interface CreditSpend {
+  readonly userId: string;
+  /** 实际扣掉的 CR，**正数**（流水里它是负的，方向由 kind 表达） */
+  readonly chargedCr: number;
+  readonly priceVersion: number | null;
+}
+
 export interface CreditWalletRepository {
   balance(userId: string): Promise<WalletBalance>;
   history(input: {
@@ -147,6 +154,20 @@ export interface CreditWalletRepository {
 
   /** 这个任务的预留。`null` = 没预留过（0013 之前入队，或计费当时关着） */
   findHold(jobId: string): Promise<CreditHold | null>;
+
+  /**
+   * 按业务对象回查那一笔消费。`null` = 没扣过费。
+   *
+   * 存在的理由只有一个：**导出失败时要退回「当时实际扣的那个数」**。
+   * 现算一遍（`estimateExportCost` × 当前价目）在调价窗口内会退错数，
+   * 而退错数比不退更糟 —— 少退是我们赖账，多退是可以被反复触发的漏洞。
+   *
+   * `credit_ledger_ref_idx (ref_type, ref_id)` 正是为这类回查建的。
+   */
+  findSpend(input: {
+    readonly refType: string;
+    readonly refId: string;
+  }): Promise<CreditSpend | null>;
 
   /**
    * 指定版本的价目表，**不看它是否仍是发布版**。
@@ -723,6 +744,29 @@ export function createCreditWalletRepository(pool: Pool): CreditWalletRepository
         amountCr: big(row.amount_cr),
         priceVersion: big(row.price_version),
         status: row.status,
+      };
+    },
+
+    async findSpend({ refType, refId }) {
+      const result = await pool.query<{
+        user_id: string;
+        amount_cr: string;
+        price_version: string | null;
+      }>(
+        `SELECT user_id, amount_cr, price_version
+         FROM credit_ledger
+         WHERE ref_type = $1 AND ref_id = $2 AND kind = 'SPEND'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [refType, refId],
+      );
+      const row = result.rows[0];
+      if (row === undefined) return null;
+      return {
+        userId: row.user_id,
+        /* 流水里是负数，调用方要的是「退多少」 */
+        chargedCr: Math.abs(big(row.amount_cr)),
+        priceVersion: row.price_version === null ? null : big(row.price_version),
       };
     },
 

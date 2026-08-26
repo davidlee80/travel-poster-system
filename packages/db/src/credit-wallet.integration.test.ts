@@ -520,6 +520,65 @@ describeIntegration('CR 钱包（集成，需 PostgreSQL）', () => {
     });
   });
 
+  describe('按业务对象回查消费（C-4b）', () => {
+    it('取到金额（正数）、所属用户与价目版本', async () => {
+      /*
+       * 导出失败时要退「当时实际扣的那个数」。流水里 `amount_cr` 是负的
+       * （方向由 kind 表达），而调用方要的是「退多少」—— 因此这里取绝对值。
+       * 少了这一步，退款会调用 `refund({ amountCr: -50 })`，
+       * 而那会让余额继续减少：读起来完全正常，对账时才发现。
+       */
+      await grant(1_000);
+      await wallet.charge({
+        userId,
+        amountCr: 50,
+        idempotencyKey: 'export:k1',
+        refType: 'EXPORT',
+        refId: 'export-1',
+        priceVersion: 1,
+      });
+
+      const spend = await wallet.findSpend({ refType: 'EXPORT', refId: 'export-1' });
+      expect(spend).toEqual({ userId, chargedCr: 50, priceVersion: 1 });
+    });
+
+    it('没扣过费时返回 null（调用方据此什么都不做）', async () => {
+      expect(await wallet.findSpend({ refType: 'EXPORT', refId: 'never' })).toBeNull();
+    });
+
+    it('只认这一个 ref，不会串到别的导出上', async () => {
+      await grant(1_000);
+      for (const [key, refId, amountCr] of [
+        ['export:a', 'export-a', 50],
+        ['export:b', 'export-b', 80],
+      ] as const) {
+        await wallet.charge({
+          userId,
+          amountCr,
+          idempotencyKey: key,
+          refType: 'EXPORT',
+          refId,
+          priceVersion: 1,
+        });
+      }
+
+      expect((await wallet.findSpend({ refType: 'EXPORT', refId: 'export-b' }))?.chargedCr).toBe(
+        80,
+      );
+    });
+
+    it('不把生成任务的结算当成导出的消费（ref_type 参与匹配）', async () => {
+      await grant(2_000);
+      const jobId = crypto.randomUUID();
+      await wallet.reserve({ userId, jobId, amountCr: 600, priceVersion: 1, expiresAt: future() });
+      await wallet.settle({ jobId, actualCr: 300, lines: [], unpriced: [] });
+
+      /* 那一笔的 ref 是 `JOB`/<job_id> —— 拿同一个 id 按 EXPORT 查不该命中 */
+      expect(await wallet.findSpend({ refType: 'EXPORT', refId: jobId })).toBeNull();
+      expect((await wallet.findSpend({ refType: 'JOB', refId: jobId }))?.chargedCr).toBe(300);
+    });
+  });
+
   describe('按版本取价目（C-4）', () => {
     it('取得到尚未发布的草稿版 —— 结算要的正是「可能已不是发布版」的那一版', async () => {
       /*
