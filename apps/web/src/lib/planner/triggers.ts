@@ -13,8 +13,8 @@ import { hasValue, isOptedIn, type PlannerState } from './state';
  *
  * ## 一张表 + 一个默认值
  *
- * 76 个字段里 36 个有非「始终显示」的触发条件，其余 40 个恒显示。
- * 表里只写那 36 个，默认恒显示 —— 反过来（把 40 个恒显示也写进表）会让
+ * 76 个字段里只有非「始终显示」的字段进入触发表，其余字段恒显示。
+ * 表里只写条件字段，默认恒显示 —— 反过来把恒显示字段也写进表会让
  * 这张表大部分是 `() => true` 的噪声。
  *
  * 代价是「键打错了」会静默变成恒显示。因此 `triggers.test.ts` 有一条反向断言：
@@ -26,7 +26,7 @@ import { hasValue, isOptedIn, type PlannerState } from './state';
  * 字段表那一列混了两种东西：真正的显示条件，与排序/必填强度的说明。
  * 照字面实现会把它们错误地藏起来：
  *
- *   - `PV2-04-007`「多城市或目的地未定时**优先显示**」—— 说的是排序靠前。
+ *   - `PV2-04-007`「多城市时**优先显示**」—— 说的是排序靠前。
  *     藏起来会让单目的地用户无法表达换宿容忍度，而那是规范 10 用来推导
  *     单点/双中心/多城市路线结构的唯一输入。
  *   - `PV2-08-008`「**始终显示**；高风险活动时提升为条件必填」—— 前半句就是答案。
@@ -63,7 +63,6 @@ export interface TriggerContext {
   /** 存在儿童或婴幼儿（不含少年）。儿童需求读它 */
   readonly hasChild: boolean;
   readonly isMultiCity: boolean;
-  readonly destinationUndecided: boolean;
   /** 跨境。只有出发国与任一目的国都已知且不同时才成立 */
   readonly isInternational: boolean;
   readonly involvesAir: boolean;
@@ -162,7 +161,6 @@ export function buildTriggerContext(answers: PlannerProfileInput): TriggerContex
     hasMinor: profiles.some(isMinor),
     hasChild: profiles.some(isChild),
     isMultiCity: isMultiCityOf(destinations.length),
-    destinationUndecided: trip?.destination_status === 'UNDECIDED',
     isInternational,
     involvesAir,
     involvesLongHaul,
@@ -198,15 +196,13 @@ function isMultiCityOf(count: number): boolean {
 type TriggerFn = (ctx: TriggerContext, state: PlannerState) => boolean;
 
 /**
- * 36 个非恒显示字段的触发条件。
+ * 非恒显示字段的触发条件。
  *
  * `Partial` 而不是全量 `Record`：只写有条件的那些。完整性由测试反向守护
  * （见文件头）。
  */
 const TRIGGERS: Partial<Record<PlannerFieldId, TriggerFn>> = {
   // ── D-01 目的地链 ──
-  /** 「完全未定」时不问具体目的地，转入目的地发现分支（规范 7） */
-  'PV2-01-003': (ctx) => !ctx.destinationUndecided,
   /** 选了任一订单类型才展开订单卡 */
   'PV2-01-009': (ctx) => ctx.lockedTypesChosen,
 
@@ -227,7 +223,7 @@ const TRIGGERS: Partial<Record<PlannerFieldId, TriggerFn>> = {
   'PV2-04-006': (ctx, state) => ctx.childNeedsFixedNap || isOptedIn(state, 'PV2-04-006'),
 
   // ── 交通 ──
-  'PV2-05-001': (ctx) => ctx.involvesLongHaul || ctx.isMultiCity || ctx.destinationUndecided,
+  'PV2-05-001': (ctx) => ctx.involvesLongHaul || ctx.isMultiCity,
   'PV2-05-002': (ctx) => ctx.involvesAir,
   'PV2-05-003': (ctx) => ctx.involvesAir,
   'PV2-05-004': (ctx) => ctx.involvesLongHaul,
@@ -266,9 +262,8 @@ const TRIGGERS: Partial<Record<PlannerFieldId, TriggerFn>> = {
  * 触发表里有条目的字段。
  *
  * 导出它是为了让完整性断言能**直接**比较键集合。曾经试过一种间接判定
- * 「空状态下仍显示 ⇒ 表里没有它」—— 那是错的：`PV2-01-003` 的条件是
- * 「目的地状态 ≠ 完全未定」，空状态下它本就成立。间接判定会把两个已处理的
- * 字段报成漏项，而修那两条假警报的路上很容易顺手把真的漏项也放过去。
+ * 「空状态下仍显示 ⇒ 表里没有它」并不可靠：有些条件字段在空状态下也可能
+ * 成立。直接导出键集合，完整性测试才能区分恒显示字段和条件字段。
  */
 export const CONDITIONAL_FIELD_IDS: readonly PlannerFieldId[] = Object.keys(
   TRIGGERS,

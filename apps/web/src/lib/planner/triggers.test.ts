@@ -135,17 +135,17 @@ describe('S1 普通国内双人（规范 24）', () => {
   });
 });
 
-describe('S2 目的地未定', () => {
+describe('旧草稿里的目的地未定值', () => {
   const undecided = answer(INITIAL_PLANNER_STATE, [
     ['PV2-01-002', { trip: { destination_status: 'UNDECIDED' } }],
   ]);
 
-  it('具体目的地不再显示，也不阻塞', () => {
-    expect(isTriggered(undecided, 'PV2-01-003')).toBe(false);
-    expect(unresolvedBlockers(undecided)).not.toContain('PV2-01-003');
+  it('不能绕过目的地必填：具体目的地仍显示并阻塞', () => {
+    expect(isTriggered(undecided, 'PV2-01-003')).toBe(true);
+    expect(unresolvedBlockers(undecided)).toContain('PV2-01-003');
   });
 
-  it('仍然可以填预算与节奏 —— 发现模式不该锁住其余步骤', () => {
+  it('不锁住其余步骤，用户可以继续编辑后再回来补目的地', () => {
     expect(isTriggered(undecided, 'PV2-03-001')).toBe(true);
     expect(isTriggered(undecided, 'PV2-04-001')).toBe(true);
   });

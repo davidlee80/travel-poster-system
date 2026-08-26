@@ -34,7 +34,7 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
   '01': [
     {
       title: '从哪出发，去哪里',
-      intro: '目的地还没定也可以往下走，我们会转入目的地发现。',
+      intro: '请选择至少 1 个目的地；有多个备选时可以按期望顺序添加，最多 5 个。',
       fields: ['PV2-01-001', 'PV2-01-002', 'PV2-01-003'],
     },
     { title: '什么时候走', fields: ['PV2-01-004', 'PV2-01-005'] },

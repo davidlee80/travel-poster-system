@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CONTROL_PRIMITIVES,
   FIELD_DESCRIPTORS,
+  PLANNER_DESTINATION_STATUS_VALUES,
   PROJECTION_ONLY_CODES,
   TRISTATE_CODES,
   declaredOptionValues,
@@ -33,6 +34,10 @@ function allParts(fieldId: (typeof PLANNER_FIELDS)[number]['field_id']): readonl
 }
 
 describe('描述符表覆盖 76 个字段', () => {
+  it('目的地状态只有已确定与有备选，没有无目的地入口', () => {
+    expect(PLANNER_DESTINATION_STATUS_VALUES).toEqual(['CONFIRMED', 'SHORTLISTED']);
+  });
+
   it('每个 field_id 都有描述符', () => {
     /*
      * `Record<PlannerFieldId, …>` 已经在编译期保证了这件事。这条运行期断言

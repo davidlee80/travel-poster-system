@@ -29,7 +29,6 @@ export const OPTION_LABEL: Record<string, Record<string, string>> = {
   'trip.destination_status': {
     CONFIRMED: '已经确定',
     SHORTLISTED: '有几个备选',
-    UNDECIDED: '完全没定',
   },
   'trip.date_flexibility': {
     FIXED: '日期固定',

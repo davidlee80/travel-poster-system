@@ -33,7 +33,8 @@ const STORAGE_KEY = 'tps.planner.v2.draft';
  * 这个管的是「浏览器里存的草稿长什么样」。前者不因加可选字段而递增，
  * 而后者在枚举值改名时就必须递增 —— 两者的变更节奏不同。
  */
-const DRAFT_VERSION = 1;
+/* v2 移除了前端的 `UNDECIDED` 目的地状态；v1 草稿在读取时做定向迁移。 */
+const DRAFT_VERSION = 2;
 
 interface StoredDraft {
   readonly version: number;
@@ -45,6 +46,23 @@ interface StoredDraft {
 }
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
+
+/**
+ * v1 → v2 只清掉已退役的目的地状态，保留用户已经填写的其余答案。
+ *
+ * 直接作废整份九步草稿虽然简单，但一个选项下线不应该让用户丢掉十几分钟输入。
+ * `answers` 来自刚完成的 JSON 解析，因此这里的两层浅克隆足以安全迁移。
+ */
+function migrateAnswers(answers: object, version: number): object {
+  if (version !== 1) return answers;
+  const record = answers as Record<string, unknown>;
+  const trip = record['trip'];
+  if (typeof trip !== 'object' || trip === null) return answers;
+  const tripRecord = trip as Record<string, unknown>;
+  if (tripRecord['destination_status'] !== 'UNDECIDED') return answers;
+  const { destination_status: _retired, ...migratedTrip } = tripRecord;
+  return { ...record, trip: migratedTrip };
+}
 
 /**
  * 写草稿。返回是否成功 —— 失败**不阻断编辑**但要能重试（规范 6）。
@@ -95,7 +113,7 @@ export function loadDraft(): PlannerState | null {
   if (typeof parsed !== 'object' || parsed === null) return null;
 
   const draft = parsed as Partial<StoredDraft>;
-  if (draft.version !== DRAFT_VERSION) return null;
+  if (draft.version !== 1 && draft.version !== DRAFT_VERSION) return null;
   if (typeof draft.answers !== 'object' || draft.answers === null) return null;
 
   /*
@@ -118,7 +136,7 @@ export function loadDraft(): PlannerState | null {
 
   return {
     ...INITIAL_PLANNER_STATE,
-    answers: draft.answers,
+    answers: migrateAnswers(draft.answers, draft.version),
     touched: (Array.isArray(draft.touched) ? draft.touched : []) as readonly PlannerFieldId[],
     optIns: (Array.isArray(draft.optIns) ? draft.optIns : []) as readonly PlannerFieldId[],
     activeStep,

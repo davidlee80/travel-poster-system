@@ -84,6 +84,23 @@ const RICH: PlannerState = {
 };
 
 describe('停用一个选项，界面上就没有了', () => {
+  it('目的地状态不展示「完全没定」，即使远端配置仍保留旧选项', () => {
+    const after = render(
+      '01',
+      config({
+        'trip.destination_status': [
+          option('CONFIRMED', '已经确定'),
+          option('SHORTLISTED', '有几个备选'),
+          option('UNDECIDED', '完全没定'),
+        ],
+      }),
+    );
+    expect(after).toContain('>已经确定</button>');
+    expect(after).toContain('>有几个备选</button>');
+    expect(after).not.toContain('完全没定');
+    expect(after).not.toContain('UNDECIDED');
+  });
+
   it('条件码：停用「夜间活动」之后兴趣多选里不再出现它', () => {
     const before = render('07', undefined);
     expect(before).toContain('夜间活动');

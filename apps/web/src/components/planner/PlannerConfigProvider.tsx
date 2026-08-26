@@ -80,8 +80,8 @@ const warned = new Set<string>();
  *   2. 配置里没有这个 field_key      → 同上。迁移漏注册一个列表是这种表现，
  *                                      由 `config-binding.test.ts` 的双向断言守住。
  *   3. `CONDITION_CODE`              → 用配置的列表，允许出现内置没有的码。
- *   4. `ENUM`                        → 配置 ∩ 内置。配置里多出来的值被丢弃 ——
- *                                      渲染它只会得到一个点了提交被 Zod 拒的按钮。
+ *   4. `ENUM`                        → 配置 ∩ 前端支持列表。配置里多出来的值被
+ *                                      丢弃；它可能是非法枚举，也可能是已退役选项。
  */
 export function usePlannerOptionResolver(): (target: OptionTarget) => ResolvedOptions {
   const config = useContext(PlannerConfigContext);
@@ -101,8 +101,8 @@ export function usePlannerOptionResolver(): (target: OptionTarget) => ResolvedOp
         warned.add(fieldKey);
         const dropped = published.filter((o) => !allowed.has(o.key)).map((o) => o.key);
         console.warn(
-          `[planner-config] ${fieldKey} 是枚举字段，配置里的 ${dropped.join('、')} 不在契约枚举内，已忽略。` +
-            '新增枚举成员需要同时改契约，只改配置不会生效。',
+          `[planner-config] ${fieldKey} 是枚举字段，配置里的 ${dropped.join('、')} 不在前端支持列表内，已忽略。` +
+            '新增或恢复选项需要同时更新前端支持列表与契约，只改配置不会生效。',
         );
       }
 

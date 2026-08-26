@@ -13,7 +13,6 @@ import {
   CURRENCY_VALUES,
   DATE_FLEXIBILITY_VALUES,
   DEPARTURE_WINDOW_VALUES,
-  DESTINATION_STATUS_VALUES,
   DIETARY_REQUIREMENT_VALUES,
   DINING_BUDGET_VALUES,
   DRIVING_EXPERIENCE_VALUES,
@@ -56,6 +55,7 @@ import {
 } from '@tps/schemas';
 import { describe, expect, it } from 'vitest';
 
+import { PLANNER_DESTINATION_STATUS_VALUES } from './descriptors';
 import { ABSTRACT_SUMMARY, OPTION_LABEL, optionLabel } from './field-spec';
 
 /**
@@ -69,7 +69,7 @@ import { ABSTRACT_SUMMARY, OPTION_LABEL, optionLabel } from './field-spec';
  * 复合字段（一个 api_key 下有多组枚举，如舱等 + 座位）把几组拼起来。
  */
 const EXPECTED: Record<string, readonly string[]> = {
-  'trip.destination_status': DESTINATION_STATUS_VALUES,
+  'trip.destination_status': PLANNER_DESTINATION_STATUS_VALUES,
   'trip.date_flexibility': DATE_FLEXIBILITY_VALUES,
   'trip.locked_order_types': LOCKED_ORDER_TYPE_VALUES,
   'trip.locked_orders': [...LOCKED_ORDER_TYPE_VALUES, ...CHANGEABILITY_VALUES],

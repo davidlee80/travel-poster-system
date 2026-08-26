@@ -57,6 +57,16 @@ import {
 } from '@tps/schemas';
 
 /**
+ * 前端只允许「已确定」或「有备选」。
+ *
+ * 契约暂时保留 `UNDECIDED`，用于兼容已经落库的历史请求；不能直接复用完整枚举，
+ * 否则配置中心即使没有发布该选项，内置回退仍会把「完全没定」重新显示出来。
+ */
+export const PLANNER_DESTINATION_STATUS_VALUES = DESTINATION_STATUS_VALUES.filter(
+  (value) => value !== 'UNDECIDED',
+);
+
+/**
  * 76 个字段的控件描述符。
  *
  * ## 为什么是一张描述符表而不是 76 个手写控件
@@ -277,7 +287,7 @@ function one(primitive: ControlPrimitive, extra: Omit<FieldPart, 'key' | 'primit
 export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   // ── 01 旅行轮廓 ──────────────────────────────────────────
   'PV2-01-001': one('place', { placeholder: '城市、机场或车站' }),
-  'PV2-01-002': one('choice', { options: DESTINATION_STATUS_VALUES }),
+  'PV2-01-002': one('choice', { options: PLANNER_DESTINATION_STATUS_VALUES }),
   'PV2-01-003': one('place-list', {
     max: 5,
     add_label: '添加目的地',

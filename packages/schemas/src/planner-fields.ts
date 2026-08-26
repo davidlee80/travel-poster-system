@@ -231,7 +231,7 @@ export const PLANNER_STEPS = [
     nav: '旅行轮廓',
     title: '先勾勒这趟旅行的轮廓',
     module: '这次想怎么旅行',
-    intro: '建立旅行骨架和成功标准，并决定后续目的地发现、跨境、日期与订单分支。',
+    intro: '建立旅行骨架和成功标准，并决定后续跨境、日期与订单分支。',
   },
   {
     step: '02',
@@ -338,7 +338,7 @@ export const PLANNER_FIELDS = [
     question: '目的地是否已经确定？',
     control: '单选卡片',
     trigger: '始终显示',
-    validation: '选择“未定”时不要求具体城市，转入目的地发现分支',
+    validation: '只能选择“已经确定”或“有几个备选”；不能跳过具体目的地',
   },
   {
     field_id: 'PV2-01-003',
@@ -347,14 +347,14 @@ export const PLANNER_FIELDS = [
     level: 'MAIN',
     runtime_type: 'FACT',
     priority: 'P0',
-    required: 'CONDITIONAL',
+    required: 'ALWAYS',
     blocking: 'ALWAYS',
     summary_group: 'SKELETON',
     sensitivity: 'NORMAL',
     data_type: 'array<object>',
     question: '目的地/备选目的地',
     control: '可增删地点选择器',
-    trigger: '目的地状态=已确定/有备选',
+    trigger: '始终显示',
     validation: '至少1个；每个地点需解析到国家/城市',
   },
   {
@@ -782,7 +782,7 @@ export const PLANNER_FIELDS = [
     data_type: 'enum',
     question: '最多愿意换几次住宿？',
     control: '单选',
-    trigger: '多城市或目的地未定时优先显示',
+    trigger: '多城市时优先显示',
     validation: '不直接要求普通用户理解“中心辐射”等规划术语',
   },
   {

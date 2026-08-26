@@ -38,6 +38,15 @@ const MIGRATION = path.join(
   'infrastructure/migrations/0012_planner_config_all_options.sql',
 );
 
+const RETIREMENT_MIGRATION = path.join(
+  fileURLToPath(import.meta.url),
+  '../../../../../..',
+  'infrastructure/migrations/0015_require_destination.sql',
+);
+
+/** 0012 曾注册、后来由追加迁移明确停用的历史选项 */
+const RETIRED_OPTIONS = new Set(['trip.destination_status\u0000UNDECIDED']);
+
 // ── 迁移文本的解析 ──────────────────────────────────────────
 
 interface RegisteredRow {
@@ -154,11 +163,25 @@ describe('0012 与描述符表一致', () => {
      * 「先问经济舱还是先问头等舱」不该在迁移里被打乱。
      */
     for (const list of OPTION_LISTS) {
-      const registered = ROWS.filter((row) => row.fieldKey === list.fieldKey).map(
-        (row) => row.optionKey,
-      );
+      const registered = ROWS.filter(
+        (row) =>
+          row.fieldKey === list.fieldKey &&
+          !RETIRED_OPTIONS.has(`${row.fieldKey}\u0000${row.optionKey}`),
+      ).map((row) => row.optionKey);
       expect(registered, list.fieldKey).toEqual([...list.values]);
     }
+  });
+
+  it('0015 从当前发布配置克隆下一版，停用「完全没定」后发布', () => {
+    const sql = readFileSync(RETIREMENT_MIGRATION, 'utf8');
+    expect(sql).toMatch(/WHERE status = 'PUBLISHED'/);
+    expect(sql).toMatch(/MAX\(version\)[\s\S]*?INTO target_version/);
+    expect(sql).toMatch(/clone_planner_config\([\s\S]*?source_version,[\s\S]*?target_version,/);
+    expect(sql).toContain('option.version_id = target_id');
+    expect(sql).toContain("option.field_key = 'trip.destination_status'");
+    expect(sql).toContain("option.option_key = 'UNDECIDED'");
+    expect(sql).toMatch(/SET enabled = FALSE/);
+    expect(sql).toMatch(/publish_planner_config\(target_version\)/);
   });
 
   it('每个 field_key 的 value_kind 与派生的 kind 相同', () => {
