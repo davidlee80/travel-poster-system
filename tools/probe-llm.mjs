@@ -2,9 +2,13 @@
 /**
  * OpenAI 兼容端点的能力探测（接第三方中转站 / 直连供应商前用）。
  *
- *   node tools/probe-llm.mjs --base-url https://xxx --model gpt-4o
- *   LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=... node tools/probe-llm.mjs
- *   node tools/probe-llm.mjs --dry-run          # 只做本地 schema 体检，不发请求
+ *   pnpm probe:llm                              # 凭据从 .env 读，不经过命令行
+ *   pnpm probe:llm -- --dry-run                 # 只做本地 schema 体检，不发请求
+ *   pnpm probe:llm -- --model anthropic/claude-sonnet-5    # 临时换模型
+ *
+ * **不要用 `--api-key` 传 key**：命令行参数会进 shell history，也出现在同机
+ * 其他用户的 ps 输出里。`pnpm probe:llm` 用 `--env-file-if-exists=.env` 启动，
+ * 直接读 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`。
  *
  * ## 存在的理由
  *
@@ -20,7 +24,16 @@
  *
  * 这个脚本是那个取舍的**对侧**：它是一次性诊断工具，不入生产路径，
  * 因此可以回显完整错误体。发出去的提示是固定的假数据（杭州 1 天行程），
- * 不含任何用户信息，所以回显是安全的。
+ * 不含任何用户信息，所以回显**我们发的内容**是安全的。
+ *
+ * ## 但回显的是上游的响应体，那部分不由我们决定
+ *
+ * 少数网关会在错误体里 echo 请求上下文，其中可能包含 `Authorization` 头。
+ * 在本地终端跑无所谓（key 本来就在你手上），**在 CI 里跑要当心** ——
+ * 那段输出会留在构建日志里，而构建日志的可见范围通常比 key 本身大得多。
+ * 因此：这个脚本是给人在终端用的，不要接进流水线。
+ *
+ * key 本身只以前 4 位 + 长度回显（见下），不完整打印。
  *
  * ## 为什么要「先协商基线，再单独变动 response_format」
  *
@@ -164,10 +177,12 @@ if (dryRun) {
 
 if (baseUrl === '' || apiKey === '' || model === '') {
   process.stderr.write(
-    '\n缺少凭据。三项都要给（CLI 参数优先于环境变量）：\n' +
-      `  --base-url  ${baseUrl || '(空)'}\n` +
-      `  --api-key   ${apiKey === '' ? '(空)' : `已给，长度 ${apiKey.length}`}\n` +
-      `  --model     ${model || '(空)'}\n\n` +
+    '\n缺少凭据。三项都要给：\n' +
+      `  LLM_BASE_URL  ${baseUrl || '(空)'}\n` +
+      `  LLM_API_KEY   ${apiKey === '' ? '(空)' : `已给，长度 ${apiKey.length}`}\n` +
+      `  LLM_MODEL     ${model || '(空)'}\n\n` +
+      '推荐填在 .env 里（`pnpm probe:llm` 会自动读），别用 --api-key ——\n' +
+      '命令行参数会进 shell history，也出现在同机其他用户的 ps 输出里。\n' +
       '只想看本地 schema 体检结果时加 --dry-run。\n',
   );
   process.exit(2);

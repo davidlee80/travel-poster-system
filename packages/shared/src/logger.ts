@@ -25,6 +25,20 @@ const FORBIDDEN_KEYS = [
   'anon_token_hash',
   'authorization',
   'cookie',
+  /*
+   * 上游模型服务的 API key（`LLM_API_KEY` / `IMAGE_API_KEY`，走 ofox）。
+   *
+   * 现在没有任何代码把它写进日志 —— 客户端只把它放进 `Authorization` 头，
+   * 错误消息只留状态码。列在这里是因为**载体是整个配置对象**：
+   * `LlmConfig` / `ImageConfig` 都带 `apiKey` 字段，而
+   * `logger.info({ llmConfig }, '启动')` 是最自然的一种写法。
+   * 一层嵌套由 `*.apiKey` 覆盖，顶层由裸键名覆盖。
+   *
+   * 这与 `authorization` 不重复：那个挡的是请求头被整体序列化（Fastify 的
+   * `req.headers`），这个挡的是我们自己的配置对象。
+   */
+  'apiKey',
+  'api_key',
   // 个人可识别信息
   'email',
   'created_ip',

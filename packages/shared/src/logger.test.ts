@@ -42,6 +42,8 @@ describe('二十章：禁记字段', () => {
     ['tp_session', { tp_session: 'opaque-session-token' }, 'opaque-session-token'],
     ['tp_anon', { tp_anon: 'opaque-anon-token' }, 'opaque-anon-token'],
     ['anon_token_hash', { anon_token_hash: 'deadbeef' }, 'deadbeef'],
+    ['apiKey', { apiKey: 'sk-of-must-not-appear' }, 'sk-of-must-not-appear'],
+    ['api_key', { api_key: 'sk-of-must-not-appear' }, 'sk-of-must-not-appear'],
     ['created_ip', { created_ip: '203.0.113.7' }, '203.0.113.7'],
     ['raw_request', { raw_request: { custom: '我的手机号 13800000000' } }, '13800000000'],
     ['raw_text', { raw_text: '我叫张三，电话 13800000000' }, '张三'],
@@ -71,6 +73,31 @@ describe('二十章：禁记字段', () => {
     const line = logOnce({ user: { email: 'nested@example.com', user_id: 'u1' } });
     expect(line).not.toContain('nested@example.com');
     expect(line).toContain('u1');
+  });
+
+  it('整个模型配置对象被误记时，只剥掉 apiKey，其余照留', () => {
+    /*
+     * 这是 `apiKey` 进禁记清单的**实际理由**：单独记 key 没人会写，
+     * 而 `logger.info({ llmConfig }, '启动')` 是最自然的一种写法 ——
+     * `LlmConfig` / `ImageConfig` 都带 `apiKey` 字段。
+     *
+     * 同时断言 mode / model / baseUrl 保留：启动日志靠它们回答「这个进程
+     * 到底连的哪儿」，一并剥掉的话排查就没有起点了（baseUrl 不是凭据）。
+     */
+    const line = logOnce({
+      llmConfig: {
+        mode: 'direct',
+        model: 'openai/gpt-5.5',
+        baseUrl: 'https://api.ofox.ai',
+        apiKey: 'sk-of-real-credential',
+        timeoutMs: 30_000,
+      },
+    });
+
+    expect(line).not.toContain('sk-of-real-credential');
+    expect(line).toContain('[REDACTED]');
+    expect(line).toContain('openai/gpt-5.5');
+    expect(line).toContain('https://api.ofox.ai');
   });
 
   it('允许记录的身份字段保留', () => {

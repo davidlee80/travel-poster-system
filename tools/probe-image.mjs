@@ -2,8 +2,16 @@
 /**
  * 图像生成端点的能力探测（对应 tools/probe-llm.mjs，两者各自独立）。
  *
- *   node tools/probe-image.mjs --dry-run     # 只做本地体检，不发请求
- *   IMAGE_BASE_URL=... IMAGE_API_KEY=... IMAGE_MODEL=... node tools/probe-image.mjs
+ *   pnpm probe:image -- --dry-run            # 只做本地体检，不发请求
+ *   pnpm probe:image                         # 凭据从 .env 读，不经过命令行
+ *
+ * **不要用 `--api-key` 传 key**：命令行参数会进 shell history，也出现在同机
+ * 其他用户的 ps 输出里。`pnpm probe:image` 用 `--env-file-if-exists=.env` 启动。
+ *
+ * 与 probe-llm 同理，本脚本会**回显上游的完整错误体**（这是它存在的理由 ——
+ * 生产代码只留状态码就无法归因）。少数网关会在错误体里 echo 请求上下文，
+ * 其中可能含 `Authorization`。因此它是给人在终端用的，**不要接进流水线**：
+ * 构建日志的可见范围通常比 key 本身大得多。
  *
  * 凭据读 `IMAGE_*`；缺省回落到 `LLM_*`（同一个中转站同时提供两种能力时
  * 只配一套即可）。回落时会明确打印用了哪一套 —— `image.ts` 的注释特意说明
@@ -162,6 +170,8 @@ if (baseUrl === '' || apiKey === '' || model === '') {
       `  base-url  ${baseUrl || '(空)'}\n` +
       `  api-key   ${apiKey === '' ? '(空)' : `已给，长度 ${apiKey.length}`}\n` +
       `  model     ${model || '(空)'}\n\n` +
+      '推荐填在 .env 里（`pnpm probe:image` 会自动读），别用 --api-key ——\n' +
+      '命令行参数会进 shell history，也出现在同机其他用户的 ps 输出里。\n' +
       '只想看本地体检结果时加 --dry-run。\n',
   );
   process.exit(2);
