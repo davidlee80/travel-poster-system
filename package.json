@@ -88,6 +88,8 @@
     "test:alerts": "pnpm --filter @tps/observability exec vitest run alert-rules catalog",
     "//test:logs": "TP-5-02 的门禁：日志禁记字段（redact 层 + message 插值的静态扫描）。--self-test 验证扫描器本身有效",
     "test:logs": "node tools/scan-log-payloads.mjs --self-test && node tools/scan-log-payloads.mjs && pnpm --filter @tps/shared exec vitest run logger",
+    "//test:css-scope": "门禁 #53：planner.css 的选择器必须全部以 .planner 开头。globals.css 由根 layout 引入，而 /render/** 的信息图页面是它的后代 —— 写到 body / :root 会让导出 PNG 底色变灰、字体绕过 @tps/fonts 自托管子集，而采集页面看起来完全正常。--self-test 保证扫描器本身没失效",
+    "test:css-scope": "node tools/scan-css-scope.mjs --self-test && node tools/scan-css-scope.mjs",
     "//test:retention": "TP-4-21~25 的门禁：保留期清理与知识转存（需 DATABASE_URL）",
     "test:retention": "pnpm --filter @tps/db exec vitest run retention.integration --no-file-parallelism && pnpm --filter @tps/retention-worker exec vitest run purge",
     "//test:shutdown": "TP-5-13 / L-10 / 门禁 #34：起真实 Worker 子进程发 SIGTERM。仅 Linux（Windows 没有 POSIX 信号，child.kill 映射到 TerminateProcess），其他平台自动跳过",

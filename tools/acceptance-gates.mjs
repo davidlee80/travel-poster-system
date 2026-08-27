@@ -357,11 +357,11 @@ export const GATES = [
   },
   {
     id: 39,
-    title: '条件字典扩到 46 码后，字典、分域表与中文文案三处一致',
-    ref: 'P8 / R-55，设计稿 5.1',
+    title: '条件字典、分域表与中文文案三处一致',
+    ref: 'P8 / R-55、P9 / R-65，设计稿 5.1',
     kind: 'command',
     run: 'pnpm --filter @tps/schemas exec vitest run conditions && pnpm --filter @tps/presentation exec vitest run condition-labels',
-    why: '5.1 的失效方式是静默的：漏配一个 code 的文案会让表单出现没有文字的标签，把 code 归错域会让它不进 Prompt 的对应小节 —— 两者都不报错。文案表是 Record<ConditionCode,…>，因此漏配是编译错误；这条门禁守的是分域条目数与「正向命名」两条约定',
+    why: '5.1 的失效方式是静默的：漏配一个 code 的文案会让表单出现没有文字的标签，把 code 归错域会让它不进 Prompt 的对应小节 —— 两者都不报错。文案表是 Record<ConditionCode,…>，因此漏配是编译错误；这条门禁守的是分域条目数与「正向命名」两条约定。**标题刻意不写字典总数**：它已经陈旧过一次（写着 46 而实际是 61，而门禁照样绿着）。权威数字在 CONDITION_CODE_COUNT 与 conditions.test.ts 的逐域断言里 —— 那里写错会变红，而标题写错不会',
   },
   {
     id: 40,
@@ -397,13 +397,102 @@ export const GATES = [
     run: 'pnpm --filter @tps/generation-worker exec vitest run ai-budget ai-generator',
     why: '21.4 的「3 张」与 21.2 的「Hero 2 次」都是用次数近似时延，而那个近似的前提是「一次生成最多 20 秒」这个硬编码常量。超时可配之后次数只剩成本含义 —— 没有这一项，T2 的窗口就没有任何东西在守。同批还含「整条候选链失败只记 1 次 failure」：按候选记的话 MAX_AI_FAILURES_PER_JOB=2 会让 failover 跑不完一轮',
   },
+
+  // ── P9 Planner V2.1（迁移 0010～0012）─────────────────
+  {
+    id: 44,
+    title: '契约地基：76 字段元数据与载荷路径恒等式',
+    ref: 'P9 / R-73，设计稿 5.2',
+    kind: 'command',
+    run: 'pnpm --filter @tps/schemas exec vitest run planner-fields planner-profile',
+    why: '守的是一条恒等式：76 个字段的载荷路径 ≡ planner_profile. + api_key（双向断言，缺字段与多余叶子键都报错）。破了之后的表现不是报错，是「用户填了档次，生成时读到 undefined」—— 而那正是当初不维护别名表而改用新顶层块的理由。同批还含分域数量逐行（14/11/19/4/4/7/2）与**隐私禁词扫描**（叶子路径无 passport_number / card_number / cvv 等 12 个）—— 后者坏了的表现是我们收了护照号而没人发现',
+  },
+  {
+    id: 45,
+    title: '界面绑定完整：76 个绑定可被识别，无重叠无遗漏',
+    ref: 'P9 规范 21.1 硬门槛，设计稿 5.2',
+    kind: 'command',
+    run: 'pnpm --filter @tps/web exec vitest run sections descriptors',
+    why: '区块表逐组拼起来必须**逐个相等**于 fieldsOfStep(step)，且九步 70 + 准备中心 6 的并集 = 76、两边无重叠。靠元数据表而不是逐个组件罗列字段，因为两份清单必然漂移 —— 而漂移的表现是「产品加了一个字段，某一步没有它」，而那一步看起来完整',
+  },
+  {
+    id: 46,
+    title: '配置中心与内置字典双向一致（P9 陷阱 1）',
+    ref: 'P9 实施计划「陷阱 1」，设计稿 5.1 / 5.2',
+    kind: 'command',
+    run: 'pnpm --filter @tps/api exec vitest run planner-config',
+    why: 'N-08 的判据是 allowedConditionCodes?.has(code) ?? isKnownConditionCode(code) —— `??` **不是并集**，一旦库里有已发布配置，内置字典完全不参与判断。新码只加进 conditions.ts 而没注册进 planner_config_options 就会被拒，而界面上那个标签完全正常。P9-6 期间就因此发现过一个更严重的存量缺陷：筛选用的是 endsWith(".tags") 而 8 个字段里有 5 个是 _tags 结尾 —— 于是装了配置中心的环境里 P8 自己的 26 个码全部被 N-08 拒掉。本地开发与单测不装配置中心，因此它在开发期完全不可见',
+  },
+  {
+    id: 47,
+    title: '配置驱动真的生效（派生键 ⇄ 迁移注册，含停用/改文案/改排序）',
+    ref: '设计稿 5.2、docs/规划器配置中心.md',
+    kind: 'command',
+    run: 'pnpm --filter @tps/web exec vitest run config-binding config-driven',
+    why: '从描述符表**派生**的 62 个 field_key ⇄ 迁移 0012 注册的行（双向且含顺序），kind 与 metadata.value_kind 一致，投影专用键下恰好是界面上没有标签的那 18 个码。派生而不是手写映射表：手写的那份与描述符漂移无法被发现 —— 描述符里新加一个带选项的部件、忘了补映射，那个列表就静默退回硬编码，运营改了没生效而界面看起来完全正常',
+  },
+  {
+    id: 48,
+    title: '多城与弹性日期：V-04 集合校验、单城恒等、N-09/N-10/N-13/N-14',
+    ref: 'P9 / R-61～R-63、R-67，设计稿 3.1.2 / 3.2.1.2',
+    kind: 'command',
+    run: 'pnpm --filter @tps/planning exec vitest run conflicts && pnpm --filter @tps/presentation exec vitest run cities',
+    why: '不改 V-04 的后果不是「校验不住」而是比那严重得多：trip.destination 永远是单个，因此一份「东京 + 京都」行程里第 2～5 城的所有日子都会被判违规，然后被修复动作逐日覆写成第一个城市 —— 用户拿到全程东京的计划，而校验与修复都报告成功。「单城行为一字未变」那一条同样要守：它是视觉基线在 P9 下保持 0.0000% 的原因（planCities 对存量行退化成单元素序列）。V-04 的集合校验与修复策略另由 pnpm test:validation 覆盖',
+  },
+
+  // ── CR 计费（迁移 0013～0014）──────────────────────
+  {
+    id: 49,
+    title: '钱包不变量：结算幂等、并发预留守恒、六道约束',
+    ref: '设计稿 21.5 不变量一 / 二，docs/用户货币与计费.md §七',
+    kind: 'command',
+    run: 'pnpm --filter @tps/db exec vitest run credit-wallet.integration --no-file-parallelism',
+    why: '幂等键 job:<job_id> 是整套计费设计里最重要的约束：生成任务会被重投（队列重试、worker 崩溃后接管），没有它一次重投就是一次重复扣费 —— 而用户不会因为「少了 2000 CR」来提工单，他只会觉得这个产品贵。同批含并发预留（余额只够一次 → 恰好一个成功、balance_cr + held_cr 守恒）与六道数据库约束。**必须标 needsDb**：无 DATABASE_URL 时 35 个用例全 skip 而退出码是 0，不标的话报告会把“什么都没验”算成通过 —— 而这是全清单里最不能被误报成绿的一项，它管的是钱',
+    needsDb: true,
+  },
+  {
+    id: 50,
+    title: '预留生命周期：可重试不释放、失败全退、导出退原额',
+    ref: '设计稿 21.5 不变量三，docs/用户货币与计费.md §四 / §五',
+    kind: 'command',
+    run: 'pnpm --filter @tps/generation-worker exec vitest run billing && pnpm --filter @tps/render-worker exec vitest run billing',
+    why: '可重试的失败**保留**预留 —— 释放了的话重试成功时结算找不到 ACTIVE 的预留，按设计它不扣费，于是「失败一次然后成功」的任务全部免费。PLAN_LLM_TIMEOUT / PLAN_LLM_UNAVAILABLE 导致的重试并不罕见，这会是一个持续漏钱且完全不可见的洞。导出侧守的是「退多少只有一个正确答案：当时实际扣的那个数」—— 按当前价目现算在调价窗口内会退错，而少退是我们赖账、多退是可以被反复触发的漏洞',
+  },
+  {
+    id: 51,
+    title: '定价安全网：兜底价命中、估算参数 ≥ 真实常量、开发期上界 ≤ 赠送额',
+    ref: 'docs/用户货币与计费.md §三 / §九，设计稿 21.5',
+    kind: 'command',
+    run: 'pnpm --filter @tps/billing exec vitest run billing dev-prices && pnpm --filter @tps/generation-worker exec vitest run billing-limits',
+    why: '三条都是静默的。兜底价：没它会让任务卡在终态之前（用户的计划已经生成好了却永远看不到），而兜底按 0 会让那个模型完全免费且没有任何人会发现。估算参数用 >= 而不是 ===：允许 billing 保守，不允许它乐观（乐观 → 预留不足 → 坏账）。开发期定价那一条断言「任何天数、任何重生成次数下的最坏上界 ≤ 注册赠送额」—— 只保证典型值不超不够，那会让「重生成两次」变成一个只在特定条件下出现的 402，而它恰恰最难复现。dev-prices.test.ts **直接解析迁移 SQL**，不在测试里抄一份数字 —— 抄的话漂移方向恰好最坏：测试说能跑通，库里那一版跑不通',
+  },
+  {
+    id: 52,
+    title: '开关与身份边界：关闭时钱包表一次不读、/credits/* 拒匿名、赠送只发一次',
+    ref: '设计稿 21.5 不变量五 / 六，13.9.1',
+    kind: 'command',
+    run: 'pnpm --filter @tps/api exec vitest run credits travel-plans exports',
+    why: '开关那条不是静默而是灾难性的，但**它只在生产的特定部署顺序下出现**：钱包与价目表到 0013 才建立，而应用与数据库的部署不是原子的 —— 装配了却没迁移的后果是每个生成请求都撞 relation credit_wallets does not exist，也就是全站不可用。本地永远看不到它，因此只能靠「未装配计费时不碰钱包」那两条断言守。赠送那条是静默的：幂等键 signup:<user_id> 与匿名原地升级走同一个 user_id，做错会让「先匿名生成再注册」多拿一次',
+  },
+
+  // ── 样式作用域（P9-2）──────────────────────────
+  {
+    id: 53,
+    title: 'planner.css 的选择器全部以 .planner 开头',
+    ref: 'P9 Global Constraints，设计稿 5.2',
+    kind: 'command',
+    run: 'pnpm test:css-scope',
+    why: 'globals.css 由根 layout 引入，而 /render/** 的信息图页面是它的后代。写到 body / :root 会让导出 PNG 底色从白变灰、字体绕过 @tps/fonts 的自托管子集 —— 两者的共同点是**采集页面看起来完全正常**，坏掉的是另一条链路上的产物。P9-8 手工核对过一次（当时 319 条全合格），但那是一次性的：下一个改样式的人不会知道有这条纪律，而违反它除了视觉基线之外不会让任何测试变红（而那条的报错指向截图差异，不指向这里）。--self-test 用 6 个必须检出 + 7 个必须放过的样本反证扫描器本身没失效，并带一条选择器数量下限（低于 200 直接报错）—— 一个解析不到东西的扫描器会把「0 处违规」当成通过',
+  },
 ];
 
 /**
  * 24.1 的项数。写成常量供自检，防止无意增删。
  *
- * 24.1 原表是 38 项；P8 加 #39/#40，多模型故障转移加 #41～#43。
- * 后五项不在设计稿里，理由逐条写在各自的 `why` ——
- * 与 METRICS_CATALOG 的 `source: 'supplementary'` 同一处理。
+ * 24.1 原表是 38 项；P8 加 #39/#40，多模型故障转移加 #41～#43，
+ * P9 加 #44～#48、CR 计费加 #49～#52、样式作用域加 #53。
+ * 后十五项本来不在设计稿里（与 METRICS_CATALOG 的 `source: 'supplementary'` 同一处理），
+ * 设计稿 V1.9 的 R-66 与 V1.11 的 R-77 已把它们登记进 24.1 的「设计稿之外的补充门禁」一节 ——
+ * 因此两边现在都是 53。两个数字不等时，「现在是全绿吗」这个问题没有确定的答案。
  */
-export const GATE_COUNT = 43;
+export const GATE_COUNT = 53;

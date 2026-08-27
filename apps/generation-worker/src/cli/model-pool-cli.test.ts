@@ -1,16 +1,26 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatMapping, formatPool, parseArgs } from './model-pool-cli.js';
+import {
+  formatMapping,
+  formatOverwriteNotice,
+  formatPool,
+  parseArgs,
+} from './model-pool-cli.js';
 
 /**
  * `pnpm model:pool` 的参数解析与输出（多模型 failover 计划的任务 5）。
  *
- * 两条断言值得单列：
+ * 四条断言值得单列：
  *   - **`--models` 为空被拒**：空池的语义会是「这一档不许用 AI」，而调用方
  *     把它当成「无配置」回落 env —— 两件事必须在写入时就分开（迁移 0009
  *     的 `model_pools_models_nonempty` 是第二道）；
  *   - **`--list` 显示被截断后的实际候选数**：只显示配置值的话，运营把
- *     `max_candidates` 调到 10 会看到「10」并以为生效了，而运行时只试 2 个。
+ *     `max_candidates` 调到 10 会看到「10」并以为生效了，而运行时只试 2 个；
+ *   - **不传 `--note` 时属性被省掉**（不是传 `null`）：下游据此保留原备注。
+ *     曾经这里传 `null` 而 SQL 是 `note = EXCLUDED.note`，于是「只改模型顺序」
+ *     会静默抹掉备注 —— 而改顺序恰好是应急操作；
+ *   - **回退命令的 `--models` 不带空格**：带了就不能直接粘贴（shell 会拆词），
+ *     而它存在的全部意义就是可粘贴。
  */
 
 const BUDGETS = {
@@ -25,17 +35,65 @@ describe('parseArgs', () => {
     expect(parseArgs(['--list'])).toEqual({ kind: 'list' });
   });
 
-  it('--set-pool 收集池名、类型与有序模型列表', () => {
-    expect(
-      parseArgs(['--set-pool', 'paid', '--kind', 'LLM', '--models', 'gpt-4o,claude-opus-4']),
-    ).toEqual({
+  it('--set-pool 收集池名、类型与有序模型列表；不传 --note 时省掉该属性', () => {
+    const command = parseArgs([
+      '--set-pool',
+      'paid',
+      '--kind',
+      'LLM',
+      '--models',
+      'openai/gpt-5.5,anthropic/claude-opus-4.8',
+    ]);
+
+    expect(command).toEqual({
       kind: 'set-pool',
       name: 'paid',
       poolKind: 'LLM',
-      models: ['gpt-4o', 'claude-opus-4'],
-      note: null,
+      models: ['openai/gpt-5.5', 'anthropic/claude-opus-4.8'],
       dryRun: false,
     });
+
+    /*
+     * 属性必须**不存在**，而不是值为 null。
+     *
+     * `upsertPool` 靠 `input.note !== undefined` 判「本次是否动备注」；
+     * 传 null 会被当成「显式清空」，于是只改模型顺序就抹掉了备注。
+     * `toEqual` 不区分两者，因此这一行必须单独写。
+     */
+    expect('note' in command).toBe(false);
+  });
+
+  it('--note 传内容时设置，传空串时显式清空', () => {
+    expect(
+      parseArgs(['--set-pool', 'p', '--kind', 'LLM', '--models', 'a', '--note', '只放便宜模型']),
+    ).toMatchObject({ note: '只放便宜模型' });
+
+    // 空串与纯空白都归为「显式清空」（null），与「不传」区分开
+    expect(
+      parseArgs(['--set-pool', 'p', '--kind', 'LLM', '--models', 'a', '--note', '']),
+    ).toMatchObject({ note: null });
+    expect(
+      parseArgs(['--set-pool', 'p', '--kind', 'LLM', '--models', 'a', '--note', '   ']),
+    ).toMatchObject({ note: null });
+  });
+
+  it('模型名内部含空白被拒（PowerShell 不加引号的 a,b）', () => {
+    /*
+     * PowerShell 把不加引号的 `--models a,b` 展开成数组再用空格拼回，
+     * 于是 CLI 收到一个字符串 `"a b"`。它切完逗号只得到**一个**模型名，
+     * 而那个名字在中转站上不存在。
+     *
+     * 不拦的后果是静默的：它会被写进数据库，`--list` 看上去正常，
+     * 而那一档的每次调用都失败 —— 已经在本机真实发生过一次。
+     */
+    expect(() =>
+      parseArgs(['--set-pool', 'p', '--kind', 'LLM', '--models', 'openai/gpt-5.5 google/gemini-3.5-flash']),
+    ).toThrow(/不能含空白/);
+
+    // 提示必须包含解法，否则运营看不出该怎么改
+    expect(() =>
+      parseArgs(['--set-pool', 'p', '--kind', 'LLM', '--models', 'a b']),
+    ).toThrow(/加引号/);
   });
 
   it('模型名两侧的空格被裁掉（复制粘贴常带空格）', () => {
@@ -245,5 +303,56 @@ describe('formatPool', () => {
       '[a, b]',
     );
     expect(formatPool({ name: 'paid', kind: 'LLM', models: ['a'], note: null })).not.toContain('#');
+  });
+});
+
+describe('formatOverwriteNotice', () => {
+  it('新建池时不给回退命令（无旧值可退）', () => {
+    const notice = formatOverwriteNotice(undefined, 'paid', 'LLM');
+    expect(notice).toContain('新建');
+    expect(notice).not.toContain('--set-pool');
+  });
+
+  it('覆盖时给出旧值、旧备注与一条可粘贴的回退命令', () => {
+    const notice = formatOverwriteNotice(
+      {
+        name: 'paid',
+        kind: 'LLM',
+        models: ['openai/gpt-5.5', 'google/gemini-3.5-flash'],
+        note: '只放便宜模型',
+      },
+      'paid',
+      'LLM',
+    );
+
+    expect(notice).toContain('[openai/gpt-5.5, google/gemini-3.5-flash]');
+    expect(notice).toContain('只放便宜模型');
+    expect(notice).toContain(
+      'pnpm model:pool -- --set-pool paid --kind LLM ' +
+        '--models "openai/gpt-5.5,google/gemini-3.5-flash"',
+    );
+  });
+
+  it('回退命令的 --models 带引号、不带空格，也不带 --note', () => {
+    const notice = formatOverwriteNotice(
+      { name: 'p', kind: 'IMAGE', models: ['a', 'b', 'c'], note: '带空格 的 备注' },
+      'p',
+      'IMAGE',
+    );
+
+    const command = notice
+      .split('\n')
+      .find((row) => row.includes('pnpm model:pool'))
+      ?.trim();
+
+    /*
+     * 三条都是「能不能直接粘贴」的条件：
+     *   - `--models a, b, c` 会被 shell 拆成三个参数，`b` 与 `c` 成了游离项；
+     *   - **不带引号时 PowerShell 会把 `a,b,c` 展开成数组再用空格拼回**，
+     *     于是粘贴回去得到一个含空格的假模型名 —— 已在本机真实发生过；
+     *   - 带上 `--note "带空格 的 备注"` 就得处理引号转义，而备注本来就会被
+     *     `upsertPool` 在缺省时保留 —— 加上只会多一个出错点。
+     */
+    expect(command).toBe('pnpm model:pool -- --set-pool p --kind IMAGE --models "a,b,c"');
   });
 });

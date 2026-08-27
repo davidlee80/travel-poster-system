@@ -126,6 +126,39 @@ describeIntegration('分层与池的写侧（集成，需 PostgreSQL）', () => 
       expect(rows[0]).toMatchObject({ models: ['b', 'c'], note: '换了' });
     });
 
+    it('不传 note 时保留原备注（只改模型顺序不应抹掉运营备注）', async () => {
+      await admin.upsertPool({
+        name: 'paid',
+        kind: 'LLM',
+        models: ['a', 'b'],
+        note: '这一档只放便宜模型',
+      });
+
+      // 应急时的典型操作：把还活着的那个提到前面，不带 --note
+      await admin.upsertPool({ name: 'paid', kind: 'LLM', models: ['b', 'a'] });
+
+      const rows = await admin.listPools();
+      expect(rows[0]).toMatchObject({
+        models: ['b', 'a'],
+        note: '这一档只放便宜模型',
+      });
+    });
+
+    it('传 note: null 是显式清空，与「不传」分开', async () => {
+      await admin.upsertPool({ name: 'paid', kind: 'LLM', models: ['a'], note: '旧备注' });
+      await admin.upsertPool({ name: 'paid', kind: 'LLM', models: ['a'], note: null });
+
+      const rows = await admin.listPools();
+      expect(rows[0]?.note).toBeNull();
+    });
+
+    it('新建池不传 note 时落为 null（没有“原备注”可保留）', async () => {
+      await admin.upsertPool({ name: 'fresh', kind: 'LLM', models: ['a'] });
+
+      const rows = await admin.listPools();
+      expect(rows[0]?.note).toBeNull();
+    });
+
     it('同名池在 LLM 与 IMAGE 下各自独立（复合唯一键）', async () => {
       await admin.upsertPool({ name: 'paid', kind: 'LLM', models: ['gpt-4o'] });
       await admin.upsertPool({ name: 'paid', kind: 'IMAGE', models: ['flux-pro'] });

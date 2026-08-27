@@ -51,5 +51,7 @@ apps/web/public/fonts/
 # `pnpm preview` 的产物：一份可离线打开的页面快照（含 10 MB 的 data URI 字体）。
 # 它是当前代码 + 一份现场生成的 fake 计划的函数，随时可重生，没有理由入库。
 preview/
+# 同类产物（Next.js 静态 chunk + 自托管字体副本），之前漏了
+preview-local/
 /docs/design/Planner_V2_页面交互原型规范.docx
 /docs/design/planner_v2_prototype.html

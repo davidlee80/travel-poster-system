@@ -58,6 +58,13 @@ export interface UpsertPoolInput {
   readonly name: string;
   readonly kind: ModelPoolKind;
   readonly models: readonly string[];
+  /**
+   * 三态：**属性缺省** = 保留原备注，`null` = 显式清空，字符串 = 设置。
+   *
+   * 「缺省 = 保留」而不是「缺省 = 清空」：改模型顺序是应急操作（见运维手册
+   * 「主模型胜出率下降」一节），而应急时没人会先把「这一档只放便宜模型」
+   * 那句备注抄下来。`exactOptionalPropertyTypes` 让这三态在类型层就能区分。
+   */
   readonly note?: string | null;
 }
 
@@ -207,8 +214,21 @@ export function createTierAdminRepository(pool: Pool): TierAdminRepository {
         `INSERT INTO model_pools (pool_id, name, kind, models, note)
          VALUES (gen_random_uuid(), $1, $2, $3::jsonb, $4)
          ON CONFLICT (name, kind)
-         DO UPDATE SET models = EXCLUDED.models, note = EXCLUDED.note, updated_at = NOW()`,
-        [input.name, input.kind, JSON.stringify(input.models), input.note ?? null],
+         DO UPDATE SET models = EXCLUDED.models,
+                       note = CASE WHEN $5::boolean THEN EXCLUDED.note ELSE model_pools.note END,
+                       updated_at = NOW()`,
+        [
+          input.name,
+          input.kind,
+          JSON.stringify(input.models),
+          input.note ?? null,
+          /*
+           * 「本次是否动备注」得单独传。光靠 `$4` 区分不了「不传」与「传 null」：
+           * `COALESCE(EXCLUDED.note, model_pools.note)` 能保留，但那样就永远无法
+           * 显式清空一条已经过时的备注了。
+           */
+          input.note !== undefined,
+        ],
       );
     },
 

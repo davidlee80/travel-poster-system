@@ -16,10 +16,17 @@ import { LLM_CHAIN_BUDGET_MS } from '../assets/model-selection.js';
  *
  * ```bash
  * pnpm model:pool -- --list
- * pnpm model:pool -- --set-pool paid --kind LLM --models gpt-4o,claude-opus-4
+ * pnpm model:pool -- --set-pool paid --kind LLM --models "openai/gpt-5.5,anthropic/claude-opus-4.8"
  * pnpm model:pool -- --map --kind LLM --min-tier 10 --pool paid --max-candidates 3
  * pnpm model:pool -- --map --kind IMAGE --min-tier 10 --pool paid   # 省略即不限
- * pnpm model:pool -- --set-pool paid --kind LLM --models a,b --dry-run
+ * pnpm model:pool -- --set-pool paid --kind LLM --models "a,b" --dry-run
+ *
+ * # --models 的值必须加引号！PowerShell 会把不加引号的 a,b 展开成数组再用
+ * # 空格拼回，于是只得到一个含空格的假模型名（现已被 parseModels 拒掉）
+ *
+ * # --note 三态：不传 = 保留原备注；传内容 = 设置；传空串 = 显式清空
+ * pnpm model:pool -- --set-pool paid --kind LLM --models "a,b" --note "只放便宜模型"
+ * pnpm model:pool -- --set-pool paid --kind LLM --models "a,b" --note ""
  *
  * # 回滚：删映射即回落 env 单模型（迁移 0009 承诺的那条路）
  * pnpm model:pool -- --unmap --kind IMAGE --min-tier 10
@@ -47,6 +54,10 @@ import { LLM_CHAIN_BUDGET_MS } from '../assets/model-selection.js';
  * 中转站没有可靠的模型列表接口。配错的后果是那个候选快速失败、链条切到
  * 下一个，代价是每次多一个无效请求 —— 靠 `--dry-run` 与 failover 指标发现，
  * 而不是靠一个会过期的白名单。这一条写在计划的「交付边界」里。
+ *
+ * 代价由运维手册「ofox 模型进池前的兼容性检查」一节承担：它列出两类结构性
+ * 不能进池的模型（responses-only、视频），并给出区分方法 —— 结构性不兼容是
+ * 恒定的（位次占比几乎 100% 且不波动），上游抖动是间歇的。
  */
 
 const KINDS: readonly ModelPoolKind[] = ['LLM', 'IMAGE'];
@@ -58,7 +69,8 @@ export type ModelPoolCommand =
       readonly name: string;
       readonly poolKind: ModelPoolKind;
       readonly models: readonly string[];
-      readonly note: string | null;
+      /** 属性缺省 = 保留原备注，`null` = 显式清空，字符串 = 设置 */
+      readonly note?: string | null;
       readonly dryRun: boolean;
     }
   | {
@@ -91,12 +103,14 @@ export function parseArgs(argv: readonly string[]): ModelPoolCommand {
   const setPool = values.get('set-pool');
   if (setPool !== undefined) {
     const models = parseModels(values.get('models'));
+    const note = values.get('note');
     return {
       kind: 'set-pool',
       name: setPool,
       poolKind: parseKind(values.get('kind')),
       models,
-      note: values.get('note') ?? null,
+      // 缺省时**省掉该属性**（不是传 null）—— 下游据此保留原备注
+      ...(note === undefined ? {} : { note: note.trim() === '' ? null : note }),
       dryRun,
     };
   }
@@ -196,15 +210,37 @@ function parseKind(raw: string | undefined): ModelPoolKind {
  * 那条约束存在的理由是「空池」与「没有配置」必须区分（前者的语义会是
  * 「这一档不许用 AI」，而调用方把它当成无配置回落 env）。让 CLI 先报错
  * 是为了给出这句解释 —— 数据库只会说 violates check constraint。
+ *
+ * ## 模型名含空白一律拒掉（PowerShell 陷阱）
+ *
+ * PowerShell 会把**不加引号**的 `--models a,b` 当成数组展开，再用空格拼回成
+ * 一个参数 —— 于是这里收到的是 `"a b"`，切完逗号只得到**一个**含空格的
+ * 假模型名。没有这道检查的话它会被写进数据库，表现是那一档的每次调用都
+ * 失败（候选名不存在），而 `--list` 看上去完全正常。
+ *
+ * 真实模型 ID 不含空白（`openai/gpt-5.5` 这种形式），因此这条不会误伤。
  */
 function parseModels(raw: string | undefined): readonly string[] {
-  if (raw === undefined) throw new Error('--set-pool 需要 --models a,b,c');
+  if (raw === undefined) throw new Error('--set-pool 需要 --models "a,b,c"（引号必须加）');
   const models = raw
     .split(',')
     .map((item) => item.trim())
     .filter((item) => item !== '');
   if (models.length === 0) {
     throw new Error('--models 至少要有一个模型名（空池与「无配置」是两件事，见迁移 0009）');
+  }
+
+  /*
+   * 放在重复检查**之前**：含空白几乎总是引号没加，而那条提示比
+   * 「模型名重复」更可操作。
+   */
+  const withWhitespace = models.filter((item) => /\s/.test(item));
+  if (withWhitespace.length > 0) {
+    throw new Error(
+      `--models 里的模型名不能含空白：${withWhitespace.join(' | ')}\n` +
+        'PowerShell 会把不加引号的 a,b 展开成数组再用空格拼回来。' +
+        '请加引号：--models "a,b"',
+    );
   }
   const unique = new Set(models);
   if (unique.size !== models.length) {
@@ -288,6 +324,43 @@ export function formatPool(pool: ModelPoolRow): string {
   );
 }
 
+/**
+ * 覆盖前的当前值，加一条可直接粘贴的回退命令。
+ *
+ * 池**没有版本历史** —— 同仓另两套运营配置（`planner_config_*`、
+ * `credit_price_*`）都是 DRAFT/PUBLISHED/ARCHIVED 加 clone + publish，而池是
+ * 直接 upsert。于是「改错了」唯一的退路是有人记得旧值 —— `--unmap` 不算，
+ * 它是回落 env 单模型，丢掉整个池，不是回到上一版列表。
+ *
+ * **dry-run 与实写都打印**：应急时很可能跳过 dry-run，而跳过的人恰好是
+ * 最需要这条记录的人。它会留在终端输出里。
+ *
+ * 回退命令不带 `--note`：备注在缺省时会被保留（见 `upsertPool`），
+ * 因此省掉它既短，也不用处理备注里的引号转义。
+ *
+ * `--models` 的值**必须带引号**：PowerShell 会把不加引号的 `a,b` 展开成
+ * 数组再用空格拼回来，于是粘贴这条命令会得到一个含空格的假模型名 ——
+ * 一条自己造出来的陷阱。`parseModels` 现在会拒掉它，但回退命令本身
+ * 不应该靠那道护栏才能用。
+ */
+export function formatOverwriteNotice(
+  existing: ModelPoolRow | undefined,
+  name: string,
+  kind: ModelPoolKind,
+): string {
+  if (existing === undefined) {
+    return `新建 ${kind} 池 ${name}（当前不存在，无需回退）\n`;
+  }
+
+  return (
+    `覆盖前：${kind} 池 ${name} = [${existing.models.join(', ')}]` +
+    (existing.note === null ? '' : `  # ${existing.note}`) +
+    '\n回退命令（池无版本历史，只有这一条退路）：\n' +
+    `  pnpm model:pool -- --set-pool ${name} --kind ${kind} ` +
+    `--models "${existing.models.join(',')}"\n`
+  );
+}
+
 async function main(): Promise<void> {
   const command = parseArgs(process.argv.slice(2));
   const pool = createPool(loadDbConfig());
@@ -339,17 +412,23 @@ async function main(): Promise<void> {
 
     if (command.kind === 'set-pool') {
       const line = `${command.poolKind} 池 ${command.name} = [${command.models.join(', ')}]`;
+      const existing = (await repository.listPools()).find(
+        (row) => row.name === command.name && row.kind === command.poolKind,
+      );
+      const notice = formatOverwriteNotice(existing, command.name, command.poolKind);
+
       if (command.dryRun) {
-        process.stdout.write(`--dry-run：将写入 ${line}\n`);
+        process.stdout.write(`--dry-run：将写入 ${line}\n${notice}`);
         return;
       }
       await repository.upsertPool({
         name: command.name,
         kind: command.poolKind,
         models: command.models,
-        note: command.note,
+        // 缺省时省掉该属性，`upsertPool` 据此保留原备注
+        ...(command.note === undefined ? {} : { note: command.note }),
       });
-      process.stdout.write(`已写入 ${line}\n`);
+      process.stdout.write(`已写入 ${line}\n${notice}`);
       return;
     }
 
