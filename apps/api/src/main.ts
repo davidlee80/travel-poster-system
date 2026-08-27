@@ -40,6 +40,7 @@ import {
 } from './identity/phone-verification.js';
 import { RedisSessionStore } from './identity/redis-session-store.js';
 import { CreditsService } from './credits/service.js';
+import { startQueueDepthSampler } from './queue-depth.js';
 import { buildServer } from './server.js';
 
 const SERVICE_NAME = 'tps-api';
@@ -125,6 +126,15 @@ async function main(): Promise<void> {
   const queue = new BullMqPlanQueue(queueRedis);
   shutdown.register('plan-queue', async () => {
     await queue.close();
+  });
+
+  /*
+   * 提升为具名常量（原先在 exports 那一块内联 new）：队列深度采样器也要用它，
+   * 而两个独立实例会各自持一份 BullMQ 的连接与事件监听。
+   */
+  const exportQueue = new BullMqExportQueue(queueRedis);
+  shutdown.register('export-queue', async () => {
+    await exportQueue.close();
   });
 
   const quota = new QuotaGuard({ config: quotaConfig, store: counters, now: () => new Date() });
@@ -236,7 +246,7 @@ async function main(): Promise<void> {
       quota,
       plans: createTravelPlansRepository(pool),
       exports: createExportsRepository(pool),
-      queue: new BullMqExportQueue(queueRedis),
+      queue: exportQueue,
       storage: new S3ExportStorage(loadExportsStorageConfig()),
       featureFlags,
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
@@ -275,6 +285,21 @@ async function main(): Promise<void> {
   // HTTP 服务后注册 → 关闭时先停，保证连接池在还有请求在处理时不被断开
   shutdown.register('http-server', async () => {
     await app.close();
+  });
+
+  /*
+   * 队列积压的先行指标（见 queue-depth.ts）。
+   *
+   * 放在 listen 之前起：它不依赖 HTTP，而先起能保证第一次抓取就能拿到值。
+   */
+  const stopQueueDepthSampler = startQueueDepthSampler({
+    plan: queue,
+    export: exportQueue,
+    logger,
+  });
+  shutdown.register('queue-depth-sampler', () => {
+    stopQueueDepthSampler();
+    return Promise.resolve();
   });
 
   // 0.0.0.0 而非 localhost：容器内必须监听所有接口才能被外部访问

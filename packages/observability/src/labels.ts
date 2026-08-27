@@ -71,6 +71,17 @@ export const ALLOWED_LABELS = [
    * 具体哪个 SKU 走日志（billing.ts 打了 sku 字段）。
    */
   'domain',
+
+  /*
+   * 队列名。两个取值，由代码常量封闭：
+   *   'travel-plan-generation' | 'travel-plan-export'
+   *
+   * 不用 `service` 代替：同一个 API 进程同时上报两个队列的深度（它持有
+   * 两边的生产者句柄），而 `service` 是进程级默认标签，区分不了两个队列 ——
+   * 而「生成队列积压」与「导出队列积压」的处置完全不同（前者加 generation-worker
+   * 副本，后者加 render-worker）。
+   */
+  'queue',
 ] as const;
 
 export type AllowedLabel = (typeof ALLOWED_LABELS)[number];

@@ -307,6 +307,14 @@ export const METRICS_CATALOG: readonly CatalogEntry[] = [
     source: 'supplementary',
     note: '产品信号而非故障信号：定价配错时的表现不是报错，是「一批用户点了生成什么也没发生」，而每一次都返回了语义完全正确的 402。outcome=free 那条序列同样必须可见 —— 它意味着所有生成都不收费，而除此之外没有任何迹象',
   },
+  {
+    name: 'travel_queue_depth',
+    kind: 'gauge',
+    labels: ['queue'],
+    owner: 'api',
+    source: 'supplementary',
+    note: '背压的**先行**指标。T1 SLA 告警也能发现积压，但它是滞后的 —— 直方图只在任务完成时落样本，队列积压到 200 条时那 200 个受苦的用户还一个都没进过直方图。取 waiting 而不含 active：active 正常就该等于副本数 × concurrency。由 API 上报（它持有两个队列的生产者句柄），多副本下每个实例报的是同一个全局值，因此告警必须用 max by (queue) 而不是 sum',
+  },
 
   // ── 保留期（retention-worker）─────────────────────────────
   {

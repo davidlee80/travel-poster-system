@@ -103,6 +103,8 @@ describe('Prometheus 规则文件', () => {
    * 而没有理由的告警最终会被静音，连带着把有理由的那些一起淹掉。
    */
   const SUPPLEMENTARY_ALERTS: Readonly<Record<string, string>> = {
+    TravelQueueBacklogHigh:
+      '21.3 的六条里唯一缺的是**先行**指标。T1 SLA 那条也能发现积压（T1 从提交算起，含排队），但它是滞后的：直方图只在任务完成时落样本，队列积压到 200 条时 T1 的 P95 反映的是三分钟前完成的那批，而正在受苦的这 200 个用户还一个都没进过直方图 —— 等它们进去时人已经走了。队列深度在第一个用户超时之前就升高，是唯一能在用户受影响前介入的窗口',
     TravelAssetImageLoadFailureRatioHigh:
       'RenderReadyProbe 刻意让坏图不阻塞就绪（十八章降级链），因此素材 URL 全部取不到时页面仍 ready、degraded 仍为 false、导出仍 COMPLETED —— 用户拿到图片位置全空白的长图而所有信号都是绿的。21.3 的六条里没有一条能覆盖这个失效',
     TravelJobT2SlaBreach:

@@ -42,6 +42,15 @@ export type GenerationJobPayload = z.infer<typeof GenerationJobPayloadSchema>;
 export interface PlanQueue {
   /** 返回队列侧的 job id，写入 `generation_jobs.queue_job_id` 供排查 */
   enqueue(payload: GenerationJobPayload): Promise<string>;
+  /**
+   * 等待中的任务数（不含在跑的）。
+   *
+   * 专为背压告警而存在，因此取 waiting 而不是 waiting + active：
+   * active 永远等于「Worker 副本数 × concurrency」（正常工作就该打满），
+   * 把它加进来会让一个健康的系统看起来恒在积压。waiting > 0 持续
+   * 才是「活已经排到了而没人接」。
+   */
+  depth(): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -88,6 +97,10 @@ export class BullMqPlanQueue implements PlanQueue {
     return job.id ?? payload.jobId;
   }
 
+  async depth(): Promise<number> {
+    return this.queue.getWaitingCount();
+  }
+
   async close(): Promise<void> {
     await this.queue.close();
   }
@@ -108,6 +121,11 @@ export class InMemoryPlanQueue implements PlanQueue {
       this.enqueued.push(payload);
     }
     return Promise.resolve(payload.jobId);
+  }
+
+  /** 没有消费者，因此入队的那些就是全部在等 */
+  depth(): Promise<number> {
+    return Promise.resolve(this.enqueued.length);
   }
 
   close(): Promise<void> {

@@ -52,6 +52,8 @@ export const EXPORT_JOB_OPTIONS: JobsOptions = {
 
 export interface ExportQueue {
   enqueue(payload: ExportJobPayload): Promise<string>;
+  /** 等待中的任务数。取 waiting 而不含 active，理由见 `PlanQueue.depth` */
+  depth(): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -68,6 +70,10 @@ export class BullMqExportQueue implements ExportQueue {
     return job.id ?? payload.exportId;
   }
 
+  async depth(): Promise<number> {
+    return this.queue.getWaitingCount();
+  }
+
   async close(): Promise<void> {
     await this.queue.close();
   }
@@ -82,6 +88,10 @@ export class InMemoryExportQueue implements ExportQueue {
       this.enqueued.push(payload);
     }
     return Promise.resolve(payload.exportId);
+  }
+
+  depth(): Promise<number> {
+    return Promise.resolve(this.enqueued.length);
   }
 
   close(): Promise<void> {
