@@ -104,7 +104,27 @@ export interface PresentationsRepository {
 
   /** TP-3-15：重复解析不产生重复绑定 */
   saveBindings(inputs: readonly SaveBindingInput[]): Promise<void>;
-  /** 渲染与回填 ViewModel 用：连素材表一起取出展示所需字段 */
+
+  /**
+   * 连素材表一起取出某个版本绑定的素材及其**当前**状态。
+   *
+   * **不得用于渲染，也不得用于回填 ViewModel（R-83）。**
+   *
+   * 它与展示路径是两种不同的时间语义：
+   *
+   * ```text
+   * plan_presentations.view_model   快照  —— 当时那张图的 URL，19.3 永久保存
+   * listBindings（本方法）        实时  —— JOIN assets 取 a.storage_url
+   * ```
+   *
+   * 用它渲染的后果是同一份计划两次打开可能长得不一样 —— 而「历史计划回看
+   * 看到的就是当时那份」正是 ViewModel 快照存在的全部理由（也是素材 URL 不能用
+   * 预签名、`assets` 不物理删除的理由）。
+   *
+   * 当前**没有生产调用方**：ViewModel 由 `resolve-assets.ts` 直接从内存里的解析
+   * 结果构建，不重读数据库。保留它是因为它回答一个展示路径回答不了的运维问题：
+   * 「这个版本绑了哪些素材，它们现在是什么状态（是不是被下架了、授权到期了）」。
+   */
   listBindings(planVersionId: string): Promise<readonly BindingRow[]>;
 }
 

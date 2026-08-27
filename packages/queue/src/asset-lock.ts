@@ -34,15 +34,24 @@ export interface AssetLock {
 }
 
 /**
- * TTL 默认 30 秒。
+ * TTL 默认 60 秒。
  *
- * 比 AI 生成超时（20 秒，21.2 措施二）多 10 秒：锁必须活过整个生成 +
- * 后处理 + 上传 + 落库的过程。取得太短的表现是「锁在生成完成前过期，
- * 第二个调用方开始重复生成」—— 也就是这把锁没起作用，而且不会报错。
+ * 必须**长于单候选图片超时**（`AI_IMAGE_TIMEOUT_MS`，当前 40 秒）：锁要活过
+ * 整个生成 + 后处理 + 上传 + 落库的过程。取得太短的表现是「锁在生成完成前
+ * 过期，第二个调用方开始重复生成」—— 也就是这把锁没起作用，而且不会报错。
  *
  * 上限也不能太长：持锁进程崩溃后，等待方要靠 TTL 过期才能接手。
+ *
+ * > **R-82：这个值曾经是 30 秒，而当时的理由写的是「比 AI 生成超时（20 秒）
+ * > 多 10 秒」。那句话在写下时是对的，但多模型故障转移那轮把单候选超时从
+ * > 20 秒放宽到 40 秒（见 `image.ts` 里「原先 IMAGE_TIMEOUT_MS > 20000 即硬拒」
+ * > 那段），**TTL 没跟着调** —— 于是锁反而比它保护的操作短 10 秒，上面那句
+ * > 「取得太短的表现」正好描述了当时的实际状态。
+ * >
+ * > 后果是双倍 AI 成本加一个孤儿对象，而两者都不报错。
+ * > 现已由 `asset-lock-ttl.test.ts` 的跨包断言钉住两者的大小关系。
  */
-export const ASSET_LOCK_TTL_SECONDS = 30;
+export const ASSET_LOCK_TTL_SECONDS = 60;
 
 export class RedisAssetLock implements AssetLock {
   constructor(private readonly redis: Redis) {}

@@ -202,11 +202,34 @@ export async function ingestAsset(
      * 把本次上传的缩略图挂过去会让 `assets.thumbnail_url` 与
      * `asset_variants.storage_url` 指向两份不同的文件 ——
      * 内容一样，但从此无法判断哪个是有效的。
-     * 本次上传的两个对象成为孤儿，由存储生命周期规则回收。
+     *
+     * 本次上传的两个对象在这一刻就确定永远不会有人引用，因此**当场删掉**。
+     *
+     * > **R-83：这里原本写的是「由存储生命周期规则回收」—— 而那个规则不存在。
+     * > `mc ilm import` 只对 `tps-exports` 应用，`deploy/storage/` 下也只有
+     * > `exports-lifecycle.json`；素材桶只设了匿名读。于是孤儿对象永久累积，
+     * > 而注释让人以为有人在收。
+     * >
+     * > 生命周期规则本身也不是对的工具：素材桶里的正常对象是**永久**的
+     * > （URL 写进了 ViewModel），按 age 删会把它们一起删掉，而 S3 的规则
+     * > 表达不了「只删没人引用的」。在已经知道它是垃圾的这一刻删掉，
+     * > 比任何事后对账都简单。
      */
+    await deps.storage.delete([originalKey, thumbnailKey]).catch((error: unknown) => {
+      /*
+       * 清垃圾失败**不能**把这次调用变成失败：业务目标（复用到先到者的
+       * 素材）已经达成，而抛错会让调用方把一个可用的素材丢掉、降级成占位图。
+       * 代价是漏下两个孤儿对象，而那一条日志是发现它们的唯一途径。
+       */
+      deps.logger.warn(
+        { role: input.role, reason_code: 'ORPHAN_OBJECT_CLEANUP_FAILED' },
+        `未落库的上传残留清理失败，两个对象成为孤儿：${String(error)}`,
+      );
+    });
+
     deps.logger.info(
       { role: input.role },
-      '同缓存键素材已存在，复用既有素材（本次上传的对象将由生命周期规则回收）',
+      '同缓存键素材已存在，复用既有素材（本次上传的对象已删除）',
     );
     return { kind: 'ingested', assetId: saved.assetId, created: false };
   }

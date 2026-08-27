@@ -1,4 +1,9 @@
-import { PutObjectCommand, S3Client, type S3ClientConfig } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectsCommand,
+  PutObjectCommand,
+  S3Client,
+  type S3ClientConfig,
+} from '@aws-sdk/client-s3';
 
 /**
  * S3 兼容对象存储（设计稿 1.1「文件」、11.2 第 6 步、二十章「外部图片」）。
@@ -14,11 +19,20 @@ import { PutObjectCommand, S3Client, type S3ClientConfig } from '@aws-sdk/client
  * 这也是二十章要求「外部图片下载转存到自己的对象存储」的落点：
  * 转存之后 URL 由我们控制，不会因为对方防盗链或删图而失效。
  *
- * ## 只有 put
+ * ## 为什么只有 put 和一个受限的 delete
  *
- * 读路径是浏览器与 Chromium 直接按 URL 取，不经过后端；
- * 删除素材由 19.3 的「标记下架」代替（`assets.status`），不物理删除。
- * 因此这个接口只需要写入 —— 少一个方法就少一处「谁有权删」的问题。
+ * 读路径是浏览器与 Chromium 直接按 URL 取，不经过后端。
+ *
+ * **已入库的素材不物理删除** —— 下架用 19.3 的 `assets.status` 标记代替。
+ * 理由在上面：素材 URL 被写进了永久保存的 ViewModel，删掉对象就是让旧计划页
+ * 集体裂图。这一条不变。
+ *
+ * `delete` 存在只为了一个场景：**上传成功但从未落库的残留**。
+ * 那种对象没有任何 `assets` 行指向它，因此它**不是素材** —— 它是我们自己
+ * 一次写入失败的垃圾，删它不涉及「谁有权删素材」那个问题。
+ *
+ * 接口只收**显式键列表**，没有也不会有 `deletePrefix`（与 `ExportStorage` 同一
+ * 处理）：前缀删除只要一个拼错的参数就能清空整个素材池，而那一步不可逆。
  */
 
 export interface PutObjectInput {
@@ -38,6 +52,14 @@ export interface ObjectStorage {
   put(input: PutObjectInput): Promise<string>;
   /** 键 → 绝对 URL（不发请求） */
   urlFor(key: string): string;
+  /**
+   * 删掉**从未落库的上传残留**。见文件头：不得用于删除已入库素材。
+   *
+   * 失败**不阻断**调用方的主流程：调用点那时已经完成了业务目标（复用到了
+   * 先到者的素材），清垃圾失败不该把那个成功变成失败。因此实现不保证原子性，
+   * 调用方应当 catch 并记一条日志。
+   */
+  delete(keys: readonly string[]): Promise<void>;
 }
 
 export interface StorageConfig {
@@ -95,6 +117,22 @@ export class S3ObjectStorage implements ObjectStorage {
     return `${this.base}/${key.replace(/^\/+/, '')}`;
   }
 
+  async delete(keys: readonly string[]): Promise<void> {
+    if (keys.length === 0) return;
+
+    /*
+     * 不分批：这个方法的唯一调用点一次只传两个键（原图 + 缩略图），
+     * 而 `DeleteObjects` 单次上限是 1000。加分批循环是为一个不存在的场景
+     * 写代码 —— `ExportStorage.delete` 需要分批是因为它按任务批量删导出。
+     */
+    await this.client.send(
+      new DeleteObjectsCommand({
+        Bucket: this.config.bucket,
+        Delete: { Objects: keys.map((key) => ({ Key: key })), Quiet: true },
+      }),
+    );
+  }
+
   destroy(): void {
     this.client.destroy();
   }
@@ -118,6 +156,12 @@ export class InMemoryObjectStorage implements ObjectStorage {
 
   urlFor(key: string): string {
     return `${this.base}/${key.replace(/^\/+/, '')}`;
+  }
+
+  /** 删除后 `objects` 里真的没了 —— 测试要断言「孤儿确实被清掉」 */
+  delete(keys: readonly string[]): Promise<void> {
+    for (const key of keys) this.objects.delete(key);
+    return Promise.resolve();
   }
 }
 

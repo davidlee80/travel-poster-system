@@ -37,6 +37,10 @@
 7. [实施状态与已知边界](07-实施状态与已知边界.md)：识别假实现、未实测项和延期项；
 8. [开发改动指南](08-开发改动指南.md)：按常见修改类型查看联动清单。
 
+上面八篇负责**广度**，每篇刻意压在 100 行上下。单个子系统的**具体阈值与判据**
+在 [专项说明](专项说明/README.md)：正文给「在哪、有什么」，专项给「为什么是这个值、
+不满足会怎样」。遇到「这个阈值能不能改」这类问题时去那里。
+
 ## 按角色快速入口
 
 | 角色/任务            | 优先阅读                                       | 代码起点                                                                                                                                                                                                       |
@@ -46,7 +50,7 @@
 | 修改业务规则         | [功能与代码映射](03-功能与代码映射.md)         | [`packages/planning/src/plan-rules.ts`](../../packages/planning/src/plan-rules.ts)、[`packages/planning/src/conflicts.ts`](../../packages/planning/src/conflicts.ts)                                           |
 | 修改信息图模板       | [开发改动指南](08-开发改动指南.md)             | [`apps/web/src/templates/`](../../apps/web/src/templates)                                                                                                                                                      |
 | 接入 LLM/图片供应商  | [实施状态与已知边界](07-实施状态与已知边界.md) | [`packages/llm/src/`](../../packages/llm/src)、[`apps/generation-worker/src/assets/model-selection.ts`](../../apps/generation-worker/src/assets/model-selection.ts)                                            |
-| 修改素材检索/降级    | [功能与代码映射](03-功能与代码映射.md)         | [`apps/generation-worker/src/assets/resolve-assets.ts`](../../apps/generation-worker/src/assets/resolve-assets.ts)                                                                                             |
+| 修改素材检索/降级    | [图片与素材全链路](专项说明/图片与素材全链路.md) | [`apps/generation-worker/src/assets/resolve-assets.ts`](../../apps/generation-worker/src/assets/resolve-assets.ts)                                                                                             |
 | 修改数据库           | [数据、检索与存储](05-数据检索与存储.md)       | [`infrastructure/migrations/`](../../infrastructure/migrations)、[`packages/db/src/`](../../packages/db/src)                                                                                                   |
 | 部署与告警排障       | [测试、部署与运维](06-测试部署与运维.md)       | [`deploy/`](../../deploy)、[运维手册](../运维手册.md)                                                                                                                                                          |
 

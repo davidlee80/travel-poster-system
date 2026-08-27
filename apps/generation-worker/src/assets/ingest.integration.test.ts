@@ -195,6 +195,16 @@ describeIntegration('素材入库管道（集成，需 PostgreSQL）', () => {
     expect(assets.rows[0]!.count).toBe('1');
     const variants = await pool.query<{ count: string }>('SELECT count(*) FROM asset_variants');
     expect(variants.rows[0]!.count).toBe('1');
+
+    /*
+     * 第二次上传的两个对象（原图 + 缩略图）已被当场删掉，因此桶里只剩
+     * 先到者的两个（R-83）。
+     *
+     * 这一行断言的是一个**以前不存在的机制**：原先注释说孤儿对象「由存储
+     * 生命周期规则回收」，而素材桶从未配过任何规则 —— 于是它们永久累积。
+     * 没有这条断言，下一个把 `delete` 改成日志一行就算的人不会被拦住。
+     */
+    expect(d.storage.objects.size).toBe(2);
   });
 
   it('灌入后可被 findCandidates 检索到（管道到检索是通的）', async () => {
