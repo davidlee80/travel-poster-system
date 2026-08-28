@@ -113,6 +113,54 @@ groups:
           description: '19.5 的预热库可能未覆盖当前热门目的地。检查 travel_asset_resolution_total 的 strategy 分布。'
           runbook: 'docs/运维手册.md#hero-缓存命中率下降'
 
+      # 2b. 占位图占比（降级是静默的，这是它唯一的信号）
+      #
+      # ## 它回答的问题只有一个：有多少用户拿到的是渐变图
+      #
+      # 五层降级链的最后一层是渐变占位图。它落到这一层时：任务 COMPLETED、
+      # 页面 ready、错误率正常 —— 用户拿到一份「完整」的产物，只是图都是色块。
+      # 在这条告警之前，这个问题只能手工查 strategy 分布。
+      #
+      # ## 为什么必须带 outcome="fallback"
+      #
+      # `STATIC_DEFAULT` 这个策略名被**两种结局**共用（见 resolvers/fallback.ts）：
+      #
+      # ```text
+      # outcome="fallback"  fallback_level 2  真的给了占位图，用户看得到
+      # outcome="skipped"   fallback_level 3  槽位被跳过，模板不渲染那个位置
+      # ```
+      #
+      # 不过滤的话被模板隐藏的槽位会把比例抬高，而那些槽位本来就不影响用户。
+      #
+      # ## 为什么两侧都排除 ROUTE_MAP
+      #
+      # 路线图走独立的 svg-map resolver（SVG_RENDER 或 TEXT_FALLBACK），
+      # 它几乎不可能产生 static_default。把它留在分母里只会稀释比例 ——
+      # 14 天行程里路线图占全部槽位约六分之一，足以把一个真问题压到阈值下。
+      #
+      # ## 阈值 0.2 是个起始值，待预热覆盖率实测后收紧
+      #
+      # 21.2 措施二期望预热覆盖 ≥ 80% 的 Hero 请求，因此健康状态下占位图应当
+      # 只是残余。但现在不能取 5%：
+      #
+      #   - 匿名用户的 QUOTA_ANON_AI_HERO 是 0，冷组合必然落到占位图；
+      #   - 预热覆盖率从未在生产规模验证（门禁 #17 是 manual）。
+      #
+      # 0.2 的意义是「五个槽位里有一个是色块」—— 那已经是可见的产品降级。
+      # 实测出真实命中率之后应当把它收到接近那个残余。
+      - alert: TravelAssetPlaceholderRatioHigh
+        expr: |
+          sum(rate(travel_asset_resolution_total{strategy="static_default",outcome="fallback",role!="ROUTE_MAP"}[30m]))
+            /
+          sum(rate(travel_asset_resolution_total{role!="ROUTE_MAP"}[30m])) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: '超过 20% 的素材槽位降级为占位图'
+          description: '用户拿到的是渐变色块而不是图，而任务、导出与错误率全部正常。先看 travel_asset_resolution_total 的 strategy 分布定位是哪一层没接住：cache_hit 占比低是预热没覆盖（看 TravelHeroCacheHitRatioLow），local_library_match 低是素材库太空，ai_generation 低则查额度与供应商。'
+          runbook: 'docs/运维手册.md#占位图占比升高'
+
       # 3. 图标回归（验收标准 5，期望恒为 0）
       #
       # 没有 `for`：一次就是缺陷。图标是内联进构建产物的（9.1），

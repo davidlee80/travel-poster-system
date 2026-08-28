@@ -221,6 +221,14 @@ export const METRICS_CATALOG: readonly CatalogEntry[] = [
     note: 'R-42：21.3 的字体故障告警条件写的是「日志出现 CJK_FONT_UNAVAILABLE」，而 Prometheus 不看日志。把渲染失败原因计成指标，那条告警才有可判定的对象',
   },
   {
+    name: 'travel_render_browser_restart_total',
+    kind: 'counter',
+    labels: ['reason_code'],
+    owner: 'render-worker',
+    source: 'supplementary',
+    note: 'R-84：1 browser + 3 page 的渲染模型下，Chromium 崩溃会让后续每一个导出都失败，直到有人重启进程。现已自愈（BrowserHolder 在任务开始时惰检查并串行重启），而自愈的副作用是崩溃变得不可见 —— 这一项是「到底崩过几次」的唯一信号。不并入 travel_render_failure_total：后者是每次失败的导出，两者处置不同（崩溃看内存与 /dev/shm，渲染失败看模板与素材）',
+  },
+  {
     name: 'travel_ai_failover_total',
     kind: 'counter',
     labels: ['kind', 'position', 'outcome'],

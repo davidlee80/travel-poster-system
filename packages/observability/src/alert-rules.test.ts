@@ -103,6 +103,8 @@ describe('Prometheus 规则文件', () => {
    * 而没有理由的告警最终会被静音，连带着把有理由的那些一起淹掉。
    */
   const SUPPLEMENTARY_ALERTS: Readonly<Record<string, string>> = {
+    TravelAssetPlaceholderRatioHigh:
+      '五层降级链的最后一层是渐变占位图，而落到那一层时任务 COMPLETED、页面 ready、错误率正常 —— 用户拿到一份「完整」的产物，只是图都是色块。TravelHeroCacheHitRatioLow 只盖 Hero 且只盖缓存那一层，盖不到「素材库、搜索、AI 三层都没接住」。带 outcome="fallback" 是必需的：STATIC_DEFAULT 这个策略名被「真给了占位图」与「槽位被跳过」两种结局共用，而后者不影响用户',
     TravelQueueBacklogHigh:
       '21.3 的六条里唯一缺的是**先行**指标。T1 SLA 那条也能发现积压（T1 从提交算起，含排队），但它是滞后的：直方图只在任务完成时落样本，队列积压到 200 条时 T1 的 P95 反映的是三分钟前完成的那批，而正在受苦的这 200 个用户还一个都没进过直方图 —— 等它们进去时人已经走了。队列深度在第一个用户超时之前就升高，是唯一能在用户受影响前介入的窗口',
     TravelAssetImageLoadFailureRatioHigh:

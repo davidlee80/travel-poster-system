@@ -25,7 +25,7 @@ import { optionalBool, optionalString, requireString, runWorker } from '@tps/sha
 import { S3ExportStorage, loadExportsStorageConfig } from '@tps/storage';
 import { UnrecoverableError, Worker } from 'bullmq';
 
-import { launchBrowser } from './browser.js';
+import { createBrowserHolder } from './browser-holder.js';
 import { EXPORT_LABEL_NONE, exportDuration, exportTotal } from './export-metrics.js';
 import { createExportBilling, type ExportBilling } from './billing.js';
 import { runExport } from './run-export.js';
@@ -96,10 +96,16 @@ await runWorker({
         })
       : undefined;
 
-    const { browser, devShm } = await launchBrowser();
+    const browsers = createBrowserHolder({ logger: handle.logger });
+    /*
+     * 启动时先取一次：让「拉不起 Chromium」在就绪日志之前就暴露，
+     * 而不是等第一个导出任务才发现 —— 后者会把一个启动期配置问题
+     * 变成一次用户可见的导出失败。
+     */
+    await browsers.get();
     handle.logger.info(
       {
-        devShm: devShm.reason,
+        devShm: browsers.devShm?.reason ?? '(未探测)',
         base_url: renderBaseUrl,
         /* 关闭时渲染失败不退款 —— 这一条必须能从启动日志里一眼看到 */
         credit_billing_enabled: billingEnabled,
@@ -124,7 +130,12 @@ await runWorker({
               exports: exportsRepository,
               presentations,
               storage,
-              browser,
+              /*
+               * 每任务取一次而不是闭包捕一个固定句柄（R-84）。
+               * Chromium 崩溃后那个句柄从此是死的，而原先会让
+               * **后续每一个导出都失败**，直到有人重启进程。
+               */
+              browser: await browsers.get(),
               baseUrl: renderBaseUrl,
               signingKey,
               logger: handle.logger,
@@ -259,7 +270,7 @@ await runWorker({
       // 先 pause 停止领新任务，再 close 等在途渲染跑完，最后关浏览器
       await worker.pause(true);
       await worker.close();
-      await browser.close();
+      await browsers.close();
       storage.destroy();
       await redis.quit();
       await queueRedis.quit();

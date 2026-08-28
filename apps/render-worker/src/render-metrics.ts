@@ -135,6 +135,27 @@ export const renderFailureTotal = createCounter({
 /** 非 RenderError 的失败归到这一个值，避免把异常消息当标签（基数不可控） */
 export const UNKNOWN_RENDER_REASON = 'UNKNOWN';
 
+/**
+ * Chromium 重启计数（R-84）。
+ *
+ * ## 为什么它不能并入 `travel_render_failure_total`
+ *
+ * 重启本身不是一次渲染失败 —— 崩溃那一刻失败的导出已经各自计入
+ * `travel_render_failure_total` 了。这一项回答的是一个不同的问题：
+ * **浏览器到底崩过几次**。合在一起会让「一次崩溃带倒三个导出」与
+ * 「三次无关的渲染失败」在图上一模一样，而两者的处置完全不同：
+ * 前者要看内存与 /dev/shm，后者要看模板与素材。
+ *
+ * 取值有界：当前只有 `BROWSER_DISCONNECTED` 一个（唯一会触发重启的原因）。
+ * 保留 `reason_code` 标签而不是无标签，是为了将来多一种触发因（比如主动
+ * 回收）时不用改指标名 —— 改名会断掉历史曲线。
+ */
+export const browserRestartTotal = createCounter({
+  name: 'travel_render_browser_restart_total',
+  help: 'Chromium 断开后重启的次数（不含首次启动）',
+  labelNames: ['reason_code'],
+});
+
 export function recordRenderFailure(error: unknown): void {
   const reason =
     error instanceof RenderError
