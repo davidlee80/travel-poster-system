@@ -113,10 +113,14 @@ export async function runExport(deps: RunExportDeps, exportId: string): Promise<
   /*
    * `ALL_DAYS` 要渲染「实际落了 ViewModel 的那些天」，而不是请求里的天数：
    * 编排失败时两者不一致，按后者渲染会对不存在的页面发请求。
+   *
+   * 必须带 `row.templateId`（R-85）：一个版本下可以共存多套模板的展示数据，
+   * 不过滤的话 14 天会变 28 行，于是这里渲染 28 页 —— 时长翻倍、
+   * 按页计费翻倍，而任务状态是 COMPLETED。
    */
   const days =
     row.scope === 'ALL_DAYS'
-      ? await deps.presentations.listDayNumbers(row.planVersionId)
+      ? await deps.presentations.listDayNumbers(row.planVersionId, row.templateId)
       : row.dayNumbers;
   const pages = pagesFor(row.scope, days, row.planVersionId);
   const context = await createRenderContext(deps.browser);
