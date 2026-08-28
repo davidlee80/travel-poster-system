@@ -13,6 +13,7 @@ import type {
   AssetWarningCode,
   PresentationValidation,
   ResolvedAsset,
+  TemplateId,
   TravelPlan,
 } from '@tps/schemas';
 import type { Logger } from '@tps/shared';
@@ -65,9 +66,18 @@ export interface BuildPresentationResult {
 export async function buildAndSavePresentations(
   deps: BuildPresentationDeps,
   plan: TravelPlan,
+  /**
+   * 用户选的样式套件，来自 `output_preferences.template_id`（R-85）。
+   *
+   * **必填而不给默认值**：这个值在标准化结果里一直在（
+   * `NormalizedTravelRequestSchema` 包含 `output_preferences`），只是从前没人读 ——
+   * 校验完就丢。给默认值会让这个 bug 能默默重现：调用方忘传时不报错，
+   * 而用户选的样式再一次被静默丢弃。
+   */
+  templateId: TemplateId,
 ): Promise<BuildPresentationResult> {
   // ── BUILDING_PRESENTATION：N+1 页与槽位清单（纯计算）──
-  const plans = buildPresentationPlans({ plan });
+  const plans = buildPresentationPlans({ plan, templateId });
   const merged = mergeRequirements(plans);
   if (merged.duplicates.length > 0) {
     /*
@@ -84,7 +94,7 @@ export async function buildAndSavePresentations(
   const envelope = assetRequirementEnvelope({
     planId: plan.plan_id,
     planVersionId: plan.plan_version_id,
-    templateId: 'travel_infographic_v1',
+    templateId,
     requirements: merged.requirements,
   });
 

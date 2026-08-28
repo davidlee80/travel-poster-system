@@ -8,7 +8,7 @@ import {
   type TravelPlansRepository,
 } from '@tps/db';
 import { InMemoryExportQueue } from '@tps/queue';
-import { TRAVEL_PLAN_FIXTURES } from '@tps/schemas';
+import { TEMPLATE_ID_VALUES, TRAVEL_PLAN_FIXTURES } from '@tps/schemas';
 import {
   COOKIE_NAMES,
   GracefulShutdown,
@@ -224,6 +224,32 @@ function makeHarness(billing: 'off' | 'on' = 'off'): Harness {
         storage,
         exports,
         plans: plans as unknown as TravelPlansRepository,
+        /*
+         * 样式套件校验与缺省解析的桩（R-85）。
+         *
+         * 不传 templateId → 返回「这份计划自己的套件」，即第一套；
+         * 传了且已注册 → 返回那一套；传了但未注册 → null。
+         *
+         * 本桩不无条件返回非 null —— 那样那条校验就永远不会拒，
+         * 而它存在的全部目的就是拒。
+         */
+        presentations: {
+          findPresentationByVersion: ({ templateId }) => {
+            const resolved = templateId ?? TEMPLATE_ID_VALUES[0];
+            return Promise.resolve(
+              (TEMPLATE_ID_VALUES as readonly string[]).includes(resolved)
+                ? {
+                    planVersionId: 'stub',
+                    templateId: resolved,
+                    pageType: 'FULL_PLAN' as const,
+                    dayNumber: null,
+                    validationStatus: 'VALID' as const,
+                    viewModel: {},
+                  }
+                : null,
+            );
+          },
+        },
         secureCookies: false,
         ...(credits === undefined ? {} : { credits }),
       },
@@ -272,7 +298,7 @@ async function ownerCookie(): Promise<string> {
 function requestBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     format: 'PDF',
-    template_id: 'travel_infographic_v1',
+    template_id: 'ink_paper_v1',
     scope: 'ALL_DAYS',
     day_numbers: null,
     ...overrides,
@@ -293,6 +319,58 @@ describe('13.5 POST /travel-plans/{plan_id}/exports', () => {
     const body = response.json<{ export_id: string; status: string }>();
     expect(body.status).toBe('QUEUED');
     expect(h().queue.enqueued).toEqual([{ exportId: body.export_id }]);
+  });
+
+  it('不传 template_id 也能建成功，服务端取这份计划自己的套件（R-85）', async () => {
+    /*
+     * 客户端不应当被迫知道模板的存在。缺省时服务端从
+     * `plan_presentations` 读出这份计划用的套件，而不是报 400。
+     */
+    const cookie = await ownerCookie();
+    const payload = requestBody();
+    delete payload['template_id'];
+
+    const response = await h().app.inject({
+      method: 'POST',
+      url: `/api/v1/travel-plans/${PLAN_ID}/exports`,
+      headers: { cookie },
+      payload,
+    });
+
+    expect(response.statusCode).toBe(201);
+    // 存下来的是**解析后**的具体值，不是 null
+    const stored = [...h().exports.rows.values()];
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.templateId).toBe(TEMPLATE_ID_VALUES[0]);
+  });
+
+  it('缺省与显式传同一值算出同一个幂等键（否则会渲两遍、扣两次）', async () => {
+    /*
+     * 幂等键用的必须是解析后的值。用 `body.template_id` 的后果是
+     * 同一份计划起两个内容完全相同的导出任务。
+     */
+    const cookie = await ownerCookie();
+    const omitted = requestBody();
+    delete omitted['template_id'];
+
+    const first = await h().app.inject({
+      method: 'POST',
+      url: `/api/v1/travel-plans/${PLAN_ID}/exports`,
+      headers: { cookie },
+      payload: omitted,
+    });
+    const second = await h().app.inject({
+      method: 'POST',
+      url: `/api/v1/travel-plans/${PLAN_ID}/exports`,
+      headers: { cookie },
+      payload: requestBody({ template_id: TEMPLATE_ID_VALUES[0] }),
+    });
+
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(200);
+    expect(second.json<{ export_id: string }>().export_id).toBe(
+      first.json<{ export_id: string }>().export_id,
+    );
   });
 
   it('相同参数第二次命中幂等：返回原 export_id 且不重复入队（13.5）', async () => {
@@ -374,7 +452,7 @@ describe('13.5 POST /travel-plans/{plan_id}/exports', () => {
       userId: h().plans.ownerId,
       planId: PLAN_ID,
       planVersionId: VERSION_ID,
-      templateId: 'travel_infographic_v1',
+      templateId: 'ink_paper_v1',
       format: 'PDF',
       scope: 'ALL_DAYS',
       dayNumbers: null,

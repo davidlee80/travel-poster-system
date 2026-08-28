@@ -1,8 +1,9 @@
 import { notFound } from 'next/navigation';
-import { TRAVEL_PLAN_FIXTURES, makeTravelPlanFixture } from '@tps/schemas';
+import { TRAVEL_PLAN_FIXTURES, TEMPLATE_ID_VALUES, makeTravelPlanFixture } from '@tps/schemas';
+import type { TemplateId } from '@tps/schemas';
 import { buildDailyPoster, parseRenderVariant } from '@tps/presentation';
 import { isFixtureVersion, loadDailyViewModel } from '@/lib/presentation-source';
-import { TravelInfographic } from '@/templates/travel-infographic-v1';
+import { templateComponent } from '@/templates/registry';
 import { RenderReadyProbe } from '@/components/RenderReadyProbe';
 
 /**
@@ -41,15 +42,22 @@ function fixtureFor(planVersionId: string) {
   return TRAVEL_PLAN_FIXTURES.sevenDays();
 }
 
-async function loadViewModel(planVersionId: string, day: number) {
+async function loadViewModel(planVersionId: string, day: number, templateId: string) {
   if (isFixtureVersion(planVersionId)) {
     const plan = fixtureFor(planVersionId);
     if (!plan.days.some((d) => d.day_number === day)) return null;
-    return buildDailyPoster({ plan, dayNumber: day }).viewModel;
+    return buildDailyPoster({ plan, dayNumber: day, templateId: templateId as TemplateId })
+      .viewModel;
   }
 
   // 契约校验在 `loadDailyViewModel` 里做（旧契约的行返回 null → 404）
-  return loadDailyViewModel(planVersionId, day);
+  return loadDailyViewModel(planVersionId, day, templateId);
+}
+
+/** 取查询参数的第一个值。Next 的 searchParams 对重复参数给数组 */
+function firstValue(query: Record<string, string | string[] | undefined>, key: string) {
+  const raw = query[key];
+  return Array.isArray(raw) ? raw[0] : raw;
 }
 
 export default async function RenderDailyPosterPage({ params, searchParams }: PageProps) {
@@ -60,12 +68,28 @@ export default async function RenderDailyPosterPage({ params, searchParams }: Pa
   if (!Number.isInteger(day) || day < 1) notFound();
 
   const variant = parseRenderVariant(query);
-  const viewModel = await loadViewModel(planVersionId, day);
+
+  /*
+   * 样式套件从 `?template=` 来（R-85）。缺省取第一套 —— 手工打开这个页面
+   * 排查时不应当被迫拼参数；而生产路径上 run-export 总是会带它。
+   */
+  const requested = firstValue(query, 'template') ?? TEMPLATE_ID_VALUES[0];
+  const viewModel = await loadViewModel(planVersionId, day, requested);
   if (viewModel === null) notFound();
+
+  /*
+   * 组件按**取回的 ViewModel** 选，而不是按 URL 参数选。
+   *
+   * 两者正常下相同，但用 ViewModel 里那个值能排除一种死角：
+   * 取了 A 的数据却用 B 的组件渲。那种不一致不会报错，
+   * 只会产出一张排版错乱的图 —— 而任务仍然 COMPLETED。
+   */
+  const Template = templateComponent(viewModel.template_id, 'DAILY_POSTER');
+  if (Template === null) notFound();
 
   return (
     <>
-      <TravelInfographic
+      <Template
         viewModel={viewModel}
         compact={variant.compact}
         hideBelowPriority={variant.hideBelowPriority}

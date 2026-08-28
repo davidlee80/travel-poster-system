@@ -1,5 +1,6 @@
 import {
   SCHEMA_VERSIONS,
+  TEMPLATE_ID_VALUES,
   type HeroAsset,
   type TemplateId,
   type TravelPlan,
@@ -137,7 +138,7 @@ export function buildDailyPoster(input: BuildDailyPosterInput): BuildResult {
   const {
     plan,
     dayNumber,
-    templateId = 'travel_infographic_v1',
+    templateId = TEMPLATE_ID_VALUES[0],
     assets = EMPTY_ASSET_LOOKUP,
     limits = DAILY_CONTENT_LIMITS,
   } = input;

@@ -45,7 +45,7 @@ function base(): Record<string, any> {
     custom_requirements: { raw_text: '' },
     output_preferences: {
       language: 'zh-CN',
-      template_id: 'travel_infographic_v1',
+      template_id: 'ink_paper_v1',
       generate_png: true,
       generate_pdf: false,
     },
@@ -296,7 +296,7 @@ describe('P8：最小必填集（11 个字段）', () => {
     expect(parsed.custom_requirements.raw_text).toBe('');
     expect(parsed.output_preferences).toEqual({
       language: 'zh-CN',
-      template_id: 'travel_infographic_v1',
+      template_id: 'ink_paper_v1',
       generate_png: true,
       generate_pdf: true,
     });

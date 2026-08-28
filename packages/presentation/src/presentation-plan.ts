@@ -1,4 +1,5 @@
 import type { AssetRequirementItem, PageType, TemplateId, TravelPlan } from '@tps/schemas';
+import { TEMPLATE_ID_VALUES } from '@tps/schemas';
 import {
   DAILY_CONTENT_LIMITS,
   FULL_PLAN_CONTENT_LIMITS,
@@ -32,27 +33,30 @@ export interface PresentationPlan {
 
 export interface BuildPresentationPlansInput {
   readonly plan: TravelPlan;
-  /** 每日模板。默认 `travel_infographic_v1` */
-  readonly dailyTemplateId?: TemplateId;
-  /** 完整页模板。默认 `travel_full_plan_v1` */
-  readonly fullTemplateId?: TemplateId;
+  /**
+   * 样式套件。缺省取第一套（`TEMPLATE_ID_VALUES[0]`）。
+   *
+   * **一个参数而不是两个**（R-85）。原先是 `dailyTemplateId` 与
+   * `fullTemplateId` 分开给，那是「模板 = 页布局」时代的形状：同一份计划的
+   * 展示数据会带着两个不同的 `template_id`。产品语义是一套套件同时提供
+   * 全览页与每日页，页型靠 `page_type` 区分。
+   *
+   * 两个参数的形状还允许一种不应存在的组合：日页用 A、全览页用 B。
+   * 合成一个后那种组合在类型层面就不可表达。
+   */
+  readonly templateId?: TemplateId;
   readonly limits?: ContentLimits;
 }
 
 export function buildPresentationPlans(input: BuildPresentationPlansInput): PresentationPlan[] {
-  const {
-    plan,
-    dailyTemplateId = 'travel_infographic_v1',
-    fullTemplateId = 'travel_full_plan_v1',
-    limits = DAILY_CONTENT_LIMITS,
-  } = input;
+  const { plan, templateId = TEMPLATE_ID_VALUES[0], limits = DAILY_CONTENT_LIMITS } = input;
 
   // 按 day_number 排序而不是相信数组顺序（V-02 的乱序在业务规则阶段已修复，
   // 这里排序是廉价的防御 —— 与 buildFullPlan 同一处理）
   const days = [...plan.days].sort((a, b) => a.day_number - b.day_number);
 
   const daily: PresentationPlan[] = days.map((day) => ({
-    template_id: dailyTemplateId,
+    template_id: templateId,
     page_type: 'DAILY_POSTER',
     day_number: day.day_number,
     content_limits: limits,
@@ -62,7 +66,7 @@ export function buildPresentationPlans(input: BuildPresentationPlansInput): Pres
   return [
     ...daily,
     {
-      template_id: fullTemplateId,
+      template_id: templateId,
       page_type: 'FULL_PLAN',
       day_number: null,
       content_limits: FULL_PLAN_CONTENT_LIMITS,

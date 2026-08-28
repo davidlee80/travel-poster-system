@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 
 import { ExportPanel } from '@/components/ExportPanel';
 import { getFullPresentation, getPlan } from '@/lib/api-client';
-import { TravelFullPlan } from '@/templates/travel-full-plan-v1';
+import { templateComponent } from '@/templates/registry';
 
 /**
  * 用户可见的完整计划页（TP-2-17、TP-3-17，设计稿 1.1「可浏览的完整计划页」）。
@@ -221,6 +221,23 @@ export default function PlanPage({
     );
   }
 
+  /*
+   * 组件按 ViewModel 自带的 `template_id` 选（R-85）。本页不接收模板参数 ——
+   * 用户看的就是这份计划生成时选的那一套。
+   *
+   * 未注册时不渲染而提示：那意味着库里的 `template_id` 不在当前枚举里
+   * （比如套件被下线了而存量计划未迁移）。静默回退到默认套件会让用户
+   * 看到一份与当初不同的产物，而那比一条提示更难发现。
+   */
+  const FullPlanTemplate = templateComponent(state.viewModel.template_id, 'FULL_PLAN');
+  if (FullPlanTemplate === null) {
+    return (
+      <p className="plan-page__notice" role="alert">
+        这份计划用的样式套件（{state.viewModel.template_id}）已不可用。
+      </p>
+    );
+  }
+
   return (
     <>
       {state.upgrading ? (
@@ -238,7 +255,7 @@ export default function PlanPage({
           部分配图使用了默认样式。
         </p>
       ) : null}
-      <TravelFullPlan viewModel={state.viewModel} />
+      <FullPlanTemplate viewModel={state.viewModel} />
       {planId === null ? null : <ExportPanel planId={planId} viewModel={state.viewModel} />}
     </>
   );

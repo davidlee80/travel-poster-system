@@ -1,6 +1,6 @@
 import type { FullPlanViewModel } from '@tps/presentation';
 import { Icon } from '@/components/Icon';
-import { TravelInfographic } from '@/templates/travel-infographic-v1';
+import { TravelInfographic } from '@/templates/ink-paper-v1/daily';
 import './styles.css';
 
 /**

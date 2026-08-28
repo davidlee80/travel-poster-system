@@ -10,7 +10,7 @@ import {
   type RequestRuleId,
 } from './conflicts.js';
 import { normalizeTravelRequest } from './normalize.js';
-import type { TravelRequestUI } from '@tps/schemas';
+import { TEMPLATE_ID_VALUES, type TravelRequestUI } from '@tps/schemas';
 
 /**
  * N-01～N-14（TP-2-05，设计稿 3.1.2；N-13/N-14 是 P9 新增）。
@@ -470,8 +470,13 @@ describe('N-11 模板已注册', () => {
     expect(n11?.code).toBe('REQ_TEMPLATE_UNKNOWN');
   });
 
-  it('两个已注册模板都通过', () => {
-    for (const templateId of ['travel_infographic_v1', 'travel_full_plan_v1'] as const) {
+  it('已注册的样式套件全部通过', () => {
+    /*
+     * 遍历 `TEMPLATE_ID_VALUES` 而不是写死值（R-85）：新增套件时这条
+     * 自动覆盖。写死的后果是新套件上线后 N-11 对它的判定从未被测过，
+     * 而那条规则正是「未知模板该不该报错」的唯一关口。
+     */
+    for (const templateId of TEMPLATE_ID_VALUES) {
       const ui = makeRequestFixture({
         output_preferences: {
           language: 'zh-CN',

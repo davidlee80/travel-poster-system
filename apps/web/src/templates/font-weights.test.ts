@@ -23,21 +23,40 @@ import { FONT_WEIGHTS } from '@tps/fonts';
 const stylesRoot = path.dirname(fileURLToPath(import.meta.url));
 const globalsCss = path.resolve(stylesRoot, '..', 'app', 'globals.css');
 
+/**
+ * 收集要检查的样式表。
+ *
+ * **递归两层**（R-85）：模板目录从 `templates/<模板>/styles.css` 变成了
+ * `templates/<套件>/<页型>/styles.css` —— 一套样式套件同时提供全览页与
+ * 每日页，因此多了一层。只走一层的话这道门禁会**静默覆盖 0 个模板样式表**
+ * （`ink-paper-v1/` 下没有 styles.css）—— 下面那条下限断言就是为此而存在。
+ */
 async function collectCssFiles(): Promise<string[]> {
   const files = [globalsCss];
 
-  for (const entry of await readdir(stylesRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const candidate = path.join(stylesRoot, entry.name, 'styles.css');
-    try {
-      await readFile(candidate);
-      files.push(candidate);
-    } catch {
-      // 该模板没有独立样式表
+  for (const suite of await readdir(stylesRoot, { withFileTypes: true })) {
+    if (!suite.isDirectory()) continue;
+    const suiteDir = path.join(stylesRoot, suite.name);
+
+    // 套件目录自己可能有一份共享样式表
+    await pushIfExists(files, path.join(suiteDir, 'styles.css'));
+
+    for (const page of await readdir(suiteDir, { withFileTypes: true })) {
+      if (!page.isDirectory()) continue;
+      await pushIfExists(files, path.join(suiteDir, page.name, 'styles.css'));
     }
   }
 
   return files;
+}
+
+async function pushIfExists(files: string[], candidate: string): Promise<void> {
+  try {
+    await readFile(candidate);
+    files.push(candidate);
+  } catch {
+    // 该层没有独立样式表
+  }
 }
 
 const cssFiles = await collectCssFiles();

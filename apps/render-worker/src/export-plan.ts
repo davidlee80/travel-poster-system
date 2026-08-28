@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { RENDER_PAGE_KEYS, issueRenderToken, type Logger } from '@tps/shared';
+import { TEMPLATE_ID_VALUES } from '@tps/schemas';
 import type { BrowserContext } from 'playwright-core';
 
 import {
@@ -35,6 +36,13 @@ export interface ExportPlanRequest {
   readonly formats: readonly ExportFormat[];
   readonly outputDir: string;
   readonly logger: Logger;
+  /**
+   * 要渲染的样式套件（R-85）。缺省取第一套。
+   *
+   * 本文件是本地预览与视觉基线工具，不是生产导出路径。可选是为了 P2：
+   * 基线是按套件拍的，新增套件时需要能指定拍哪一套。
+   */
+  readonly templateId?: string;
 }
 
 export interface DayArtifact {
@@ -233,6 +241,7 @@ async function renderDay(
     context,
     baseUrl: request.baseUrl,
     path: `/render/plans/${encodeURIComponent(request.planVersionId)}/days/${dayNumber}`,
+    templateId: request.templateId ?? TEMPLATE_ID_VALUES[0],
     // 每页一个新令牌：令牌与页面绑定，且 jti 唯一以支持重放检测（17.1）
     renderToken: issueRenderToken(
       { planVersionId: request.planVersionId, pageKey, jti: randomUUID() },
@@ -265,6 +274,7 @@ async function exportFullPlanHtml(
     context,
     baseUrl: request.baseUrl,
     path: `/render/plans/${encodeURIComponent(request.planVersionId)}/full`,
+    templateId: request.templateId ?? TEMPLATE_ID_VALUES[0],
     renderToken: token,
   });
 

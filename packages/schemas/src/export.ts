@@ -20,7 +20,18 @@ import { NonEmptyStringSchema } from './primitives.js';
 export const CreateExportRequestSchema = z
   .object({
     format: ExportFormatSchema,
-    template_id: TemplateIdSchema,
+    /**
+     * 样式套件。**可缺省**（R-85）—— 缺省时服务端取这份计划自己的套件。
+     *
+     * 不给它一个 Zod 默认值（比如 `TEMPLATE_ID_VALUES[0]`）：导出必须用
+     * **生成时那一套**，而全局默认在计划用了别的套件时会指向一份不存在的
+     * 展示数据 —— 然后被 `EXPORT_TEMPLATE_UNAVAILABLE` 拒掉，而客户端根本
+     * 没提过模板，那个报错毫无道理。
+     *
+     * 因此默认值必须在**路由里**解析（从 `plan_presentations` 读），
+     * 而不是在 schema 里填一个常量。
+     */
+    template_id: TemplateIdSchema.optional(),
     scope: ExportScopeSchema,
     /** `SINGLE_DAY` 时必填且长度为 1；其余必须为 null（13.5） */
     day_numbers: z.array(z.number().int().min(1).max(14)).nullish(),

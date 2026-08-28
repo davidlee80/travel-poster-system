@@ -1,6 +1,5 @@
 import { createCounter, createHistogram } from '@tps/observability';
 import { RENDER_ROUNDS } from '@tps/presentation';
-import type { TemplateId } from '@tps/schemas';
 
 import { RenderError } from './errors.js';
 
@@ -15,11 +14,16 @@ import { RenderError } from './errors.js';
 /** 页面类型。与 run-export 的日志字段取值一致，便于指标与日志对照 */
 export type RenderPageType = 'day' | 'full';
 
-/** 页面类型 → 模板 ID。12.2 的两个模板与两种页面一一对应 */
-export const TEMPLATE_BY_PAGE_TYPE: Record<RenderPageType, TemplateId> = {
-  day: 'travel_infographic_v1',
-  full: 'travel_full_plan_v1',
-};
+/*
+ * 原先这里有一张 `TEMPLATE_BY_PAGE_TYPE: Record<RenderPageType, TemplateId>`
+ * （day → travel_infographic_v1、full → travel_full_plan_v1），已删（R-85）。
+ *
+ * 它的前提是「模板与页型一一对应」，而产品语义是一套样式套件同时提供
+ * 两个页型。保留它的后果是 `template_id` 这个指标标签永远按页型反推，
+ * 而不是报实际渲染的那一套 —— 也就是一个看起来正常却恒为错的维度。
+ *
+ * 现在 `recordRenderQuality` 收 `templateId`，由调用方从展示数据里拿。
+ */
 
 /**
  * 21.3 的 `travel_render_overflow_rounds`：17.3 的重渲染轮次分布。
@@ -167,13 +171,25 @@ export function recordRenderFailure(error: unknown): void {
 /** 一次页面渲染的质量观测 */
 export function recordRenderQuality(input: {
   readonly pageType: RenderPageType;
+  /**
+   * 实际渲染的样式套件（R-85）。
+   *
+   * 原先这个标签取自 `TEMPLATE_BY_PAGE_TYPE[pageType]` —— 一张硬编码映射表，
+   * 它把页型当成模板。多套样式并存后那个标签会**说谎**：用户选了 kraft，
+   * 指标仍报 ink_paper，于是「哪套模板溢出多」这类问题无法回答。
+   *
+   * 类型是 `string` 而不是 `TemplateId`：值来自 `exports.template_id`，
+   * 那一列是 `VARCHAR(100)` 无 CHECK。基数的实际边界来自导出接口的
+   * `TemplateIdSchema` 校验 —— 而不是这里的类型声明。
+   */
+  readonly templateId: string;
   readonly round: number;
   readonly degraded: boolean;
   readonly missingIcons: number;
   readonly images: { readonly total: number; readonly broken: number };
 }): void {
   const labels = {
-    template_id: TEMPLATE_BY_PAGE_TYPE[input.pageType],
+    template_id: input.templateId,
     page_type: input.pageType,
   };
   renderOverflowRounds.observe(labels, input.round);

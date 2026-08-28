@@ -40,12 +40,26 @@ export interface ExportRequest {
  * `EXPORT_PLAN_VERSION_MISMATCH` 正是为这种情况准备的，
  * 而不传这个字段的话那个错误码永远不会触发。
  */
-export function buildExportRequest(choice: ExportChoice, planVersionId: string): ExportRequest {
+export function buildExportRequest(
+  choice: ExportChoice,
+  planVersionId: string,
+  /**
+   * 这份计划的样式套件（R-85），取自 ViewModel 的 `template_id`。
+   *
+   * 三种导出都用同一套 —— 原先这里按导出种类写死两个不同的值
+   * （全览 PDF 用 travel_full_plan_v1、日页用 travel_infographic_v1），
+   * 那是把页型当模板的写法。
+   *
+   * 必须与生成时那一套一致：导出侧会校验该套件有对应的 presentation，
+   * 不一致会直接被拒（而不是渲出一份空白产物）。
+   */
+  templateId: string,
+): ExportRequest {
   if (choice.kind === 'full-pdf') {
     return {
       body: {
         format: 'PDF',
-        template_id: 'travel_full_plan_v1',
+        template_id: templateId,
         scope: 'FULL_PLAN',
         day_numbers: null,
         plan_version_id: planVersionId,
@@ -58,7 +72,7 @@ export function buildExportRequest(choice: ExportChoice, planVersionId: string):
     return {
       body: {
         format: 'PDF',
-        template_id: 'travel_infographic_v1',
+        template_id: templateId,
         scope: 'ALL_DAYS',
         // ALL_DAYS 的天数由服务端按「实际落了 ViewModel 的那些天」决定（13.5）
         day_numbers: null,
@@ -71,7 +85,7 @@ export function buildExportRequest(choice: ExportChoice, planVersionId: string):
   return {
     body: {
       format: 'PNG',
-      template_id: 'travel_infographic_v1',
+      template_id: templateId,
       scope: 'SINGLE_DAY',
       day_numbers: [choice.dayNumber],
       plan_version_id: planVersionId,

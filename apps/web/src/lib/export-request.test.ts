@@ -1,4 +1,4 @@
-import { CreateExportRequestSchema } from '@tps/schemas';
+import { CreateExportRequestSchema, TEMPLATE_ID_VALUES } from '@tps/schemas';
 import { describe, expect, it } from 'vitest';
 
 import { buildExportRequest, type ExportChoice } from './export-request.js';
@@ -17,6 +17,8 @@ import { buildExportRequest, type ExportChoice } from './export-request.js';
  */
 
 const VERSION_ID = '22222222-2222-4222-8222-222222222222';
+/** 计划生成时选的样式套件。取枚举而不写字面量：schema 校验要求它已注册 */
+const TEMPLATE = TEMPLATE_ID_VALUES[0];
 
 describe('buildExportRequest', () => {
   const CHOICES: readonly (readonly [string, ExportChoice])[] = [
@@ -26,14 +28,14 @@ describe('buildExportRequest', () => {
   ];
 
   it.each(CHOICES)('%s 的请求体通过 13.5 的 schema', (_name, choice) => {
-    const { body } = buildExportRequest(choice, VERSION_ID);
+    const { body } = buildExportRequest(choice, VERSION_ID, TEMPLATE);
     const parsed = CreateExportRequestSchema.safeParse(body);
 
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
   });
 
   it('SINGLE_DAY 恰好带一天', () => {
-    const { body } = buildExportRequest({ kind: 'single-day-png', dayNumber: 7 }, VERSION_ID);
+    const { body } = buildExportRequest({ kind: 'single-day-png', dayNumber: 7 }, VERSION_ID, TEMPLATE);
     expect(body.scope).toBe('SINGLE_DAY');
     expect(body.day_numbers).toEqual([7]);
   });
@@ -43,24 +45,28 @@ describe('buildExportRequest', () => {
      * 传 `[]` 也能通过 TypeScript，但 schema 的 refine 会拒绝它 ——
      * 而那是一个静默的 400。
      */
-    expect(buildExportRequest({ kind: 'full-pdf' }, VERSION_ID).body.day_numbers).toBeNull();
-    expect(buildExportRequest({ kind: 'all-days-pdf' }, VERSION_ID).body.day_numbers).toBeNull();
+    expect(buildExportRequest({ kind: 'full-pdf' }, VERSION_ID, TEMPLATE).body.day_numbers).toBeNull();
+    expect(buildExportRequest({ kind: 'all-days-pdf' }, VERSION_ID, TEMPLATE).body.day_numbers).toBeNull();
   });
 
-  it('三种组合各自用对应的模板', () => {
+  it('三种组合用同一套样式套件（R-85）', () => {
     /*
-     * 完整页用 travel_full_plan_v1、每日页用 travel_infographic_v1（12.2）。
-     * 用错模板不会报错 —— 导出会成功，只是产物的版式不是用户在屏幕上看到的那个。
+     * 这条断言在 R-85 前后语义相反：原先验的是「完整页用 travel_full_plan_v1、
+     * 每日页用 travel_infographic_v1」，也就是按导出种类选模板。
+     *
+     * 现在一套套件覆盖两个页型，三种导出必须用同一套 —— 即计划生成时
+     * 选的那一套。用错不会在前端报错，但会被导出侧拒（那个套件没有
+     * 对应的 presentation）。
      */
-    expect(buildExportRequest({ kind: 'full-pdf' }, VERSION_ID).body.template_id).toBe(
-      'travel_full_plan_v1',
-    );
-    expect(buildExportRequest({ kind: 'all-days-pdf' }, VERSION_ID).body.template_id).toBe(
-      'travel_infographic_v1',
-    );
-    expect(
-      buildExportRequest({ kind: 'single-day-png', dayNumber: 1 }, VERSION_ID).body.template_id,
-    ).toBe('travel_infographic_v1');
+    const ids = [
+      buildExportRequest({ kind: 'full-pdf' }, VERSION_ID, TEMPLATE).body.template_id,
+      buildExportRequest({ kind: 'all-days-pdf' }, VERSION_ID, TEMPLATE).body.template_id,
+      buildExportRequest({ kind: 'single-day-png', dayNumber: 1 }, VERSION_ID, TEMPLATE).body
+        .template_id,
+    ];
+
+    expect(new Set(ids).size).toBe(1);
+    expect(ids[0]).toBe(TEMPLATE);
   });
 
   it('每种组合都显式带 plan_version_id', () => {
@@ -74,13 +80,13 @@ describe('buildExportRequest', () => {
       { kind: 'single-day-png', dayNumber: 2 },
     ];
     for (const choice of choices) {
-      expect(buildExportRequest(choice, VERSION_ID).body.plan_version_id).toBe(VERSION_ID);
+      expect(buildExportRequest(choice, VERSION_ID, TEMPLATE).body.plan_version_id).toBe(VERSION_ID);
     }
   });
 
   it('标签含天号，便于用户区分并发的多次导出', () => {
     expect(
-      buildExportRequest({ kind: 'single-day-png', dayNumber: 5 }, VERSION_ID).label,
+      buildExportRequest({ kind: 'single-day-png', dayNumber: 5 }, VERSION_ID, TEMPLATE).label,
     ).toContain('第 5 天');
   });
 });

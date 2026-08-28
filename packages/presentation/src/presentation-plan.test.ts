@@ -1,6 +1,7 @@
 import {
   AssetRequirementSchema,
   MEAL_VALUES,
+  TEMPLATE_ID_VALUES,
   makeTravelPlanFixture,
   type TravelPlan,
 } from '@tps/schemas';
@@ -25,16 +26,37 @@ describe('N+1 个 PresentationPlan（TP-3-03）', () => {
     expect(plans.filter((p) => p.page_type === 'FULL_PLAN')).toHaveLength(1);
   });
 
-  it('每日页带天号与信息图模板；完整页 day_number 为 null（3.3.1）', () => {
+  it('每日页带天号；全览页 day_number 为 null；两者共享同一套样式套件（3.3.1、R-85）', () => {
+    /*
+     * 这条断言在 R-85 前后语义相反：原先验的是「日页用 travel_infographic_v1、
+     * 全览页用 travel_full_plan_v1」，也就是把页型编码进模板 ID。
+     * 现在一套套件覆盖两个页型，因此全部 N+1 页的 `template_id` 必须相同，
+     * 页型靠 `page_type` 区分。
+     */
     const plans = buildPresentationPlans({ plan: makeTravelPlanFixture({ totalDays: 3 }) });
 
     expect(plans.slice(0, 3).map((p) => p.day_number)).toEqual([1, 2, 3]);
-    expect(plans.slice(0, 3).every((p) => p.template_id === 'travel_infographic_v1')).toBe(true);
+
+    const templateIds = new Set(plans.map((p) => p.template_id));
+    expect(templateIds.size).toBe(1);
+    expect([...templateIds][0]).toBe(TEMPLATE_ID_VALUES[0]);
 
     const full = plans.at(-1)!;
     expect(full.day_number).toBeNull();
-    expect(full.template_id).toBe('travel_full_plan_v1');
     expect(full.content_limits).toEqual(FULL_PLAN_CONTENT_LIMITS);
+  });
+
+  it('显式传入的套件覆盖全部页（用户选样式的落点）', () => {
+    /*
+     * 反证上一条：如果 `templateId` 参数被忽略，上面那条依旧会绿
+     * （因为默认值本来就只有一套）。这条用一个非默认值验它真的被读了。
+     */
+    const plans = buildPresentationPlans({
+      plan: makeTravelPlanFixture({ totalDays: 2 }),
+      templateId: 'ink_paper_v1',
+    });
+
+    expect(plans.every((p) => p.template_id === 'ink_paper_v1')).toBe(true);
   });
 
   it('完整页不新增素材槽位（3.3.1 —— 否则完整页会多一整套 AI 成本）', () => {
@@ -92,7 +114,7 @@ describe('槽位生成（TP-3-04）', () => {
       assetRequirementEnvelope({
         planId: plan.plan_id,
         planVersionId: plan.plan_version_id,
-        templateId: 'travel_infographic_v1',
+        templateId: TEMPLATE_ID_VALUES[0],
         requirements: merged.requirements,
       }),
     );

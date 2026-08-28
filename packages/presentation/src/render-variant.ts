@@ -57,11 +57,24 @@ export const RENDER_ROUNDS: readonly RenderVariant[] = [
   { compact: true, hideBelowPriority: 80, layout: 'relaxed' },
 ];
 
-export function variantToQuery(variant: RenderVariant): string {
+/**
+ * 把渲染参数拼成查询串。返回 `''` 或 `?a=1&b=2`。
+ *
+ * `templateId` 也走这里（R-85）而不是拼进 path：本函数的返回值恒以 `?` 开头，
+ * path 里再带一个 `?` 会拼出 `...?template=x?compact=1` 这种坏 URL。
+ * 让查询串只有**一个主**是避免那类错误的唯一办法。
+ *
+ * 模板用不签名的查询参数而不是路径段：HMAC 载荷是
+ * `plan_version_id | page_key | expires_at | jti`，动路径会动到鉴权面；
+ * 而模板不是安全边界（同一份数据、不同排版）。上面三个变体参数早已确立
+ * 这个先例。`parseRenderVariant` 忽略未知参数，因此多一个 `template` 无影响。
+ */
+export function variantToQuery(variant: RenderVariant, templateId?: string): string {
   const params = new URLSearchParams();
   if (variant.compact) params.set('compact', '1');
   if (variant.hideBelowPriority !== null) params.set('hide', String(variant.hideBelowPriority));
   if (variant.layout === 'relaxed') params.set('layout', 'relaxed');
+  if (templateId !== undefined) params.set('template', templateId);
 
   const query = params.toString();
   return query.length === 0 ? '' : `?${query}`;

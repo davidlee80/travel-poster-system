@@ -246,6 +246,8 @@ async function main(): Promise<void> {
       quota,
       plans: createTravelPlansRepository(pool),
       exports: createExportsRepository(pool),
+      // 只用于校验请求里的样式套件真有展示数据（R-85）
+      presentations: createPresentationsRepository(pool),
       queue: exportQueue,
       storage: new S3ExportStorage(loadExportsStorageConfig()),
       featureFlags,

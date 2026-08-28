@@ -47,6 +47,13 @@ export interface RenderPageRequest {
   readonly path: string;
   /** 与该 path 绑定的渲染令牌（17.1，令牌是页面级的） */
   readonly renderToken: string;
+  /**
+   * 样式套件（R-85）。以 `?template=` 进查询串，与变体参数共用同一个主。
+   *
+   * 不拼进 `path`：`variantToQuery` 的返回值恒以 `?` 开头，path 里再带
+   * 一个会拼出 `...?template=x?compact=1` 这种坏 URL。
+   */
+  readonly templateId: string;
   readonly now?: () => number;
 }
 
@@ -110,7 +117,7 @@ export async function renderPage(request: RenderPageRequest): Promise<RenderPage
         break;
       }
 
-      const url = `${request.baseUrl}${request.path}${variantToQuery(variant)}`;
+      const url = `${request.baseUrl}${request.path}${variantToQuery(variant, request.templateId)}`;
       await navigateAndWait(page, url, Math.min(SINGLE_RENDER_BUDGET_MS, remaining));
 
       /*

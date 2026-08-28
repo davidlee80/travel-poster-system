@@ -95,7 +95,7 @@ export function makeRequestFixture(overrides: RequestFixtureOverrides = {}): Tra
 
     output_preferences: {
       language: 'zh-CN',
-      template_id: 'travel_infographic_v1',
+      template_id: 'ink_paper_v1',
       generate_png: true,
       generate_pdf: true,
       ...overrides.output_preferences,

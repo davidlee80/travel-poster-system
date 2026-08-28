@@ -236,6 +236,21 @@ export const RENDER_ERRORS = {
     retryable: false,
     message: '计划已更新，请重新发起导出。',
   },
+  /**
+   * 请求的样式套件在该版本下没有展示数据（R-85）。
+   *
+   * 400 而不是 404：计划存在、版本也对，错的是请求里的 `template_id`。
+   * 不可重试 —— 重试同一个套件永远是这个结果，除非先换一个。
+   *
+   * 不设这个码的后果是失败推到异步阶段：任务建成功、扣了配额、
+   * 进了队列，然后渲染时读不到 presentation 而失败 ——
+   * 而用户已经等了一分钟。
+   */
+  EXPORT_TEMPLATE_UNAVAILABLE: {
+    httpStatus: 400,
+    retryable: false,
+    message: '这份计划没有该样式的展示数据，请换一个样式。',
+  },
 } as const satisfies Record<string, ErrorDefinition>;
 
 /**

@@ -1,4 +1,5 @@
 import type { FullPlanViewModelShape, TemplateId, TravelPlan } from '@tps/schemas';
+import { TEMPLATE_ID_VALUES } from '@tps/schemas';
 import { buildDailyPoster, EMPTY_ASSET_LOOKUP, type AssetLookup } from './build-view-model.js';
 import { destinationLabel } from './cities.js';
 import { FULL_PLAN_CONTENT_LIMITS } from './content-limits.js';
@@ -53,7 +54,7 @@ function travelerText(count: number): string {
 }
 
 export function buildFullPlan(input: BuildFullPlanInput): BuildFullPlanResult {
-  const { plan, templateId = 'travel_full_plan_v1', assets = EMPTY_ASSET_LOOKUP } = input;
+  const { plan, templateId = TEMPLATE_ID_VALUES[0], assets = EMPTY_ASSET_LOOKUP } = input;
 
   // 按 day_number 排序而不是相信数组顺序 —— V-02 的乱序是 BLOCKING 违规，
   // 但修复发生在业务规则阶段；展示层排序是廉价的防御
@@ -63,9 +64,15 @@ export function buildFullPlan(input: BuildFullPlanInput): BuildFullPlanResult {
     buildDailyPoster({
       plan,
       dayNumber: day.day_number,
-      // 各日 ViewModel 仍标为 DAILY_POSTER 的模板，因为它们的内容布局不变；
-      // 完整页只是把它们串起来
-      templateId: 'travel_infographic_v1',
+      /*
+       * 各日 ViewModel 用**同一套样式套件**（R-85）。
+       *
+       * 原先这里硬编码 `'travel_infographic_v1'`，那是「模板 = 页布局」时代的
+       * 写法：它把全览页里嵌的日页标成了另一个模板。现在一套套件覆盖两个
+       * 页型，因此必须随外层 —— 不随的后果是用户选了 kraft，全览页里每一天的
+       * ViewModel 却写着 ink_paper，而渲染端若信这个字段选组件就会混着渲。
+       */
+      templateId,
       assets,
       /*
        * 3.3.1：完整页不裁剪内容，因此 content_limits 全为 null。

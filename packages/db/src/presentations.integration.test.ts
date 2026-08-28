@@ -114,7 +114,7 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
       ...[1, 2, 3].map((day) => ({
         planId,
         planVersionId: versionId,
-        templateId: 'travel_infographic_v1',
+        templateId: 'ink_paper_v1',
         pageType: 'DAILY_POSTER' as const,
         dayNumber: day,
         viewModel: { day_number: day },
@@ -123,7 +123,7 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
       {
         planId,
         planVersionId: versionId,
-        templateId: 'travel_full_plan_v1',
+        templateId: 'ink_paper_v1',
         pageType: 'FULL_PLAN' as const,
         dayNumber: null,
         viewModel: { page: 'full' },
@@ -149,7 +149,7 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
     const row = {
       planId,
       planVersionId: versionId,
-      templateId: 'travel_infographic_v1',
+      templateId: 'ink_paper_v1',
       pageType: 'DAILY_POSTER' as const,
       dayNumber: 1,
       validationStatus: 'DEGRADED' as const,
@@ -179,7 +179,7 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
       {
         planId,
         planVersionId: versionId,
-        templateId: 'travel_infographic_v1',
+        templateId: 'ink_paper_v1',
         pageType: 'DAILY_POSTER',
         dayNumber: 1,
         viewModel: {},
@@ -203,7 +203,7 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
       {
         planId,
         planVersionId: versionId,
-        templateId: 'travel_infographic_v1',
+        templateId: 'ink_paper_v1',
         pageType: 'DAILY_POSTER',
         dayNumber: 1,
         viewModel: { draft: true },
@@ -244,7 +244,7 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
 
     const base = {
       planId,
-      templateId: 'travel_infographic_v1',
+      templateId: 'ink_paper_v1',
       pageType: 'DAILY_POSTER' as const,
       dayNumber: 1,
       validationStatus: 'VALID' as const,
@@ -283,7 +283,7 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
       planId,
       planVersionId: versionId,
       dayNumber: 1,
-      templateId: 'travel_infographic_v1',
+      templateId: 'ink_paper_v1',
       slotId: 'day_1.photo_spot.1',
       role: 'DESTINATION_PHOTO',
       resolutionStrategy: 'LOCAL_LIBRARY_MATCH',
@@ -312,7 +312,7 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
         planId,
         planVersionId: versionId,
         dayNumber: 2,
-        templateId: 'travel_infographic_v1',
+        templateId: 'ink_paper_v1',
         slotId: 'day_2.food.lunch',
         role: 'FOOD_IMAGE',
         assetId,
@@ -347,12 +347,15 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
   async function twoTemplates() {
     const f = await fixture();
     /*
-     * 注意插入顺序：magazine 在前。这是有意的 —— 它让物理顺序与
-     * `ORDER BY ... , template_id` 的顺序**相反**，于是下面那条
-     * 「缺 templateId 时取哪一套」的用例才真能失败。
+     * 注意插入顺序：`kraft_v1` 在前。这是有意的 —— 它让物理顺序与
+     * `ORDER BY ... , template_id` 的顺序**相反**（`ink_paper_v1` 字典序在前），
+     * 于是下面那条「缺 templateId 时取哪一套」的用例才真能失败。
      * 顺序一致的话那条用例无论 ORDER BY 在不在都会绿（已实测）。
+     *
+     * `kraft_v1` 是一个**假想的**未注册套件，只用作第二个可比较的值。
+     * 本组验的是仓储层的模板过滤，不经枚举校验，因此不需要它真存在。
      */
-    const templates = ['magazine_v1', 'classic_v1'] as const;
+    const templates = ['kraft_v1', 'ink_paper_v1'] as const;
     await repo.savePresentations([
       ...[1, 2].flatMap((day) =>
         templates.map((templateId) => ({
@@ -398,23 +401,23 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
      */
     const { versionId } = await twoTemplates();
 
-    const classic = await repo.findPresentationByVersion({
+    const inkPaper = await repo.findPresentationByVersion({
       planVersionId: versionId,
       pageType: 'DAILY_POSTER',
       dayNumber: 2,
-      templateId: 'classic_v1',
+      templateId: 'ink_paper_v1',
     });
-    const magazine = await repo.findPresentationByVersion({
+    const kraft = await repo.findPresentationByVersion({
       planVersionId: versionId,
       pageType: 'DAILY_POSTER',
       dayNumber: 2,
-      templateId: 'magazine_v1',
+      templateId: 'kraft_v1',
     });
 
-    expect(classic?.templateId).toBe('classic_v1');
-    expect(classic?.viewModel).toEqual({ day_number: 2, from: 'classic_v1' });
-    expect(magazine?.templateId).toBe('magazine_v1');
-    expect(magazine?.viewModel).toEqual({ day_number: 2, from: 'magazine_v1' });
+    expect(inkPaper?.templateId).toBe('ink_paper_v1');
+    expect(inkPaper?.viewModel).toEqual({ day_number: 2, from: 'ink_paper_v1' });
+    expect(kraft?.templateId).toBe('kraft_v1');
+    expect(kraft?.viewModel).toEqual({ day_number: 2, from: 'kraft_v1' });
   });
 
   it('缺 templateId 时取 template_id 排序在前的那一套，而不是物理顺序第一行', async () => {
@@ -427,9 +430,9 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
      * created_at **必然完全相同**。因此只按 created_at 排序等于没排，
      * `LIMIT 1` 会退回物理顺序。
      *
-     * `twoTemplates` 故意把 magazine 插在前面，所以：
-     *   有 template_id 排序 → classic_v1（字典序在前）
-     *   没有          → magazine_v1（物理第一行）
+     * `twoTemplates` 故意把 `kraft_v1` 插在前面，所以：
+     *   有 template_id 排序 → ink_paper_v1（字典序在前）
+     *   没有          → kraft_v1（物理第一行）
      */
     const { versionId } = await twoTemplates();
 
@@ -439,29 +442,29 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
       dayNumber: 1,
     });
 
-    expect(row?.templateId).toBe('classic_v1');
-    expect(row?.viewModel).toEqual({ day_number: 1, from: 'classic_v1' });
+    expect(row?.templateId).toBe('ink_paper_v1');
+    expect(row?.viewModel).toEqual({ day_number: 1, from: 'ink_paper_v1' });
   });
 
   it('findPresentation 按 templateId 取回各自那份（用户 API 路径）', async () => {
     const { userId, planId, versionId } = await twoTemplates();
     expect(versionId).toBeDefined();
 
-    const classic = await repo.findPresentation({
+    const inkPaper = await repo.findPresentation({
       planId,
       userId,
       pageType: 'FULL_PLAN',
-      templateId: 'classic_v1',
+      templateId: 'ink_paper_v1',
     });
-    const magazine = await repo.findPresentation({
+    const kraft = await repo.findPresentation({
       planId,
       userId,
       pageType: 'FULL_PLAN',
-      templateId: 'magazine_v1',
+      templateId: 'kraft_v1',
     });
 
-    expect(classic?.viewModel).toEqual({ page: 'full', from: 'classic_v1' });
-    expect(magazine?.viewModel).toEqual({ page: 'full', from: 'magazine_v1' });
+    expect(inkPaper?.viewModel).toEqual({ page: 'full', from: 'ink_paper_v1' });
+    expect(kraft?.viewModel).toEqual({ page: 'full', from: 'kraft_v1' });
   });
 
   it('listDayNumbers 不会把天号算两遍（导出页数与计费）', async () => {
@@ -472,8 +475,8 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
      */
     const { versionId } = await twoTemplates();
 
-    expect(await repo.listDayNumbers(versionId, 'classic_v1')).toEqual([1, 2]);
-    expect(await repo.listDayNumbers(versionId, 'magazine_v1')).toEqual([1, 2]);
+    expect(await repo.listDayNumbers(versionId, 'ink_paper_v1')).toEqual([1, 2]);
+    expect(await repo.listDayNumbers(versionId, 'kraft_v1')).toEqual([1, 2]);
     expect(await repo.listDayNumbers(versionId, '不存在的模板')).toEqual([]);
   });
 
@@ -482,7 +485,7 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
     const assetId = await insertAsset();
 
     await repo.saveBindings(
-      (['classic_v1', 'magazine_v1'] as const).map((templateId) => ({
+      (['ink_paper_v1', 'kraft_v1'] as const).map((templateId) => ({
         planId,
         planVersionId: versionId,
         dayNumber: 1,
@@ -497,6 +500,6 @@ describeIntegration('展示与绑定仓储（集成，需 PostgreSQL）', () => 
 
     // 同一个 slot_id 在两套模板下各一行（plan_asset_bindings_uk 含 template_id）
     expect(await repo.listBindings(versionId)).toHaveLength(2);
-    expect(await repo.listBindings(versionId, 'classic_v1')).toHaveLength(1);
+    expect(await repo.listBindings(versionId, 'ink_paper_v1')).toHaveLength(1);
   });
 });

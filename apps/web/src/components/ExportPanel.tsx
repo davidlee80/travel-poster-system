@@ -70,7 +70,11 @@ export function ExportPanel({
   const planVersionId = viewModel.plan_version_id;
 
   async function start(choice: ExportChoice): Promise<void> {
-    const { body, label } = buildExportRequest(choice, planVersionId);
+    /*
+     * 导出用**这份计划的**样式套件（R-85），而不是按导出种类选。
+     * 不一致会被导出侧直接拒：那个套件没有对应的 presentation。
+     */
+    const { body, label } = buildExportRequest(choice, planVersionId, viewModel.template_id);
     setPhase({ kind: 'working', progress: 0, label });
 
     const created = await createExport(planId, body);

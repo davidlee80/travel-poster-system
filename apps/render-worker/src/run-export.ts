@@ -131,7 +131,9 @@ export async function runExport(deps: RunExportDeps, exportId: string): Promise<
   try {
     for (const page of pages) {
       try {
-        captured.push(await capture(deps, context, row.planVersionId, row.format, page));
+        captured.push(
+          await capture(deps, context, row.planVersionId, row.templateId, row.format, page),
+        );
       } catch (error) {
         /*
          * 单页失败不中断整批（13.6 的 PARTIAL）。记下天号，最后一起报告。
@@ -268,6 +270,16 @@ async function capture(
   deps: RunExportDeps,
   context: BrowserContext,
   planVersionId: string,
+  /**
+   * 本次导出的样式套件（R-85），来自 `exports.template_id`。
+   *
+   * 类型是 `string` 而不是 `TemplateId`：那一列是 `VARCHAR(100)` 且无 CHECK
+   * （刻意如此 —— 新增套件不需要迁移），因此库里的值在类型层面无法
+   * 保证属于枚举。它的实际边界来自导出接口的 Zod 校验
+   * （`ExportRequestSchema` 用 `TemplateIdSchema`），而不是这里的声明。
+   * 标成 `TemplateId` 会需要一次转型，而那只是把不确定性藏起来。
+   */
+  templateId: string,
   format: 'PNG' | 'PDF',
   target: PageTarget,
 ): Promise<Captured> {
@@ -275,6 +287,7 @@ async function capture(
     context,
     baseUrl: deps.baseUrl,
     path: target.path,
+    templateId,
     // 每页一个新令牌：令牌与页面绑定，jti 唯一以支持重放检测（17.1）
     renderToken: issueRenderToken(
       { planVersionId, pageKey: target.pageKey, jti: randomUUID() },
@@ -290,6 +303,12 @@ async function capture(
   const pageType = target.dayNumber === null ? 'full' : 'day';
   recordRenderQuality({
     pageType,
+    /*
+     * 报实际渲染的那一套（R-85）。原先这个标签由 `recordRenderQuality`
+     * 内部从 `TEMPLATE_BY_PAGE_TYPE[pageType]` 反推 —— 一张把页型当模板的
+     * 硬编码表，多套样式后它会恒为错。
+     */
+    templateId,
     round: rendered.round,
     degraded: rendered.degraded,
     missingIcons: rendered.missingIcons,

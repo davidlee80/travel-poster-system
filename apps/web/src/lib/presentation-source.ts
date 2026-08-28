@@ -67,13 +67,18 @@ async function fetchPresentation(path: string): Promise<PresentationResponse | n
  * **旧契约**产出的（`plan_presentations` 永久保存，见 19.3），
  * 而模板按当前契约取字段。不校验的话，旧行会在模板里表现为某个位置
  * 渲染成 `undefined`，而 404 至少是个明确的失败。
+ *
+ * `templateId` 必填（R-85）：一个版本下可以共存多套样式的展示数据，
+ * 不带它时内部端点取到的是「排序在前的那一套」而不是用户选的那一套。
  */
 export async function loadDailyViewModel(
   planVersionId: string,
   dayNumber: number,
+  templateId: string,
 ): Promise<TravelPosterViewModel | null> {
   const body = await fetchPresentation(
-    `/internal/v1/plan-versions/${encodeURIComponent(planVersionId)}/presentations/${dayNumber}`,
+    `/internal/v1/plan-versions/${encodeURIComponent(planVersionId)}/presentations/${dayNumber}` +
+      `?template=${encodeURIComponent(templateId)}`,
   );
   if (body === null) return null;
 
@@ -88,9 +93,13 @@ export async function loadDailyViewModel(
  * `@tps/presentation` 独占产出）。因此这里只做形状探测：
  * 缺 `days` 数组就当作旧契约，返回 null 让路由 404。
  */
-export async function loadFullPlanViewModel(planVersionId: string): Promise<unknown> {
+export async function loadFullPlanViewModel(
+  planVersionId: string,
+  templateId: string,
+): Promise<unknown> {
   const body = await fetchPresentation(
-    `/internal/v1/plan-versions/${encodeURIComponent(planVersionId)}/presentations/full`,
+    `/internal/v1/plan-versions/${encodeURIComponent(planVersionId)}/presentations/full` +
+      `?template=${encodeURIComponent(templateId)}`,
   );
   return body === null ? null : body.view_model;
 }

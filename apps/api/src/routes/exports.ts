@@ -4,6 +4,7 @@ import {
   UniqueViolationError,
   type ExportRow,
   type ExportsRepository,
+  type PresentationsRepository,
   type TravelPlansRepository,
 } from '@tps/db';
 import { captureTraceContext, type ExportQueue } from '@tps/queue';
@@ -63,6 +64,12 @@ import { resolveIdentity, type IdentityContextDeps } from './identity-context.js
 export interface ExportRoutesDeps extends IdentityContextDeps {
   readonly plans: TravelPlansRepository;
   readonly exports: ExportsRepository;
+  /**
+   * 只用 `findPresentationByVersion`，为了校验请求里的样式套件真有展示数据
+   * （R-85）。收窄到单个方法而不收整个仓储：导出路由不应当能写
+   * 展示数据，而类型上限住比写注释可靠。
+   */
+  readonly presentations: Pick<PresentationsRepository, 'findPresentationByVersion'>;
   readonly quota: QuotaGuard;
   readonly queue: ExportQueue;
   /**
@@ -216,13 +223,45 @@ export function registerExportRoutes(app: FastifyInstance, deps: ExportRoutesDep
         return fail(request, reply, 'EXPORT_PLAN_VERSION_MISMATCH');
       }
 
+      /*
+       * 样式套件：校验 + 缺省解析，一次查询完成（R-85）。
+       *
+       * **传了** → 按它过滤。查不到就是那个套件没有展示数据，直接拒。
+       * `exports.template_id` 从前只是存下来而从不被消费，因此也从未被校验；
+       * 不校验的后果是任务建成功、扣了配额、进了队列，然后渲染时读不到
+       * presentation 而失败 —— 而那个失败发生在**异步阶段**，用户已经等了一分钟。
+       *
+       * **没传** → 不过滤，拿回来的行就是这份计划自己的套件。
+       * 这比在 schema 里填一个全局默认值强：全局默认在计划用了别的套件时
+       * 会被上面那条拒掉，而客户端没提过模板。
+       *
+       * 用 FULL_PLAN 探一次就够：编排是 N+1 页一事务写入（savePresentations），
+       * 全览页存在则日页必然存在。逆向不成立，所以不能拿某一天来探。
+       */
+      const presentation = await deps.presentations.findPresentationByVersion({
+        planVersionId: requestedVersion,
+        pageType: 'FULL_PLAN',
+        ...(body.template_id === undefined ? {} : { templateId: body.template_id }),
+      });
+      if (presentation === null) {
+        return fail(request, reply, 'EXPORT_TEMPLATE_UNAVAILABLE');
+      }
+      /*
+       * 下游一律用**解析后**的值而不是 `body.template_id`。
+       *
+       * 幂等键尤其如此：同一份计划、一个客户端省略了 template_id、
+       * 另一个显式传了同一个值 —— 两者必须算出同一个键，否则会起两个
+       * 内容完全相同的导出任务，扣两次配额、渲两遍。
+       */
+      const templateId = presentation.templateId;
+
       const dayNumbers = body.day_numbers ?? null;
       const idempotencyKey = computeExportIdempotencyKey({
         planVersionId: requestedVersion,
         format: body.format,
         scope: body.scope,
         dayNumbers,
-        templateId: body.template_id,
+        templateId,
       });
 
       // ── 幂等命中：直接返回原 export_id，不扣配额、不重复渲染（13.5） ──
@@ -282,7 +321,7 @@ export function registerExportRoutes(app: FastifyInstance, deps: ExportRoutesDep
           userId: resolved.identity.userId,
           planId: request.params.plan_id,
           planVersionId: requestedVersion,
-          templateId: body.template_id,
+          templateId,
           format: body.format,
           scope: body.scope,
           dayNumbers,

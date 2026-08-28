@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { TravelPosterViewModelSchema, makeTravelPlanFixture } from '@tps/schemas';
+import {
+  TEMPLATE_ID_VALUES,
+  TravelPosterViewModelSchema,
+  makeTravelPlanFixture,
+} from '@tps/schemas';
 import { buildFullPlan } from './build-full-plan.js';
 
 describe('buildFullPlan（3.3.1 FULL_PLAN）', () => {
@@ -8,7 +12,7 @@ describe('buildFullPlan（3.3.1 FULL_PLAN）', () => {
 
     expect(viewModel.page_type).toBe('FULL_PLAN');
     expect(viewModel.day_number).toBeNull();
-    expect(viewModel.template_id).toBe('travel_full_plan_v1');
+    expect(viewModel.template_id).toBe(TEMPLATE_ID_VALUES[0]);
   });
 
   it.each([1, 7, 14])('%i 天计划的每一天都产出合法的日 ViewModel', (totalDays) => {

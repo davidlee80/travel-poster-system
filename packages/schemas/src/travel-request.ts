@@ -9,6 +9,7 @@ import {
   ExistingBookingSchema,
   LocaleSchema,
   PaceLevelSchema,
+  TEMPLATE_ID_VALUES,
   TemplateIdSchema,
   type BudgetIncludedItem,
 } from './enums.js';
@@ -191,13 +192,17 @@ export const CustomRequirementsSchema = z.object({
 export const OutputPreferencesSchema = z.object({
   language: LocaleSchema.default('zh-CN'),
   /**
-   * 模板 ID 用枚举而不是自由字符串：N-11 要求「在已注册模板列表中」，
+   * 样式套件 ID 用枚举而不是自由字符串：N-11 要求「在已注册模板列表中」，
    * 而这个列表就是编译期已知的 TEMPLATE_ID_VALUES。
    * 未知模板因此返回 REQ_SCHEMA_INVALID —— 这是可接受的，
    * 因为模板 ID 不是用户填的表单项，而是前端代码里的常量，
    * 出错属于客户端 bug 而不是用户输入错误。
+   *
+   * 默认值不写成字面量而取 `TEMPLATE_ID_VALUES[0]`（R-85）：新增套件时
+   * 默认应当仍是第一套，而写字面量会让「谁是默认」散在两处 ——
+   * 将来把第一套下线时这里会静默指向一个不存在的套件。
    */
-  template_id: TemplateIdSchema.default('travel_infographic_v1'),
+  template_id: TemplateIdSchema.default(TEMPLATE_ID_VALUES[0]),
   /*
    * 两个都默认 true：13.5 的导出是用户点了才发起的独立请求，这两个开关只是
    * 声明「这份计划打算导出成什么」。默认 false 会让一个最小请求生成出的计划

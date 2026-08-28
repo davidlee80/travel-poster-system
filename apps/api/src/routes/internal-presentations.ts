@@ -29,18 +29,32 @@ export interface InternalPresentationRoutesDeps extends InternalAuthDeps {
   readonly presentations: PresentationsRepository;
 }
 
+/**
+ * 从查询串取样式套件（R-85）。
+ *
+ * 缺省不报错而是不过滤：仓内还有其他调用方（基线工具、手工排查）
+ * 不一定带这个参数，而 `findPresentationByVersion` 在缺省时有确定的选法。
+ * 但生产渲染路径上 web 侧总是会带它 —— 不带就拿到「排序在前的那一套」。
+ */
+function templateFrom(query: unknown): string | undefined {
+  const raw = (query as { template?: unknown } | undefined)?.template;
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
+}
+
 export function registerInternalPresentationRoutes(
   app: FastifyInstance,
   deps: InternalPresentationRoutesDeps,
 ): void {
-  app.get<{ Params: { plan_version_id: string } }>(
+  app.get<{ Params: { plan_version_id: string }; Querystring: { template?: string } }>(
     '/internal/v1/plan-versions/:plan_version_id/presentations/full',
     async (request, reply) => {
       if (!authorizeInternal(request, reply, deps.internalApiKey)) return reply;
 
+      const templateId = templateFrom(request.query);
       const detail = await deps.presentations.findPresentationByVersion({
         planVersionId: request.params.plan_version_id,
         pageType: 'FULL_PLAN',
+        ...(templateId === undefined ? {} : { templateId }),
       });
       if (detail === null) return reply.code(404).send({ error: { code: 'NOT_FOUND' } });
 
@@ -55,7 +69,10 @@ export function registerInternalPresentationRoutes(
     },
   );
 
-  app.get<{ Params: { plan_version_id: string; day_number: string } }>(
+  app.get<{
+    Params: { plan_version_id: string; day_number: string };
+    Querystring: { template?: string };
+  }>(
     '/internal/v1/plan-versions/:plan_version_id/presentations/:day_number',
     async (request, reply) => {
       if (!authorizeInternal(request, reply, deps.internalApiKey)) return reply;
@@ -65,10 +82,12 @@ export function registerInternalPresentationRoutes(
         return reply.code(404).send({ error: { code: 'NOT_FOUND' } });
       }
 
+      const templateId = templateFrom(request.query);
       const detail = await deps.presentations.findPresentationByVersion({
         planVersionId: request.params.plan_version_id,
         pageType: 'DAILY_POSTER',
         dayNumber: day,
+        ...(templateId === undefined ? {} : { templateId }),
       });
       if (detail === null) return reply.code(404).send({ error: { code: 'NOT_FOUND' } });
 

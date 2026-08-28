@@ -47,7 +47,7 @@ function envelopeFor(totalDays: number): AssetRequirement {
   return assetRequirementEnvelope({
     planId: plan.plan_id,
     planVersionId: plan.plan_version_id,
-    templateId: 'travel_infographic_v1',
+    templateId: 'ink_paper_v1',
     requirements: merged.requirements,
   });
 }
@@ -388,7 +388,7 @@ describe('绑定构造（TP-3-15）', () => {
     expect(first).toMatchObject({
       planId: envelope.plan_id,
       planVersionId: envelope.plan_version_id,
-      templateId: 'travel_infographic_v1',
+      templateId: 'ink_paper_v1',
     });
     expect(first.dayNumber).toBeGreaterThanOrEqual(1);
     expect(['HERO_BACKGROUND', 'ROUTE_MAP', 'FOOD_IMAGE', 'DESTINATION_PHOTO']).toContain(

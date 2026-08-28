@@ -50,7 +50,7 @@ function envelope(items: readonly AssetRequirementItem[]): AssetRequirement {
     schema_version: SCHEMA_VERSIONS.assetRequirement,
     plan_id: 'plan_123',
     plan_version_id: 'version_3',
-    template_id: 'travel_infographic_v1',
+    template_id: 'ink_paper_v1',
     requirements: [...items],
   };
 }

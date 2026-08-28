@@ -372,8 +372,40 @@ export const PAGE_TYPE_VALUES = ['DAILY_POSTER', 'FULL_PLAN'] as const;
 export const PageTypeSchema = z.enum(PAGE_TYPE_VALUES);
 export type PageType = (typeof PAGE_TYPE_VALUES)[number];
 
-/** 已注册模板。新增模板需同时更新此处与 apps/web/src/templates */
-export const TEMPLATE_ID_VALUES = ['travel_infographic_v1', 'travel_full_plan_v1'] as const;
+/**
+ * 已注册的**样式套件**（R-85）。新增时需同时更新 apps/web/src/templates 与其注册表。
+ *
+ * ## 一个套件覆盖全部页型
+ *
+ * 套件与页型是**两个正交的维度**：`ink_paper_v1` 同时提供全览页与每日页，
+ * 靠 `page_type` 区分。数据层一开始就是这么建的：
+ *
+ * ```sql
+ * plan_presentations_uk UNIQUE (plan_version_id, template_id, page_type, COALESCE(day_number, -1))
+ * ```
+ *
+ * 旧值 `travel_infographic_v1` / `travel_full_plan_v1` 把**页型编码进了套件 ID**，
+ * 于是同一份计划的展示数据带着两个不同的 `template_id` —— 浪费了上面那个
+ * 设计，也让「给用户几套样式供选」无处可表达。
+ *
+ * ## 命名轴：材质隐喻
+ *
+ * `ink_paper` 取自该套件的 CSS token（`--tps-ink` 与 `--tps-paper`）。
+ * 后续套件从同一族取名（kraft / film / neon …）。两条禁令：
+ *
+ *   - **不得含页型词**（infographic / poster / full_plan）—— 一套覆盖所有页型；
+ *   - **不得用图片风格词**（如 editorial）—— `CHINESE_TRAVEL_EDITORIAL` 是
+ *     所有套件**共享**的图片风格（它在缓存键里），因此它区分不了任何一套。
+ *
+ * 也不叫 `classic_v1`：`classic` 在本仓已有两个含义（`ROUTE_TYPE_VALUES` 的
+ * `CLASSIC`、主题桶 `garden_classic`），再加一个会让检索失效。
+ *
+ * ## ID 不是用户可见文案
+ *
+ * 这里的值只面向代码与数据库。界面文案走展示名映射，两者不能混用 ——
+ * 否则改一个文案就要迁移一次数据库。
+ */
+export const TEMPLATE_ID_VALUES = ['ink_paper_v1'] as const;
 export const TemplateIdSchema = z.enum(TEMPLATE_ID_VALUES);
 export type TemplateId = (typeof TEMPLATE_ID_VALUES)[number];
 

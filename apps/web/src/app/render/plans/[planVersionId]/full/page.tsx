@@ -1,8 +1,9 @@
 import { notFound } from 'next/navigation';
-import { TRAVEL_PLAN_FIXTURES, makeTravelPlanFixture } from '@tps/schemas';
+import { TRAVEL_PLAN_FIXTURES, TEMPLATE_ID_VALUES, makeTravelPlanFixture } from '@tps/schemas';
+import type { TemplateId } from '@tps/schemas';
 import { buildFullPlan, type FullPlanViewModel } from '@tps/presentation';
 import { isFixtureVersion, loadFullPlanViewModel } from '@/lib/presentation-source';
-import { TravelFullPlan } from '@/templates/travel-full-plan-v1';
+import { templateComponent } from '@/templates/registry';
 import { RenderReadyProbe } from '@/components/RenderReadyProbe';
 
 /**
@@ -18,6 +19,11 @@ export const dynamic = 'force-dynamic';
 
 interface PageProps {
   readonly params: Promise<{ readonly planVersionId: string }>;
+  /*
+   * 本路由原先没有 `searchParams`（它不读变体参数 —— 全览页不参与 17.3 的
+   * 溢出重渲）。R-85 加它是为了读 `?template=`。
+   */
+  readonly searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
 function fixtureFor(planVersionId: string) {
@@ -36,29 +42,49 @@ function fixtureFor(planVersionId: string) {
  * 它不跨进程，由 `@tps/presentation` 独占产出）。因此这里只做形状探测：
  * 缺 `days` 数组就当作旧契约，返回 null 让路由 404。
  */
-async function loadViewModel(planVersionId: string): Promise<FullPlanViewModel | null> {
+async function loadViewModel(
+  planVersionId: string,
+  templateId: string,
+): Promise<FullPlanViewModel | null> {
   if (isFixtureVersion(planVersionId)) {
     const plan = fixtureFor(planVersionId);
     if (plan.days.length === 0) return null;
-    return buildFullPlan({ plan }).viewModel;
+    return buildFullPlan({ plan, templateId: templateId as TemplateId }).viewModel;
   }
 
-  const stored = (await loadFullPlanViewModel(planVersionId)) as FullPlanViewModel | null;
+  const stored = (await loadFullPlanViewModel(
+    planVersionId,
+    templateId,
+  )) as FullPlanViewModel | null;
   if (stored === null || !Array.isArray(stored.days) || stored.days.length === 0) {
     return null;
   }
   return stored;
 }
 
-export default async function RenderFullPlanPage({ params }: PageProps) {
-  const { planVersionId } = await params;
+/** 取查询参数的第一个值。与单日路由同一处理 */
+function firstValue(query: Record<string, string | string[] | undefined>, key: string) {
+  const raw = query[key];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
 
-  const viewModel = await loadViewModel(planVersionId);
+export default async function RenderFullPlanPage({ params, searchParams }: PageProps) {
+  const { planVersionId } = await params;
+  const query = await searchParams;
+
+  const requested = firstValue(query, 'template') ?? TEMPLATE_ID_VALUES[0];
+  const viewModel = await loadViewModel(planVersionId, requested);
   if (viewModel === null) notFound();
+
+  /*
+   * 与单日路由同一道理：组件按取回的 ViewModel 选，不按 URL 参数选。
+   */
+  const Template = templateComponent(viewModel.template_id, 'FULL_PLAN');
+  if (Template === null) notFound();
 
   return (
     <>
-      <TravelFullPlan viewModel={viewModel} />
+      <Template viewModel={viewModel} />
       <RenderReadyProbe />
     </>
   );

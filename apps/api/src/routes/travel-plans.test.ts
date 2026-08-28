@@ -1252,7 +1252,7 @@ describe('13.4 获取展示数据', () => {
   function detail(overrides: Partial<PresentationDetail> = {}): PresentationDetail {
     return {
       planVersionId: '11111111-1111-4111-8111-111111111111',
-      templateId: 'travel_infographic_v1',
+      templateId: 'ink_paper_v1',
       pageType: 'DAILY_POSTER',
       dayNumber: 3,
       validationStatus: 'DEGRADED',
@@ -1280,7 +1280,7 @@ describe('13.4 获取展示数据', () => {
     expect(response.json()).toMatchObject({
       plan_id: 'plan-1',
       plan_version_id: '11111111-1111-4111-8111-111111111111',
-      template_id: 'travel_infographic_v1',
+      template_id: 'ink_paper_v1',
       page_type: 'DAILY_POSTER',
       day_number: 3,
       /*

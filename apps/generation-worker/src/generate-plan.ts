@@ -846,6 +846,13 @@ async function runJob(
         ...(licensedSource === undefined ? {} : { licensedSource }),
       },
       plan,
+      /*
+       * 用户选的样式套件（R-85）。这个值一直存在于标准化结果里，
+       * 而在 R-85 之前全仓**无人读** —— Zod 校验通过后就丢了，
+       * 编排用的是硬编码默认值。表现是「接口看起来支持选模板，
+       * 传什么都不报错，而产物永远是同一套」。
+       */
+      normalized.output_preferences.template_id,
     );
 
     meterAssets(result.pages);
