@@ -12,13 +12,14 @@
 
 .poster {
   --tps-canvas-width: 1200px;
-  --tps-ink: #1b1b1b;
-  --tps-ink-soft: #5b5b5b;
-  --tps-line: #e4e0d8;
-  --tps-paper: #fdfcf9;
-  --tps-accent: #2f6b4f;
-  --tps-accent-soft: #eaf2ed;
-  --tps-warm: #b8763a;
+
+  /*
+   * 配色 token 已移到套件级的 `../tokens.css`（R-85 P2）。
+   *
+   * 原先它们在这里与 `full/styles.css` 各声明一遍（`--tps-` 与 `--fp-`），
+   * 两套相同的值而没有任何东西保证它们一致 —— 新套件改了一处漏了
+   * 另一处，产物就是两种配色，而那不会报错。
+   */
 
   /* 版式变量：relaxed 变体只覆盖这几个值（17.3 第 4 轮） */
   --tps-gap: 24px;
@@ -33,6 +34,13 @@
   box-sizing: border-box;
   background: var(--tps-paper);
   color: var(--tps-ink);
+  /*
+   * 正文字体走套件的角色 token而不靠继承（R-85 P2）。
+   *
+   * 不写这一行时正文继承 `globals.css` 的 `body { font-family: var(--tps-font-sans) }`，
+   * 于是套件想换正文字体只能改全局 —— 而那会影响所有套件与规划器。
+   */
+  font-family: var(--tps-body-font);
   font-size: var(--tps-body-size);
   line-height: var(--tps-line-height);
   /* 数字用等宽字形，避免金额在不同条目间左右跳动 */
@@ -106,7 +114,7 @@
 .hero__title {
   margin: 14px 0 8px;
   /* 17.5：标题用衬线（Noto Serif SC），正文用无衬线 */
-  font-family: var(--tps-font-serif);
+  font-family: var(--tps-title-font);
   font-size: var(--tps-title-size);
   /*
    * 1.35 而不是 1.2：Noto Sans/Serif SC 的内容区（ascent + descent）实测约
@@ -413,7 +421,7 @@
    * 右对齐的金额列会参差不齐，一眼看不出哪个数更大。
    * 字体栈里 Inter 在前、Noto 在后，「元」「起」这类汉字逐字回退到 Noto。
    */
-  font-family: var(--tps-font-numeric);
+  font-family: var(--tps-numeric-font);
   font-variant-numeric: tabular-nums;
 }
 

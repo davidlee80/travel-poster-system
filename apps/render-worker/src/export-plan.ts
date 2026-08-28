@@ -213,9 +213,24 @@ async function runExport(
 
   if (wantHtml) await exportFullPlanHtml(request, context);
 
+  /*
+   * 把套件写进 meta（R-85 P2）。
+   *
+   * 视觉基线要按套件分槽，而产物目录里的文件名（`day-01.png`）看不出套件。
+   * 不写在这里就只能靠人记住上次跑的是哪套 —— 而记错的后果是
+   * 把 A 的图写成 B 的基线，之后 B 的每次改动都会“通过”。
+   */
   await writeFile(
     path.join(request.outputDir, 'render-meta.json'),
-    `${JSON.stringify({ planVersionId: request.planVersionId, provenance }, null, 2)}
+    `${JSON.stringify(
+      {
+        planVersionId: request.planVersionId,
+        templateId: request.templateId ?? null,
+        provenance,
+      },
+      null,
+      2,
+    )}
 `,
     'utf8',
   );

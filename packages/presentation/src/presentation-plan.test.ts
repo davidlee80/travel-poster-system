@@ -3,6 +3,7 @@ import {
   MEAL_VALUES,
   TEMPLATE_ID_VALUES,
   makeTravelPlanFixture,
+  type TemplateId,
   type TravelPlan,
 } from '@tps/schemas';
 import { describe, expect, it } from 'vitest';
@@ -57,6 +58,34 @@ describe('N+1 个 PresentationPlan（TP-3-03）', () => {
     });
 
     expect(plans.every((p) => p.template_id === 'ink_paper_v1')).toBe(true);
+  });
+
+  it('换套件不改变任何槽位的 visual_constraints（决策二，R-85 P2）', () => {
+    /*
+     * 决策二：多套件共享同一套 `visual_constraints`。
+     *
+     * 缓存键含画幅（`hero:v1:...:16x6`），若某个套件把 Hero 改成 4:3，
+     * 换一次样式 = 全部素材未命中 = 重新生成一遍图，
+     * 于是「让用户选样式」变成「让用户每次选样式都花一次 AI 钱」。
+     *
+     * 这条验的是**行为**而不是常量形状：目前 `requirementsForDay` 根本不收
+     * `templateId`，因此约束结构上无法分支 —— 但那是当前实现的事实，
+     * 不是被固定的契约。哪天有人把 `templateId` 穿进 `requirements.ts`，
+     * 这条会红。
+     */
+    const plan = makeTravelPlanFixture({ totalDays: 3 });
+    const constraintsOf = (templateId: TemplateId) =>
+      buildPresentationPlans({ plan, templateId })
+        .flatMap((page) => page.asset_requirements)
+        .map((item) => `${item.slot_id}=${JSON.stringify(item.visual_constraints)}`);
+
+    const first = constraintsOf(TEMPLATE_ID_VALUES[0]);
+    expect(first.length).toBeGreaterThan(0);
+
+    // 逐套比：新增套件时这条自动覆盖到它
+    for (const templateId of TEMPLATE_ID_VALUES) {
+      expect(constraintsOf(templateId), `套件 ${templateId} 改了约束`).toEqual(first);
+    }
   });
 
   it('完整页不新增素材槽位（3.3.1 —— 否则完整页会多一整套 AI 成本）', () => {

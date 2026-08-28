@@ -9,6 +9,7 @@ import { RenderError } from './errors.js';
  * `render:fixture` CLI（P1 门禁，设计稿二十三章第一阶段）。
  *
  *   pnpm render:fixture -- --days 14 --format all
+ *   pnpm render:fixture -- --days 1 --template blueprint_v1
  *
  * 目的是在引入 LLM 与数据库之前，用静态 fixture 证明
  * 「模板 → HTML → PNG/PDF」这条链路可行 —— 这是渲染链路唯一无法
@@ -31,6 +32,7 @@ logger.info(
     formats: options.formats,
     baseUrl: options.baseUrl,
     outputDir: options.outputDir,
+    templateId: options.templateId,
   },
   '开始导出 fixture',
 );
@@ -43,6 +45,7 @@ try {
     days: Array.from({ length: options.days }, (_, index) => index + 1),
     formats: options.formats,
     outputDir: options.outputDir,
+    templateId: options.templateId,
     logger,
   });
 

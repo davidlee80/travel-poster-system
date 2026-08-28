@@ -1,0 +1,40 @@
+/*
+ * blueprint_v1 的样式套件 token（R-85 P2）。
+ *
+ * ## 材质隐喻：工程蓝图
+ *
+ * 冷灰蓝的图纸底、墨蓝的字、蓝图蓝的主色。与 ink_paper 的暖纸墨形成
+ * 冷暖对照 —— 这是两套套件最容易被用户一眼分辨的差异。
+ *
+ * 保留一档暖色（`--tps-warm`）：全冷的页面在长图上读起来发闷，
+ * 而那一点暖色只用在少量强调处（价格徽章、提前预订提示）。
+ *
+ * ## 字体角色与 ink_paper 相反
+ *
+ * 标题走**黑体**而不是宋体。工程图纸的标注是无衬线的，
+ * 而宋体的笔画对比在网格密排的版面里会显得吵。
+ *
+ * 这也是本套件存在的技术意义：它是第一套真正行使「字体属于套件」的样式 ——
+ * 在它之前 `--tps-title-font` 只有一处声明而无人验证覆盖是否生效。
+ *
+ * 三个角色仍然指向 `@tps/fonts` 注入的全局栈，不重抄字体栈本身
+ * （理由见 ink-paper-v1/tokens.css）。
+ */
+
+[data-template='blueprint_v1'] {
+  /* 图纸：冷白底、墨蓝字，比纯黑柔和且与蓝主色同色系 */
+  --tps-ink: #10243a;
+  --tps-ink-soft: #4a6a8a;
+  --tps-line: #b9cddd;
+  --tps-paper: #f2f6fa;
+
+  /* 蓝图蓝作主色；暖色只留一档做少量强调 */
+  --tps-accent: #1b5e9c;
+  --tps-accent-soft: #e0ecf7;
+  --tps-warm: #b0762a;
+
+  /* 标题用黑体（与 ink_paper 的宋体相反），正文与数字同 */
+  --tps-title-font: var(--tps-font-sans);
+  --tps-body-font: var(--tps-font-sans);
+  --tps-numeric-font: var(--tps-font-numeric);
+}

@@ -1,0 +1,75 @@
+/*
+ * ink_paper_v1 的样式套件 token（R-85 P2）。
+ *
+ * ## 为什么要有这一层
+ *
+ * 在这之前配色被声明了**两遍**：
+ *
+ *   daily/styles.css   .poster    { --tps-ink: #1b1b1b; ... }
+ *   full/styles.css    .full-plan { --fp-ink:  #1b1b1b; ... }
+ *
+ * 两套平行 token、相同的值、不同的前缀，而没有任何东西保证它们一致。
+ * 后果在第二套套件出现时立刻显形：改了日页的调色板而漏改全览页，
+ * 于是**一份产物两种配色** —— 而这不会报错，只是看起来不对。
+ *
+ * ## 作用域为什么用 `[data-template]`
+ *
+ * 两个页型的根元素本来就带这个属性（daily/index.tsx 的 `.poster`、
+ * full/index.tsx 的 `.full-plan`，值都来自 `viewModel.template_id`）。
+ * 因此不需要新增包裹元素 —— 属性选择器直接命中两者。
+ *
+ * 不用 `:root`：那会让 token 泄漏到整个页面，而用户可见的计划页
+ * 与规划器共用同一个文档（`globals.css` 的作用域门禁正是为这类泄漏设的）。
+ *
+ * ## 全览页会拿到两次声明，这是无害的
+ *
+ * 全览页把各日的 `.poster` 嵌在 `.full-plan` 里面，两者都带 `data-template`，
+ * 因此 token 在外层与内层各声明一次。同一个套件下值相同，内层胜出，结果一致。
+ *
+ * ## 度量 token 不在这里
+ *
+ * `--tps-gap` / `--tps-title-size` 等留在 `daily/styles.css` 的 `.poster` 上：
+ * 它们是**日页版式**的量，而 17.3 第 4 轮的 `[data-variant='relaxed']`
+ * 要覆盖它们。放到这一层会让那个覆盖跨越两个文件去理解，
+ * 而它本来只关乎日页。
+ *
+ * ## 字体属于套件，但这里不重抄字体栈
+ *
+ * 下面声明的是**角色 → 家族**的别名，值指向 `@tps/fonts` 注入的栈
+ * （`--tps-font-sans` / `--tps-font-serif` / `--tps-font-numeric`）。
+ *
+ * 不把字体栈本身写到这里：那些栈由 `@tps/fonts` 的清单派生，
+ * `FontFaces.tsx` 的注释已经说清为何不能手抄副本 ——
+ * 加一档字重要改两处，而漏改的表现是「加粗标题静默变回退字体」。
+ * 套件只说「标题用哪一家」，不说「那一家的回退链长什么样」。
+ *
+ * ## 覆盖为何必然生效
+ *
+ * `FontFaces` 把字体 token 注入 `:root`（即 `<html>`），而这里声明在
+ * `.poster` / `.full-plan` **自身**上。CSS 自定义属性会继承，而
+ * **元素自身的声明总是胜过继承来的值** —— 与特异性无关（层叠只在
+ * 同一元素的声明之间比特异性）。因此不需要提特异性，
+ * 也不依赖 `<style>` 与样式表在 `<head>` 里的先后顺序
+ * （`FontFaces.tsx` 把那个顺序称为「不该依赖的实现细节」）。
+ */
+
+[data-template='ink_paper_v1'] {
+  /* 墨与纸：近黑的字色落在略暖的纸色上，而不是纯黑落纯白 */
+  --tps-ink: #1b1b1b;
+  --tps-ink-soft: #5b5b5b;
+  --tps-line: #e4e0d8;
+  --tps-paper: #fdfcf9;
+
+  /* 石绿与赭石：传统颜料的两个色相，用作主色与暖色点缀 */
+  --tps-accent: #2f6b4f;
+  --tps-accent-soft: #eaf2ed;
+  --tps-warm: #b8763a;
+
+  /*
+   * 字体角色。纸墨这一套用宋体做标题、黑体做正文 ——
+   * 标题的笔画对比与「墨」的意象一致，而正文要的是小字号下的可读性。
+   */
+  --tps-title-font: var(--tps-font-serif);
+  --tps-body-font: var(--tps-font-sans);
+  --tps-numeric-font: var(--tps-font-numeric);
+}

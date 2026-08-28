@@ -50,6 +50,25 @@ const PIXEL_BASELINE_DAY = 1;
 
 const FIXTURES = [1, 7, 14];
 
+/**
+ * 旧产物归属的套件（R-85 P2）。
+ *
+ * 从 `packages/schemas` 的枚举读第一个，而不在这里手写字面量 ——
+ * 手写的那份会在重命名套件时默默失效：`check` 去一个不存在的目录找基线，
+ * 报的是「缺基线」而不是「名字对不上」。
+ *
+ * 读源码而不是 import：本工具是裸 `.mjs`，跑在 `pnpm build` 之前也要能用，
+ * 而 `@tps/schemas` 的产物那时可能还不存在。
+ */
+const DEFAULT_TEMPLATE_ID = await (async () => {
+  const source = await readFile(path.join(repoRoot, 'packages/schemas/src/enums.ts'), 'utf8');
+  const match = /TEMPLATE_ID_VALUES\s*=\s*\[\s*'([a-z0-9_]+)'/.exec(source);
+  if (match?.[1] === undefined) {
+    throw new Error('从 packages/schemas/src/enums.ts 里读不到 TEMPLATE_ID_VALUES 的第一项');
+  }
+  return match[1];
+})();
+
 function log(message) {
   process.stdout.write(`${message}\n`);
 }
@@ -184,6 +203,18 @@ async function main() {
     );
   }
 
+  /*
+   * 套件维度（R-85 P2）。
+   *
+   * 基线必须按套件分槽 —— 两套套件的同一天长得完全不同，
+   * 共用一个槽位的后果是后拍的那套把前一套的基线覆盖掉，
+   * 而下一次 `check` 会把差异报成「回归」。
+   *
+   * 旧产物（`templateId` 为缺或 null）归给默认套件：那些基线是在只有
+   * 一套套件时拍的，它们就是默认套件的。
+   */
+  const templateId = meta.templateId ?? DEFAULT_TEMPLATE_ID;
+
   const pngName = `day-${String(PIXEL_BASELINE_DAY).padStart(2, '0')}.png`;
   const htmlName = `day-${String(PIXEL_BASELINE_DAY).padStart(2, '0')}.html`;
   for (const required of [pngName, htmlName, `${meta.planVersionId}-all-days.pdf`]) {
@@ -192,7 +223,7 @@ async function main() {
     }
   }
 
-  const slot = `fixture-${days}`;
+  const slot = path.join(templateId, `fixture-${days}`);
   const baselinePng = path.join(baselineDir, slot, pngName);
   const baselineLayout = path.join(baselineDir, slot, 'layout.json');
 

@@ -11,15 +11,19 @@
 
 .full-plan {
   --fp-max: 1240px;
-  --fp-ink: #1b1b1b;
-  --fp-ink-soft: #5b5b5b;
-  --fp-line: #e4e0d8;
-  --fp-paper: #fdfcf9;
-  --fp-accent: #2f6b4f;
-  --fp-accent-soft: #eaf2ed;
 
-  background: var(--fp-paper);
-  color: var(--fp-ink);
+  /*
+   * 配色走套件级 token（`../tokens.css`，R-85 P2）。
+   *
+   * 原先这里有一整套 `--fp-ink` / `--fp-paper` …，值与日页的 `--tps-` 逐一
+   * 相同 —— 两套平行 token、不同前缀、无人保证一致。
+   * `--fp-max` 留下：它是本页的容器宽度，不是配色。
+   */
+
+  background: var(--tps-paper);
+  color: var(--tps-ink);
+  /* 正文字体走套件的角色 token，与日页同一理由（R-85 P2） */
+  font-family: var(--tps-body-font);
   font-variant-numeric: tabular-nums;
   line-height: 1.6;
 }
@@ -34,7 +38,7 @@
 
 .full-plan__eyebrow {
   margin: 0 0 8px;
-  color: var(--fp-accent);
+  color: var(--tps-accent);
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -44,7 +48,7 @@
 .full-plan__title {
   margin: 0 0 12px;
   /* 与信息图的 .hero__title 保持一致的衬线标题（17.5） */
-  font-family: var(--tps-font-serif);
+  font-family: var(--tps-title-font);
   font-size: clamp(26px, 4vw, 42px);
   /* 与信息图同理：中文字体内容区约 1.29em，1.2 装不下 */
   line-height: 1.35;
@@ -54,7 +58,7 @@
 .full-plan__summary {
   margin: 0 0 28px;
   max-width: 62ch;
-  color: var(--fp-ink-soft);
+  color: var(--tps-ink-soft);
   font-size: clamp(15px, 1.4vw, 17px);
 }
 
@@ -72,20 +76,20 @@
   column-gap: 10px;
   padding: 14px 16px;
   background: #fff;
-  border: 1.5px solid var(--fp-line);
+  border: 1.5px solid var(--tps-line);
   border-radius: 6px;
 }
 
 .full-plan__fact-icon {
   grid-row: 1 / span 2;
   align-self: center;
-  color: var(--fp-accent);
+  color: var(--tps-accent);
 }
 
 .full-plan__fact-label {
   margin: 0;
   font-size: 12px;
-  color: var(--fp-ink-soft);
+  color: var(--tps-ink-soft);
 }
 
 .full-plan__fact-value {
@@ -109,7 +113,7 @@
   flex-direction: column;
   gap: 2px;
   padding: 12px 14px;
-  background: var(--fp-accent-soft);
+  background: var(--tps-accent-soft);
   border-radius: 6px;
   text-decoration: none;
   color: inherit;
@@ -118,14 +122,14 @@
 
 .full-plan__nav-link:hover,
 .full-plan__nav-link:focus-visible {
-  border-color: var(--fp-accent);
+  border-color: var(--tps-accent);
 }
 
 .full-plan__nav-day {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--fp-accent);
+  color: var(--tps-accent);
 }
 
 .full-plan__nav-theme {
@@ -188,8 +192,8 @@
   max-width: var(--fp-max);
   margin: 0 auto;
   padding: 24px;
-  border-top: 1.5px solid var(--fp-line);
-  color: var(--fp-ink-soft);
+  border-top: 1.5px solid var(--tps-line);
+  color: var(--tps-ink-soft);
   font-size: 13px;
   display: flex;
   flex-wrap: wrap;

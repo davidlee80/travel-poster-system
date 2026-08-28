@@ -1,0 +1,21 @@
+{
+  "guardSlots": [
+    "header.title",
+    "header.subtitle",
+    "schedule.item",
+    "schedule.item",
+    "schedule.item",
+    "food.card",
+    "food.card",
+    "food.card",
+    "photo_spot.card",
+    "photo_spot.card",
+    "budget.total",
+    "transport_tip.item",
+    "transport_tip.item",
+    "booking_tip.item"
+  ],
+  "guardCount": 14,
+  "textSha256": "9532e5b7ed80dc915d4ee1bde3cac22d728441bb4a18eb198d3eac90df509841",
+  "textLength": 2353
+}

@@ -1,0 +1,233 @@
+/*
+ * blueprint_v1 全览页样式（R-85 P2）。
+ *
+ * 与每日页的分工：本文件只管**容器与响应式**，各日内容的样式来自
+ * `blueprint-v1/daily/styles.css`。因此各日的视觉基线只需维护一份。
+ *
+ * 每日页是定宽 1200px 的导出产物，在窄屏里放不下，因此用 `zoom` 等比缩放
+ * 而不是让它自己变窄 —— 变窄会改变换行位置，导致全览页与导出的 PNG
+ * 看起来是两个不同的设计。
+ *
+ * **用 `zoom` 而不是 `transform: scale`**：后者不影响布局计算，
+ * 缩小后原尺寸的空间仍被占着，页面下方会留下大片空白。
+ *
+ * ## 类名一律以 `bp-` 开头
+ *
+ * 理由见 `../daily/styles.css` 的文件头：模板 CSS 是全局的，
+ * 所有套件的样式表都进同一个包，通用类名重名会让后加载的胜出。
+ */
+
+.bp-doc {
+  --bp-doc-max: 1240px;
+
+  /* 配色与字体走套件级 token（`../tokens.css`） */
+  background: var(--tps-paper);
+  color: var(--tps-ink);
+  /* 正文字体走套件的角色 token，与日页同一理由（R-85 P2） */
+  font-family: var(--tps-body-font);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+
+/* ── 标题栏 ──────────────────────────────────────────────── */
+
+.bp-doc__title {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 32px;
+  max-width: var(--bp-doc-max);
+  margin: 0 auto;
+  padding: 48px 24px 24px;
+  border-bottom: 2px solid var(--tps-ink);
+}
+
+.bp-doc__heading {
+  min-width: 0;
+}
+
+.bp-doc__eyebrow {
+  margin: 0 0 6px;
+  color: var(--tps-accent);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+}
+
+.bp-doc__h1 {
+  margin: 0 0 10px;
+  font-family: var(--tps-title-font);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.bp-doc__summary {
+  margin: 0;
+  color: var(--tps-ink-soft);
+  font-size: 15px;
+}
+
+/* 规格网格：标签在上、值在下，成对排布 */
+.bp-doc__specs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin: 0;
+  align-content: start;
+}
+
+.bp-doc__spec {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  gap: 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--tps-line);
+}
+
+.bp-doc__spec-icon {
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--tps-accent);
+}
+
+.bp-doc__spec-label {
+  margin: 0;
+  color: var(--tps-ink-soft);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.bp-doc__spec-value {
+  margin: 0;
+  font-weight: 500;
+}
+
+/* ── 索引表 ──────────────────────────────────────────────── */
+
+.bp-doc__index {
+  max-width: var(--bp-doc-max);
+  margin: 0 auto;
+  padding: 24px 24px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.bp-doc__index-row {
+  display: grid;
+  grid-template-columns: 40px 110px 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--tps-line);
+  color: inherit;
+  text-decoration: none;
+}
+
+.bp-doc__index-row:hover,
+.bp-doc__index-row:focus-visible {
+  background: var(--tps-accent-soft);
+}
+
+.bp-doc__index-no {
+  font-family: var(--tps-numeric-font);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tps-accent);
+  letter-spacing: 0.04em;
+}
+
+.bp-doc__index-day {
+  font-weight: 700;
+}
+
+.bp-doc__index-theme {
+  min-width: 0;
+  color: var(--tps-ink-soft);
+}
+
+/* ── 各日图纸 ────────────────────────────────────────────── */
+
+.bp-doc__sheets {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  padding: 32px 0;
+}
+
+.bp-doc__sheet {
+  min-width: 0;
+}
+
+.bp-doc__sheet-frame {
+  max-width: var(--bp-doc-max);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+@media (max-width: 1280px) {
+  .bp-doc__sheet-frame {
+    padding: 0 12px;
+    zoom: 0.82;
+  }
+}
+
+@media (max-width: 900px) {
+  .bp-doc__title {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding: 32px 16px 20px;
+  }
+
+  .bp-doc__sheet-frame {
+    zoom: 0.6;
+  }
+}
+
+@media (max-width: 640px) {
+  .bp-doc__specs {
+    grid-template-columns: 1fr;
+  }
+
+  .bp-doc__index-row {
+    grid-template-columns: 32px 1fr;
+  }
+
+  .bp-doc__index-theme {
+    grid-column: 2;
+  }
+
+  .bp-doc__sheet-frame {
+    padding: 0;
+    zoom: 0.42;
+  }
+}
+
+/* ── 底栏 ────────────────────────────────────────────────── */
+
+.bp-doc__strip {
+  max-width: var(--bp-doc-max);
+  margin: 0 auto;
+  padding: 16px 24px 32px;
+  border-top: 2px solid var(--tps-ink);
+  color: var(--tps-ink-soft);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  justify-content: space-between;
+}
+
+.bp-doc__strip-id {
+  font-family: var(--tps-numeric-font);
+}
+
+@media print {
+  .bp-doc__sheet-frame {
+    /* 打印时不缩放，宽度由 @page 与 PDF scale 控制（17.4） */
+    zoom: 1;
+    padding: 0;
+  }
+}

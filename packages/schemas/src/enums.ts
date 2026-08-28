@@ -405,7 +405,7 @@ export type PageType = (typeof PAGE_TYPE_VALUES)[number];
  * 这里的值只面向代码与数据库。界面文案走展示名映射，两者不能混用 ——
  * 否则改一个文案就要迁移一次数据库。
  */
-export const TEMPLATE_ID_VALUES = ['ink_paper_v1'] as const;
+export const TEMPLATE_ID_VALUES = ['ink_paper_v1', 'blueprint_v1'] as const;
 export const TemplateIdSchema = z.enum(TEMPLATE_ID_VALUES);
 export type TemplateId = (typeof TEMPLATE_ID_VALUES)[number];
 

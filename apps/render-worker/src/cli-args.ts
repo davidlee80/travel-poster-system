@@ -1,5 +1,7 @@
 import path from 'node:path';
 
+import { TEMPLATE_ID_VALUES, type TemplateId } from '@tps/schemas';
+
 import type { ExportFormat } from './export-plan.js';
 
 /**
@@ -16,6 +18,7 @@ export interface CliOptions {
   readonly baseUrl: string;
   readonly outputDir: string;
   readonly signingKey: string;
+  readonly templateId: TemplateId;
 }
 
 export const ALL_FORMATS: readonly ExportFormat[] = ['html', 'png', 'pdf'];
@@ -103,11 +106,27 @@ export function parseArgs(
     '',
   );
 
+  /*
+   * 样式套件（R-85 P2）。默认取第一个 —— 与服务端的默认套件同一个来源，
+   * 因此不传 `--template` 时行为与加这个参数之前完全一致。
+   *
+   * 不接受未注册的值：套件写错时渲染路由会回退到默认套件或直接 404，
+   * 两种都让人以为是渲染出了问题 —— 而真因只是多敲了一个字母。
+   * 拍基线时这一点尤其要紧：退回默认套件会把 A 的图写成 B 的基线。
+   */
+  const templateRaw = flags.get('template') ?? TEMPLATE_ID_VALUES[0];
+  if (!TEMPLATE_ID_VALUES.includes(templateRaw as TemplateId)) {
+    throw new Error(
+      `未知样式套件 ${JSON.stringify(templateRaw)}；可选 ${TEMPLATE_ID_VALUES.join(' / ')}`,
+    );
+  }
+
   return {
     days,
     formats: parseFormats(flags.get('format') ?? 'all'),
     baseUrl,
     outputDir: flags.get('out') ?? path.join(cwd, 'out-fixtures'),
     signingKey,
+    templateId: templateRaw as TemplateId,
   };
 }

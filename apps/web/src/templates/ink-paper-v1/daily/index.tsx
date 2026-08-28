@@ -1,6 +1,8 @@
 import type { TravelPosterViewModel } from '@tps/schemas';
 import { Icon } from '@/components/Icon';
-import { guard } from './overflow-guards';
+import { guard } from '../../overflow-guards';
+// 套件级配色 token，与全览页共用（R-85 P2）
+import '../tokens.css';
 import './styles.css';
 
 /**

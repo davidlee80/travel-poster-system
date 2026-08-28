@@ -3,6 +3,8 @@ import type { ComponentType } from 'react';
 
 import { TravelInfographic } from './ink-paper-v1/daily';
 import { TravelFullPlan } from './ink-paper-v1/full';
+import { BlueprintDaily } from './blueprint-v1/daily';
+import { BlueprintFullPlan } from './blueprint-v1/full';
 
 /**
  * 样式套件注册表：`(templateId, pageType) → 组件`（R-85）。
@@ -41,6 +43,10 @@ export const TEMPLATE_REGISTRY: Readonly<
   ink_paper_v1: {
     DAILY_POSTER: TravelInfographic,
     FULL_PLAN: TravelFullPlan,
+  },
+  blueprint_v1: {
+    DAILY_POSTER: BlueprintDaily,
+    FULL_PLAN: BlueprintFullPlan,
   },
 };
 

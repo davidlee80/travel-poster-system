@@ -30,6 +30,10 @@ const globalsCss = path.resolve(stylesRoot, '..', 'app', 'globals.css');
  * `templates/<套件>/<页型>/styles.css` —— 一套样式套件同时提供全览页与
  * 每日页，因此多了一层。只走一层的话这道门禁会**静默覆盖 0 个模板样式表**
  * （`ink-paper-v1/` 下没有 styles.css）—— 下面那条下限断言就是为此而存在。
+ *
+ * 套件目录下的 `tokens.css` 也要收（R-85 P2）：配色与字体声明在那里，
+ * 而 `font-weight` 完全可能写成 token。只收 `styles.css` 等于给 token 层
+ * 开了一个不被检查的口子。
  */
 async function collectCssFiles(): Promise<string[]> {
   const files = [globalsCss];
@@ -38,8 +42,9 @@ async function collectCssFiles(): Promise<string[]> {
     if (!suite.isDirectory()) continue;
     const suiteDir = path.join(stylesRoot, suite.name);
 
-    // 套件目录自己可能有一份共享样式表
+    // 套件目录自己的共享样式表与 token
     await pushIfExists(files, path.join(suiteDir, 'styles.css'));
+    await pushIfExists(files, path.join(suiteDir, 'tokens.css'));
 
     for (const page of await readdir(suiteDir, { withFileTypes: true })) {
       if (!page.isDirectory()) continue;

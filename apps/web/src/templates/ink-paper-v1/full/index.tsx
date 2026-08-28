@@ -1,6 +1,8 @@
 import type { FullPlanViewModel } from '@tps/presentation';
 import { Icon } from '@/components/Icon';
 import { TravelInfographic } from '@/templates/ink-paper-v1/daily';
+// 套件级配色 token，与日页共用（R-85 P2）
+import '../tokens.css';
 import './styles.css';
 
 /**

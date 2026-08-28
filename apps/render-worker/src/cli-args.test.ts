@@ -1,3 +1,4 @@
+import { TEMPLATE_ID_VALUES } from '@tps/schemas';
 import { describe, expect, it } from 'vitest';
 
 import { ALL_FORMATS, parseArgs } from './cli-args.js';
@@ -20,6 +21,20 @@ describe('parseArgs', () => {
 
   it('逗号分隔的格式子集', () => {
     expect(parseArgs(['--format', 'png,pdf'], env).formats).toEqual(['png', 'pdf']);
+  });
+
+  it('拒绝未知样式套件', () => {
+    /*
+     * 拍视觉基线时这条尤其要紧：套件名敲错而不报错的后果是退回默认套件，
+     * 于是 A 的图被写成 B 的基线 —— 而那之后会让 B 的每次改动都“通过”。
+     */
+    expect(() => parseArgs(['--template', 'no_such_v1'], env)).toThrow(/未知样式套件/);
+  });
+
+  it('不传 --template 时取第一个已注册套件', () => {
+    // 与服务端默认套件同一个来源，因此行为与加这个参数之前一致
+    expect(parseArgs([], env).templateId).toBe(TEMPLATE_ID_VALUES[0]);
+    expect(parseArgs(['--template', 'blueprint_v1'], env).templateId).toBe('blueprint_v1');
   });
 
   it('拒绝未知格式', () => {
