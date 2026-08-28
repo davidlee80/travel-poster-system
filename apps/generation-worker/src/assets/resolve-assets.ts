@@ -367,8 +367,15 @@ async function resolveByRole(
   return { resolved: await resolveFallback(deps, item), warnings: aiWarnings };
 }
 
-/** 19.2 的键格式。ROUTE_MAP 的键在 svg-map resolver 里算（它要先渲染） */
-function cacheKeyFor(item: AssetRequirementItem): string | null {
+/**
+ * 19.2 的键计算（ROUTE_MAP 的键由 svg-map resolver 自算，需要先渲染）。
+ *
+ * **导出是为了预热侧的一致性断言**（`preheat-parity.test.ts`）：预热自己拼一份键，
+ * 而这里是运行时拼的那份。两边读的字段与默认值一旦错开，预热图就全部命不中 ——
+ * 而那个失效的表现只是「缓存命中率为 0」，看不出原因。不导出就只能在测试里
+ * 重拼一遍，而那是同义反复：它验不到本函数到底读了 subject 的哪几个字段。
+ */
+export function cacheKeyFor(item: AssetRequirementItem): string | null {
   const subject = item.subject;
   if (subject === null || subject === undefined) return null;
   const style = item.visual_constraints.style ?? null;

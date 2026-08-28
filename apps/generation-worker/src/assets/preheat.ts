@@ -58,8 +58,12 @@ export interface PreheatTarget {
  * 预热时没有 LLM 生成的主题短语（那是生成计划时才有的），因此按桶给一个
  * 代表性短语。它只影响画面内容，**不影响缓存键** —— 键里是桶名（19.2），
  * 所以真实请求里任何归到该桶的短语都能命中这张图。
+ *
+ * **导出是为了一致性断言**（`preheat-parity.test.ts`）：每个短语必须归到它
+ * 自己的桶。不成立的后果不是键错配而是内容错配：为某个桶预热的那张图，
+ * 是用一句实际归到别的桶的短语生成的 —— 键命中，画面不对题。
  */
-const BUCKET_THEME_PHRASE: Readonly<Record<ThemeBucket, string>> = {
+export const BUCKET_THEME_PHRASE: Readonly<Record<ThemeBucket, string>> = {
   canal_culture: '运河人文',
   lake_scenery: '湖光山色',
   old_town: '古城老街',
