@@ -347,7 +347,7 @@ describeIntegration('24.1 #1：20 个端到端用例（集成）', () => {
       custom_requirements: { raw_text: '想看运河和博物馆。' },
       output_preferences: {
         language: 'zh-CN',
-        template_id: 'travel_infographic_v1',
+        template_id: 'ink_paper_v1',
         generate_png: true,
         generate_pdf: true,
       },

@@ -180,7 +180,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
   }
 
   /** 出发日期取「明天」，否则 N-01（出发日期不早于今天）会拒掉请求 */
-  function requestBody(): Record<string, unknown> {
+  function requestBody(templateId: string = 'ink_paper_v1'): Record<string, unknown> {
     const start = new Date(Date.now() + 86_400_000);
     const end = new Date(start.getTime() + 4 * 86_400_000);
     const iso = (date: Date): string => date.toISOString().slice(0, 10);
@@ -216,7 +216,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
       custom_requirements: { raw_text: '想看运河和博物馆，晚上不要太晚。' },
       output_preferences: {
         language: 'zh-CN',
-        template_id: 'travel_infographic_v1',
+        template_id: templateId,
         generate_png: true,
         generate_pdf: true,
       },
@@ -732,5 +732,54 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
 
     const count = await pool.query<{ count: string }>('SELECT count(*) FROM travel_plans');
     expect(count.rows[0]!.count).toBe('1');
+  });
+
+  it('显式指定第二套套件：提交 → 生成 → 落库全部是 blueprint_v1（R-85 P3）', async () => {
+    /*
+     * P3 的端到端：用户选了非默认套件后，模板 ID 必须从请求一路传到落库。
+     *
+     * 这条不在默认路径（ink_paper_v1）覆盖范围内 —— 默认值在 schema 层就填了，
+     * 显式传另一个值才真正验「output_preferences 被消费」。
+     * 若不消费：落库全是默认套件，而任务 COMPLETED —— 没有报错。
+     */
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      payload: requestBody('blueprint_v1'),
+    });
+    expect(created.statusCode).toBe(201);
+    const handles = created.json<{ plan_id: string; job_id: string }>();
+
+    const payload = await takeQueuedPayload();
+    const outcome = await generatePlan(workerDeps(), payload);
+    expect(outcome).toMatchObject({ outcome: 'saved' });
+
+    // 落库核对：全览页 + 每日页全部是 blueprint_v1，没有一个行是默认套件
+    const rows = await pool.query<{ template_id: string; page_type: string; day_number: number | null }>(
+      `SELECT template_id, page_type, day_number
+         FROM plan_presentations
+        WHERE plan_id = $1
+        ORDER BY page_type, day_number`,
+      [handles.plan_id],
+    );
+
+    expect(rows.rows.length).toBeGreaterThanOrEqual(2); // 至少全览页 + 1 天日页
+    for (const row of rows.rows) {
+      expect(row.template_id, `${row.page_type}/${row.day_number} 不是 blueprint_v1`).toBe(
+        'blueprint_v1',
+      );
+    }
+    expect(rows.rows.some((row) => row.page_type === 'FULL_PLAN')).toBe(true);
+    expect(rows.rows.some((row) => row.page_type === 'DAILY_POSTER')).toBe(true);
+
+    // 展示数据可读，且取回的就是 blueprint 那一套
+    const cookie = anonymousCookie(created.headers['set-cookie']);
+    const full = await app.inject({
+      method: 'GET',
+      url: `/api/v1/travel-plans/${handles.plan_id}/presentations/full`,
+      headers: { cookie },
+    });
+    expect(full.statusCode).toBe(200);
+    expect(full.json<{ template_id: string }>().template_id).toBe('blueprint_v1');
   });
 });

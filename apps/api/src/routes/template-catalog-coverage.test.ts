@@ -28,6 +28,16 @@ import { describe, expect, it } from 'vitest';
 
 const TEMPLATE_FIELD_KEY = 'output.template_id';
 
+/**
+ * R-85 P1 重命名前的旧枚举值。它们已不在 `TEMPLATE_ID_VALUES` 里，
+ * 任何测试再引用它们都会在**运行时**被 `TemplateIdSchema` 拒成 400。
+ *
+ * 有一条断言扫全部测试文件禁它们再入 —— 见文件末尾。
+ * 那是 2026-08-29 实际撞出来的：三个集成测试带着旧值，`pnpm test`
+ * 排除 integration 文件所以 CI 全绿，真跑 `test:e2e` 时 6 条全红。
+ */
+const RETIRED_TEMPLATE_IDS = ['travel_infographic_v1', 'travel_full_plan_v1'] as const;
+
 function migrationsDirectory(): string {
   return path.join(process.cwd(), '..', '..', 'infrastructure', 'migrations');
 }
@@ -178,4 +188,75 @@ describe('模板样式目录与代码枚举一致', () => {
 
     expect(missing, '这些示例图不存在').toEqual([]);
   });
+
+  it('测试与脚本不得在请求体里引用已退役的模板枚举值', () => {
+    /*
+     * `travel_infographic_v1` / `travel_full_plan_v1` 是 R-85 P1 重命名前的
+     * 旧值，已不在 `TEMPLATE_ID_VALUES` 里。**请求体**再引用它们的后果
+     * 不是编译错（请求体多为 `Record<string, unknown>`，类型系统抓不住），
+     * 而是运行时被 `TemplateIdSchema` 拒成 400 —— 且 `pnpm test` 排除
+     * integration 文件，于是 CI 全绿、真跑 `test:e2e` 时整组红。
+     * 2026-08-29 实际撞到过一次（pipeline.integration 6 条全红）。
+     *
+     * **只抓请求体形态**：`output_preferences` 块里出现旧 `template_id`。
+     * 其他形态合法且必须保留 —— 模拟历史落库行的 INSERT、草稿里故意放
+     * 退役 ID 验回退的用例，都不是违例。全文件禁会让这些用例反过来
+     * 成为误报，而误报的守卫会被人删掉。
+     */
+    const repoRoot = path.join(process.cwd(), '..', '..');
+    const scanDirs = [
+      path.join(repoRoot, 'apps'),
+      path.join(repoRoot, 'packages'),
+      path.join(repoRoot, 'tools'),
+    ];
+    const offenders: string[] = [];
+    let scanned = 0;
+
+    for (const dir of scanDirs) {
+      for (const file of walkFiles(dir)) {
+        if (!/\.(ts|tsx|mjs)$/.test(file)) continue;
+        const source = readFileSync(file, 'utf8');
+        /* 先剔注释：说明历史的注释引用旧值不违例 */
+        const code = source
+          .replaceAll(/\/\*[\s\S]*?\*\//g, '')
+          .replaceAll(/^\s*\/\/[^\n]*/gm, '');
+        for (const retired of RETIRED_TEMPLATE_IDS) {
+          /*
+           * `[^]` 匹配任意字符（含换行）、`[ \t]*` 匹配空白 —— 两者都不含
+           * 反斜杠，否则 `no-windows-path-separator` 规则会把正则里的
+           * `\\s` 当成硬编码路径分隔符报错。
+           */
+          const pattern = new RegExp(
+            `output_preferences[^]{0,400}template_id:[ \t]*'${retired}'`,
+          );
+          if (pattern.test(code)) {
+            offenders.push(`${path.relative(repoRoot, file)}: '${retired}'`);
+          }
+        }
+        scanned += 1;
+      }
+    }
+
+    /* 非空守卫：目录扫不到文件时上面的循环空转，同样是绿的 */
+    expect(scanned, '一个文件也没扫到，扫描目录可能已失效').toBeGreaterThan(50);
+    expect(offenders, '这些文件的请求体仍引用已退役的模板枚举值').toEqual([]);
+  });
 });
+
+/** 递归列出目录下的全部文件。node_modules 跳过 */
+function walkFiles(dir: string): string[] {
+  const out: string[] = [];
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.next') continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkFiles(full));
+    else if (entry.isFile()) out.push(full);
+  }
+  return out;
+}

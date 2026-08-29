@@ -246,7 +246,7 @@ describeShutdown('L-10 / 门禁 #34：优雅停机（集成，仅 Linux）', () 
         custom_requirements: { raw_text: '停机测试' },
         output_preferences: {
           language: 'zh-CN',
-          template_id: 'travel_infographic_v1',
+          template_id: 'ink_paper_v1',
           generate_png: false,
           generate_pdf: false,
         },
