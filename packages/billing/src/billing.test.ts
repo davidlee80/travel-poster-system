@@ -18,7 +18,7 @@ import {
   type PriceBook,
   type PriceItem,
 } from './price-book.js';
-import { DEFAULT_JOB_LIMITS, estimateExportCost, estimateJobCost } from './estimate.js';
+import { DEFAULT_JOB_LIMITS, estimateExportCost, estimateJobCost, estimateUsage } from './estimate.js';
 import { UsageMeter, priceUsage } from './usage.js';
 
 /**
@@ -119,6 +119,40 @@ describe('单价查找与兜底', () => {
 });
 
 describe('用量 × 单价', () => {
+  it('渲染页计量固定为 N+1，与样式模板无关（R-85 P3 计费 B3）', () => {
+    /*
+     * `renderPages` 进用量计量（UsageMeter → settle），而计量必须与模板无关：
+     * 一个计划永远是「完整版 1 页 + 每日各 1 页」，模板只改版式不改页数。
+     *
+     * 模板维度若进计量，会在用户账单上留下一个他无法控制的变量 ——
+     * 与「模板不参与定价」的产品决策矛盾。这条把 N+1 钉住。
+     */
+    for (const days of [1, 3, 7, 14]) {
+      const usage = estimateUsage(days, 'gpt-x', DEFAULT_JOB_LIMITS);
+      expect(usage.renderPages, `${days} 天的渲染页数`).toBe(1 + days);
+    }
+  });
+
+  it('估算函数签名不含模板参数（R-85 P3 计费 B1/B3）', () => {
+    /*
+     * `.length` 是形参个数。将来有人为「按模板差异化定价」给函数加
+     * `templateId` 形参时，这条会红 —— 那是**有意提醒**：加模板维度
+     * 是产品决策变更，不是技术小改。
+     *
+     * 对 `estimateUsage` 这已经够用（三个位置参数）。但对 `estimateJobCost`
+     * 这类**对象参数**函数，往对象里加一个键不会改变 `.length` ——
+     * 因此下面另有一条确定性断言互补。
+     */
+    expect(estimateUsage.length, 'estimateUsage 只收 (totalDays, model, limits)').toBe(3);
+    expect(estimateJobCost.length, 'estimateJobCost 只收一个对象参数').toBe(1);
+  });
+
+  it('同一入参报价确定（无模板维度可以扰动）', () => {
+    const input = { totalDays: 5, model: 'gpt-x', book: BOOK, limits: DEFAULT_JOB_LIMITS };
+    const first = estimateJobCost(input);
+    const second = estimateJobCost(input);
+    expect(second).toEqual(first);
+  });
   it('token 按每百万计，向上取整', () => {
     const price = item('llm.in:x', 'PER_MILLION_TOKENS', 10_000);
     expect(amountFor(price, 1_000_000)).toBe(10_000);

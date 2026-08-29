@@ -85,6 +85,27 @@ function makeService(options: { readonly priceCacheMs?: number } = {}): {
 }
 
 describe('CreditsService 报价', () => {
+  it('报价与 checkJob 签名不含模板参数（R-85 P3 计费 B1）', () => {
+    /*
+     * `.length` 是形参个数。将来有人为「按模板差异化定价」给这两个方法
+     * 加 `templateId` 形参时，这条会红 —— 那是**有意提醒**：
+     * 加模板维度是产品决策变更，不是技术小改。
+     *
+     * 模板不参与定价是机制基础：生成计费只按天数与模型估算，
+     * 两个计费点都不读 `template_id`（见方案第五节）。
+     */
+    const { service } = makeService();
+    expect(service.quote.length, 'quote 只收 totalDays').toBe(1);
+    expect(service.checkJob.length, 'checkJob 只收 (userId, totalDays) 对象').toBe(1);
+  });
+
+  it('同一入参报价确定（无模板维度可以扰动）', async () => {
+    const { service } = makeService();
+    const first = await service.quote(5);
+    const second = await service.quote(5);
+    expect(second).toEqual(first);
+  });
+
   it('预留额 = 典型值 × buffer，且上界严格大于典型值', async () => {
     /*
      * 这两条数量关系是「预留取典型值」那个决定的全部内容（docs 第四节）：
@@ -286,6 +307,42 @@ describe('CreditsService 注册赠送（C-5）', () => {
 });
 
 describe('CreditsService 导出扣费', () => {
+  it('chargeExport 签名不含模板参数（R-85 P3 计费 B2）', () => {
+    /*
+     * 导出的定价是固定 SKU（export.png / export.pdf），与内容、页数、
+     * 模板完全无关。`.length` 把「入参没有 templateId」钉住 ——
+     * 将来有人为按模板差异化定价加参数时，这条会红。
+     */
+    const { service } = makeService();
+    expect(service.chargeExport.length, 'chargeExport 只收一个对象参数').toBe(1);
+  });
+
+  it('同一格式重复导出扣费相同（扣费与模板等外部因素无关）', async () => {
+    /*
+     * 行为层面的互补断言：chargeExport 的入参里根本没有模板位，
+     * 两次相同格式的扣费必然相等 —— 这条把「无模板维度」从签名层面
+     * 落到账单层面。
+     */
+    const { service, wallet } = makeService();
+    wallet.seed('u1', 500);
+
+    const first = await service.chargeExport({
+      userId: 'u1',
+      exportId: 'e1',
+      format: 'PNG',
+      exportIdempotencyKey: 'k1',
+    });
+    const second = await service.chargeExport({
+      userId: 'u1',
+      exportId: 'e2',
+      format: 'PNG',
+      exportIdempotencyKey: 'k2',
+    });
+
+    expect(second).toEqual(first);
+    expect((await service.balance('u1')).balanceCr).toBe(500 - 50 - 50);
+  });
+
   it('按格式扣对应的固定价', async () => {
     const { service, wallet } = makeService();
     wallet.seed('u1', 500);

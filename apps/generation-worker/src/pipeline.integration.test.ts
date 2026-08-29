@@ -734,13 +734,18 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     expect(count.rows[0]!.count).toBe('1');
   });
 
-  it('显式指定第二套套件：提交 → 生成 → 落库全部是 blueprint_v1（R-85 P3）', async () => {
+  it('显式指定第二套套件：提交 → 生成 → 落库全部是 blueprint_v1（R-85 P3，兼计费 B4）', async () => {
     /*
      * P3 的端到端：用户选了非默认套件后，模板 ID 必须从请求一路传到落库。
      *
      * 这条不在默认路径（ink_paper_v1）覆盖范围内 —— 默认值在 schema 层就填了，
      * 显式传另一个值才真正验「output_preferences 被消费」。
      * 若不消费：落库全是默认套件，而任务 COMPLETED —— 没有报错。
+     *
+     * **本用例提交时不带任何会话 Cookie（匿名身份），因此它同时是计费计划
+     * B4 的覆盖**：匿名豁免 × 模板两个维度正交 —— 匿名用户选非默认套件
+     * 照常生成，不因任何计费交互失败。计费端点对匿名的拒绝（403）
+     * 由 credits.test.ts 的既有用例覆盖。
      */
     const created = await app.inject({
       method: 'POST',
