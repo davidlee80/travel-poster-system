@@ -1,6 +1,7 @@
 import { MUST_BY_DEFAULT_DOMAINS } from '@tps/presentation';
 import {
   CURRENCY_VALUES,
+  TEMPLATE_ID_VALUES,
   TRAVEL_TIER_VALUES,
   TravelRequestUISchema,
   conditionDomain,
@@ -169,6 +170,49 @@ describe('产出的请求体能通过契约', () => {
     const body = buildPlannerRequest(stateWith(COMPLETE), OPTIONS);
     expect(body.planner_profile).toBeDefined();
     expect(body.conditions?.length ?? 0).toBeGreaterThan(0);
+  });
+});
+
+describe('输出样式套件（R-85 P3）', () => {
+  it('没选时整个 output_preferences 键不出现', () => {
+    /*
+     * **不是 `{}` 也不是 `{ template_id: null }`。**
+     *
+     * 契约那边是 `template_id: TemplateIdSchema.default(TEMPLATE_ID_VALUES[0])`
+     * 加整块 `.prefault({})`，因此键缺失时后端自动补默认套件；
+     * 而传 `null` 会被 `z.enum` 拒成 REQ_SCHEMA_INVALID —— 那个错误用户
+     * 看不懂，且只在「没选样式」时出现，而那是最常见的情形。
+     *
+     * 用 `toBeUndefined` 而不是 `toEqual({})`：后者对两种错法（发了空对象、
+     * 发了 null）都会红得不够精确。
+     */
+    const body = buildPlannerRequest(stateWith(COMPLETE), OPTIONS);
+    expect(body.output_preferences).toBeUndefined();
+    expect(Object.keys(body)).not.toContain('output_preferences');
+  });
+
+  it('选了套件时发出它，且不碰其他字段', () => {
+    const picked = 'blueprint_v1';
+    const body = buildPlannerRequest(
+      { ...stateWith(COMPLETE), templateId: picked },
+      OPTIONS,
+    );
+
+    expect(body.output_preferences?.template_id).toBe(picked);
+    /* 模板不属于旅行画像 —— 它不得渗进 `planner_profile` */
+    expect(JSON.stringify(body.planner_profile)).not.toContain(picked);
+  });
+
+  it('选默认那一套也显式发出 —— 与「没选」不同', () => {
+    /*
+     * 两者今天等价，但默认套件将来会换 —— 那时「我当初没选」应该跟着换，
+     * 而「我当初选了水墨纸本」不应该。因此这两种状态必须在载荷上可区分。
+     */
+    const body = buildPlannerRequest(
+      { ...stateWith(COMPLETE), templateId: TEMPLATE_ID_VALUES[0] },
+      OPTIONS,
+    );
+    expect(body.output_preferences?.template_id).toBe(TEMPLATE_ID_VALUES[0]);
   });
 });
 

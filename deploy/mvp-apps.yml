@@ -153,6 +153,12 @@ services:
       S3_ENDPOINT: http://minio:9000
       # 渲染路由在 web 上，不在 api 上（17.1）。方向与 INTERNAL_API_BASE 相反
       RENDER_BASE_URL: http://web:3000
+      #
+      # view_model 里的素材 URL 是 localhost:9000（写入时用浏览器可解析的地址，
+      # 已永久保存），渲染容器里的 Chromium 却把 localhost 解析为它自己。
+      # 这条规则让 Chromium 把 localhost 解析成 minio 服务（见 browser.ts
+      # 的 chromiumArgs）。生产不设：不存在这个分裂。
+      CHROMIUM_HOST_RESOLVER_RULES: MAP localhost minio
     # 22.3.2 / L-07：/dev/shm 默认 64MB，Chromium 会崩，且崩出来的错误
     # （"Target closed"）与内存不足的表现一样，两者都会让人先去查错的地方
     shm_size: 1gb

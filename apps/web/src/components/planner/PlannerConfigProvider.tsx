@@ -2,9 +2,14 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
+import { TEMPLATE_ID_VALUES, type TemplateId } from '@tps/schemas';
+
 import { optionLabel } from '@/lib/planner/field-spec';
 import type { OptionTarget } from '@/lib/planner/config-binding';
 import { getPlannerConfig, type PlannerConfigResponse } from '@/lib/api-client';
+
+/** 模板目录在配置中心的 field_key。与迁移 0017 里的值必须一致 */
+const TEMPLATE_FIELD_KEY = 'output.template_id';
 
 /**
  * 配置中心在前端的落点。
@@ -113,6 +118,64 @@ export function usePlannerOptionResolver(): (target: OptionTarget) => ResolvedOp
         labelOf: (value) => labels.get(value) ?? fallbackLabel(value),
       };
     };
+  }, [config]);
+}
+
+export interface TemplateOption {
+  readonly templateId: TemplateId;
+  readonly label: string;
+  readonly previewImage: string;
+}
+
+/**
+ * 样式套件选项（R-85 P3）。
+ *
+ * ## 为何不用 `usePlannerOptionResolver`
+ *
+ * 那个解析器返回 `{ values, labelOf }` —— 它**丢掉 `metadata`**，
+ * 而示例图地址就在 `metadata.preview_image` 里。改那个出口的形状会让
+ * 60 多个调用点都拿到一个它们不用的字段。
+ *
+ * ## 缺任何一个必需项就丢掉那一行
+ *
+ * 不回退到硬编码列表（与 `usePlannerOptionResolver` 的情形 1/2 不同）：
+ * 那个解析器服务的是问卷字段，回退后页面仍能填；而这里回退的后果是
+ * 渲出一张不存在的图 —— 用户看到碎图标，而那看起来像「这个样式坏了」。
+ * 宁可整个选择器不渲（用户拿默认套件，与加这个功能之前一样）。
+ *
+ * ## 还要对枚举交一次
+ *
+ * 配置里可能有一个代码不认的 ID（新套件先发了配置、前端还没上线）。
+ * 渲它的后果是用户选得中、提交被 `z.enum` 拒 —— 而那时错误指向 schema
+ * 而不指向配置。这一条与 `template-catalog-coverage.test.ts` 的反向断言同源，
+ * 但那条守的是仓内一致性，这里守的是运行时两边部署不同步。
+ */
+export function useTemplateOptions(): readonly TemplateOption[] {
+  const config = useContext(PlannerConfigContext);
+
+  return useMemo(() => {
+    const published = config?.fields[TEMPLATE_FIELD_KEY];
+    if (published === undefined) return [];
+
+    const known = new Set<string>(TEMPLATE_ID_VALUES);
+    const out: TemplateOption[] = [];
+
+    for (const option of published) {
+      if (!known.has(option.key)) continue;
+
+      const preview = option.metadata['preview_image'];
+      if (typeof preview !== 'string' || preview.length === 0) continue;
+
+      out.push({
+        templateId: option.key as TemplateId,
+        /* 配置没给文案时用 ID 顶上 —— 丑，但比整张卡片消失强；
+           而「文案不能等于 ID」由仓内门禁守着 */
+        label: option.label.length > 0 ? option.label : option.key,
+        previewImage: preview,
+      });
+    }
+
+    return out;
   }, [config]);
 }
 

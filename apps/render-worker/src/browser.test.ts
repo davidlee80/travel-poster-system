@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { chromiumArgs, checkDevShm, DEVICE_SCALE_FACTOR, RENDER_VIEWPORT } from './browser.js';
 
@@ -44,6 +44,34 @@ describe('Chromium 启动参数（TP-1-19）', () => {
     const args = chromiumArgs(noFallback);
     expect(args).toContain('--disable-background-timer-throttling');
     expect(args).toContain('--disable-renderer-backgrounding');
+  });
+
+  describe('CHROMIUM_HOST_RESOLVER_RULES（R-85 P3）', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('环境变量未设时不带 host 重写', () => {
+      /*
+       * 生产不设这个变量（生产上 MinIO 在独立子域，写入与取回用同一个
+       * 可解析域名）。默认分支必须干净 —— 若误带上重写规则，
+       * 生产渲染会把页面里对任意主机的请求都改写，而那种回归 CI 不会报。
+       */
+      vi.stubEnv('CHROMIUM_HOST_RESOLVER_RULES', '');
+      const args = chromiumArgs(noFallback);
+      expect(args.some((arg) => arg.startsWith('--host-resolver-rules'))).toBe(false);
+    });
+
+    it('环境变量设置时带 host 重写', () => {
+      /*
+       * 本地编排的素材 URL 是 localhost:9000（写入时用浏览器可解析的地址），
+       * 渲染容器里的 Chromium 却把 localhost 解析为它自己。这条规则让
+       * Chromium 把 localhost 解析成 minio 服务。删掉它的后果是导出
+       * 仍 COMPLETED，但产物里 21 张素材全是占位图（已实际撞到）。
+       */
+      vi.stubEnv('CHROMIUM_HOST_RESOLVER_RULES', 'MAP localhost minio');
+      expect(chromiumArgs(noFallback)).toContain('--host-resolver-rules=MAP localhost minio');
+    });
   });
 });
 

@@ -10,7 +10,8 @@
     "test": "vitest run",
     "start": "node --enable-source-maps dist/main.js",
     "clean": "rimraf dist .turbo *.tsbuildinfo",
-    "render:fixture": "node --enable-source-maps dist/cli.js"
+    "render:fixture": "node --enable-source-maps dist/cli.js",
+    "previews": "node tools/make-template-previews.mjs"
   },
   "dependencies": {
     "@tps/db": "workspace:*",

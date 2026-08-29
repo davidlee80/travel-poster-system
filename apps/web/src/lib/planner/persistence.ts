@@ -1,4 +1,10 @@
-import { PLANNER_STEP_IDS, type PlannerFieldId, type PlannerStepId } from '@tps/schemas';
+import {
+  PLANNER_STEP_IDS,
+  TEMPLATE_ID_VALUES,
+  type PlannerFieldId,
+  type PlannerStepId,
+  type TemplateId,
+} from '@tps/schemas';
 
 import { INITIAL_PLANNER_STATE, type PlannerState } from './state';
 
@@ -43,6 +49,17 @@ interface StoredDraft {
   readonly touched: readonly string[];
   readonly optIns: readonly string[];
   readonly activeStep: string;
+  /**
+   * 选中的样式套件（R-85 P3）。
+   *
+   * **加它不需要升 `DRAFT_VERSION`。** 那个版本号的规则是「改答案树的
+   * 形状就要 +1」，而这个字段在 `answers` 之外；且 `loadDraft` 以
+   * `...INITIAL_PLANNER_STATE` 打底再逐字段覆盖，因此旧草稿缺这个键时
+   * 自动落到 `null`（= 用默认套件），不会报错也不会作废整份草稿。
+   *
+   * 升版反而有害：那会让所有人的九步草稿因为多了一个可选字段而作废。
+   */
+  readonly templateId: string | null;
 }
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
@@ -79,6 +96,7 @@ export function saveDraft(state: PlannerState, now: string): boolean {
     touched: state.touched,
     optIns: state.optIns,
     activeStep: state.activeStep,
+    templateId: state.templateId,
   };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
@@ -134,12 +152,31 @@ export function loadDraft(): PlannerState | null {
       ? (draft.activeStep as PlannerStepId)
       : '01';
 
+  /*
+   * 样式套件要**对当前枚举验一次**（R-85 P3），不能直接 `as TemplateId`。
+   *
+   * 草稿存在浏览器里能活很久，而套件会重命名（`travel_infographic_v1`
+   * → `ink_paper_v1` 就发生过）或下架。直接断言的后果是一个已退役的 ID
+   * 一路送到请求里，被 `z.enum` 拒成 REQ_SCHEMA_INVALID —— 而用户只是
+   * 接着填上周的草稿，屏幕上没有任何地方提示他选过一个已不存在的样式。
+   *
+   * 验不过就回退到 `null`（用默认套件），而不是作废整份草稿 ——
+   * 与上面不跑 `PlannerProfileSchema.safeParse` 同一条理由：
+   * 一个选项失效不应该让用户丢掉十几分钟输入。
+   */
+  const templateIds: readonly string[] = TEMPLATE_ID_VALUES;
+  const templateId =
+    typeof draft.templateId === 'string' && templateIds.includes(draft.templateId)
+      ? (draft.templateId as TemplateId)
+      : null;
+
   return {
     ...INITIAL_PLANNER_STATE,
     answers: migrateAnswers(draft.answers, draft.version),
     touched: (Array.isArray(draft.touched) ? draft.touched : []) as readonly PlannerFieldId[],
     optIns: (Array.isArray(draft.optIns) ? draft.optIns : []) as readonly PlannerFieldId[],
     activeStep,
+    templateId,
   };
 }
 

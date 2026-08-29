@@ -2505,3 +2505,111 @@
     transform: rotate(90deg);
   }
 }
+
+/* ── 输出样式选择器（R-85 P3，第 9 步）───────────────────── */
+
+/*
+ * 类名一律以 `.planner` 开头 —— `tools/scan-css-scope.mjs` 要求本文件的
+ * 每个选择器都以这个前缀开头，否则规划器的样式会泄到 `/render/**`
+ * （那条路由渲的是导出产物，多一条全局规则就会改变已入库的视觉基线）。
+ */
+
+.planner-template-picker {
+  margin: 24px 0 8px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.planner-template-picker__title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.planner-template-picker__hint {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.planner-template-picker__list {
+  display: grid;
+  /*
+   * `auto-fill` + `minmax` 而不是固定列数：套件数量会增长（现在 2 套），
+   * 而固定列数在加到第 5 套时会挤成一行不可读。
+   */
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.planner-template-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.planner-template-card:hover {
+  border-color: var(--muted);
+}
+
+/*
+ * 选中态用 `data-active` 而不是 `:focus` —— 焦点会随 Tab 移走，
+ * 而选中状态必须在焦点离开后仍然可见。
+ */
+.planner-template-card[data-active='true'] {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.planner-template-card__image {
+  display: block;
+  width: 100%;
+  /*
+   * 示例图是整张日页长图的缩略（宽 400px，高随套件不同：916 / 569）。
+   *
+   * **高度按宽高比给而不是定值。** 第一版写 `height: 180px` +
+   * `object-fit: cover`，人工验证时发现那把长图压成一条色带 ——
+   * 两张卡片看起来只是「绿色块」与「蓝色块」，而两套样式真正的差异
+   * （编号区块 vs 大标题、表格行 vs 卡片流、4 列 vs 3 列图卡）
+   * 全在被裁掉的那部分里。选样式的人看不出差别，那这个选择器就没有意义。
+   *
+   * `3 / 4` 是取舍：整张图约 1:2.3，完整显示会让卡片高得离谱（一屏放不下
+   * 两张）；而 3:4 能露出标题栏 + 头两个区块，足够分辨版式取向。
+   */
+  aspect-ratio: 3 / 4;
+  border-radius: 8px;
+  object-fit: cover;
+  /* 取顶部而不是居中：顶部是标题栏与前两个区块，那一段最能体现差异 */
+  object-position: top;
+  background: var(--line);
+}
+
+.planner-template-card__label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@media (width <= 640px) {
+  .planner-template-picker__list {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+
+  .planner-template-card__image {
+    /* 窄屏卡片更窄，比例不变则高度自动跟着降，不需要另给定值 */
+    aspect-ratio: 3 / 4;
+  }
+}

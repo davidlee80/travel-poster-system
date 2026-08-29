@@ -159,22 +159,39 @@ describe('配置中心注册的条件码覆盖内置字典（陷阱 1）', () =>
     expect(v3).toContain('publish_planner_config(3)');
   });
 
-  it('0012 之后每一行都显式标注了 value_kind', () => {
+  it('0012 之后每一条 INSERT 都显式标注了 value_kind', () => {
     /*
      * 这一条盯的是「新增一条 INSERT 但忘了写 metadata」。
      *
      * 忘了写的后果不是报错而是**静默走后缀回退** —— 一批新条件码落在
      * `lodging.amenities` 这种不以 tags 结尾的路径下，于是它们不进白名单，
      * 提交时被 N-08 拒，而界面上那些标签完全正常。
+     *
+     * **这条原先只读 `0012` 那一个文件**，而标题写的是「0012 之后」——
+     * 于是 0013 以后任何新增的 INSERT 都从缝里漏过去。R-85 P3 加
+     * `0017_template_catalog.sql` 时正好撞上：那条迁移若忘了 value_kind，
+     * 两个模板 ID 会因后缀回退而混进条件码白名单，而这条仍然是绿的。
+     * 现在改成扫全部 >= 0012 的迁移。
      */
-    const sql = readFileSync(
-      path.join(migrationsDirectory(), '0012_planner_config_all_options.sql'),
-      'utf8',
-    );
-    const blocks = sql.split('INSERT INTO planner_config_options').slice(1);
-    expect(blocks.length).toBeGreaterThan(0);
-    for (const block of blocks) {
-      expect(block).toMatch(/"value_kind"\s*:\s*"(ENUM|CONDITION_CODE)"/);
+    const dir = migrationsDirectory();
+    const files = readdirSync(dir)
+      .filter((name) => name.endsWith('.sql'))
+      /* 字典序对零填充的编号成立：'0012' <= '0017' */
+      .filter((name) => name >= '0012')
+      .sort();
+
+    let checked = 0;
+    for (const file of files) {
+      const sql = readFileSync(path.join(dir, file), 'utf8');
+      for (const block of sql.split('INSERT INTO planner_config_options').slice(1)) {
+        expect(block, `${file} 里有一条 INSERT 没标 value_kind`).toMatch(
+          /"value_kind"\s*:\s*"(ENUM|CONDITION_CODE)"/,
+        );
+        checked += 1;
+      }
     }
+
+    /* 文件名筛选写错时 checked 会是 0，而上面的循环一次也不跑 —— 那同样是绿的 */
+    expect(checked, '一条 INSERT 也没扫到，筛选条件可能已失效').toBeGreaterThan(0);
   });
 });

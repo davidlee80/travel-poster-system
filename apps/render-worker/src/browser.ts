@@ -119,6 +119,26 @@ export function chromiumArgs(devShm: DevShmStatus): string[] {
 
   if (devShm.needsFallback) args.push('--disable-dev-shm-usage');
 
+  /*
+   * 素材地址的主机名重写（本地编排用）。
+   *
+   * 生成时 `S3_PUBLIC_BASE_URL` 会写进 view_model 并永久保存，而那个值
+   * 必须是**浏览器可解析**的地址 —— 本地是 `http://localhost:9000`
+   * （compose 把 9000 发布到了宿主）。但渲染容器里的 Chromium 解析
+   * `localhost` 得到的是**它自己**，于是页面里的素材图一张也加载不到。
+   *
+   * `--host-resolver-rules=MAP localhost minio` 让 Chromium 把 localhost
+   * 解析为 minio 服务的地址。生产不设这个变量：生产上 MinIO 在独立子域，
+   * 写入与取回用同一个可解析域名，不存在这个分裂。
+   *
+   * 只影响 Chromium 的 DNS，不影响 Node 侧 fetch —— 因此 RENDER_BASE_URL
+   * （http://web:3000，服务名）不受影响。
+   */
+  const hostRules = process.env['CHROMIUM_HOST_RESOLVER_RULES'];
+  if (hostRules !== undefined && hostRules.length > 0) {
+    args.push(`--host-resolver-rules=${hostRules}`);
+  }
+
   return args;
 }
 

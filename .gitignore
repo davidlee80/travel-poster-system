@@ -31,6 +31,7 @@ playwright-report/
 /tmp/
 /.tmp/
 /out-fixtures/
+/out-blueprint/
 
 # 编辑器与操作系统
 .vscode/*

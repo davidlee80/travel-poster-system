@@ -4,6 +4,7 @@ import {
   type PlannerFieldId,
   type PlannerProfileInput,
   type PlannerStepId,
+  type TemplateId,
 } from '@tps/schemas';
 
 /**
@@ -58,6 +59,18 @@ export interface PlannerState {
   readonly optIns: readonly PlannerFieldId[];
   /** 当前步骤。分页显示，一次只渲染一个 */
   readonly activeStep: PlannerStepId;
+  /**
+   * 用户选的输出样式套件（R-85 P3）。`null` = 没选，走服务端默认。
+   *
+   * **不在 `answers` 里。** `answers` 的形状与契约的 `planner_profile` 逐字相同，
+   * 而模板不属于旅行画像 —— 它在请求里走 `output_preferences`，
+   * 是输出偏好而不是行程输入。塞进 `answers` 会让它跟着 76 字段一起
+   * 发到 `planner_profile` 里，而那个字段后端不认。
+   *
+   * 也不进 `touched`：那张表的元素是 76 个 `PlannerFieldId` 字面量，
+   * 而「没选」与「选了默认那一个」在这里本来就可区分（`null` vs 字符串）。
+   */
+  readonly templateId: TemplateId | null;
   /** Dev Mode：显示 Field ID / API Key / 运行时类型 / 触发来源（规范 21.1） */
   readonly devMode: boolean;
 }
@@ -67,6 +80,7 @@ export const INITIAL_PLANNER_STATE: PlannerState = {
   touched: [],
   optIns: [],
   activeStep: '01',
+  templateId: null,
   devMode: false,
 };
 
@@ -143,6 +157,8 @@ export type PlannerAction =
   /** 用户主动展开/收起一个「或用户主动开启」的分支 */
   | { readonly type: 'toggleOptIn'; readonly fieldId: PlannerFieldId }
   | { readonly type: 'goToStep'; readonly step: PlannerStepId }
+  /** 选输出样式套件（R-85 P3）。`null` = 改回「用默认」 */
+  | { readonly type: 'setTemplate'; readonly templateId: TemplateId | null }
   | { readonly type: 'setDevMode'; readonly on: boolean }
   /** 草稿恢复。整体替换而不是逐字段回放 —— 回放会让 touched 记账失真 */
   | { readonly type: 'restore'; readonly state: PlannerState }
@@ -200,6 +216,9 @@ export function plannerReducer(state: PlannerState, action: PlannerAction): Plan
 
     case 'goToStep':
       return { ...state, activeStep: action.step };
+
+    case 'setTemplate':
+      return { ...state, templateId: action.templateId };
 
     case 'setDevMode':
       return { ...state, devMode: action.on };

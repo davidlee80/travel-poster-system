@@ -38,6 +38,15 @@ export interface StepPageProps {
   readonly registerField: (fieldId: PlannerFieldId, node: HTMLElement | null) => void;
   /** 某些字段的内容由本步骤的专用面板承载（第 9 步的复核面板与阻塞项列表） */
   readonly slots?: Partial<Record<PlannerFieldId, React.ReactNode>>;
+  /**
+   * 字段区块之后、底部动作区之前的内容（第 9 步的输出样式选择器）。
+   *
+   * 与 `slots` 分开是因为 `slots` 的键是 `PlannerFieldId` ——
+   * 而这里要放的东西没有对应字段（模板不在 76 字段里）。
+   * 与 `actions` 分开是因为后者在 `planner-actions__right` 里，
+   * 那是一排按钮的位置，放不下一组带图的卡片。
+   */
+  readonly beforeActions?: React.ReactNode;
   /** 底部动作区右侧的额外内容（第 9 步的生成按钮） */
   readonly actions?: React.ReactNode;
 }
@@ -53,6 +62,7 @@ export function StepPage({
   nextLabel,
   registerField,
   slots,
+  beforeActions,
   actions,
 }: StepPageProps): React.ReactElement {
   const meta = PLANNER_STEPS.find((entry) => entry.step === step);
@@ -105,6 +115,8 @@ export function StepPage({
           </div>
         );
       })}
+
+      {beforeActions}
 
       <div className="planner-actions">
         <div className="planner-actions__left">

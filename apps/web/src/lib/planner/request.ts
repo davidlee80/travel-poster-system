@@ -803,6 +803,19 @@ export function buildPlannerRequest(
     conditions: [...projectConditions(answers)],
     custom_requirements: { raw_text: (answers.profile?.additional_notes ?? '').trim() },
 
+    /*
+     * 输出样式套件（R-85 P3）。**没选时整个键不出现。**
+     *
+     * 不恒发一个 `{ template_id: null }`：契约那边是
+     * `template_id: TemplateIdSchema.default(TEMPLATE_ID_VALUES[0])` 加整块
+     * `.prefault({})`，因此不传就自动拿默认套件 —— 而传 `null` 会被
+     * `z.enum` 直接拒（REQ_SCHEMA_INVALID）。
+     *
+     * 也不在这里把默认套件写成字面量：那会让「谁是默认」多一个声明处，
+     * 而两处必然漂移。默认值只在契约里声明一次。
+     */
+    ...(state.templateId === null ? {} : { output_preferences: { template_id: state.templateId } }),
+
     planner_profile: answers,
   };
 }

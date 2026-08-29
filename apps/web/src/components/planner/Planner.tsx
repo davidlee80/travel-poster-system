@@ -24,6 +24,7 @@ import { GenerationDialog } from './GenerationDialog';
 import { PrepCenter } from './PrepCenter';
 import { BlockerList, ReviewPanel } from './ReviewBoard';
 import { StepPage } from './StepPage';
+import { TemplatePicker } from './TemplatePicker';
 import { StepNav } from './shell/StepNav';
 import { SummaryRail } from './shell/SummaryRail';
 import { TopBar } from './shell/TopBar';
@@ -422,7 +423,16 @@ export function Planner(): React.ReactElement {
               onNext={nextStep === undefined ? null : () => goToStep(nextStep)}
               nextLabel={nextMeta === undefined ? null : `下一步 · ${nextMeta.nav} →`}
               registerField={registerField}
-              {...(step === '09' ? { slots: reviewSlots, actions: generateButton() } : {})}
+              {...(step === '09'
+                ? {
+                    slots: reviewSlots,
+                    /* 输出样式选择器（R-85 P3）。选项为空时它自己不渲 */
+                    beforeActions: (
+                      <TemplatePicker selected={state.templateId} dispatch={dispatch} />
+                    ),
+                    actions: generateButton(),
+                  }
+                : {})}
             />
           ))}
 
