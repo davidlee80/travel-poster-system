@@ -23,8 +23,11 @@ const TEMPLATE = TEMPLATE_ID_VALUES[0];
 describe('buildExportRequest', () => {
   const CHOICES: readonly (readonly [string, ExportChoice])[] = [
     ['完整行程 PDF', { kind: 'full-pdf' }],
+    ['完整行程 PNG', { kind: 'full-png' }],
     ['每日信息图 PDF', { kind: 'all-days-pdf' }],
+    ['全部每日 PNG', { kind: 'all-days-png' }],
     ['单日 PNG', { kind: 'single-day-png', dayNumber: 3 }],
+    ['单日 PDF', { kind: 'single-day-pdf', dayNumber: 3 }],
   ];
 
   it.each(CHOICES)('%s 的请求体通过 13.5 的 schema', (_name, choice) => {
@@ -35,7 +38,11 @@ describe('buildExportRequest', () => {
   });
 
   it('SINGLE_DAY 恰好带一天', () => {
-    const { body } = buildExportRequest({ kind: 'single-day-png', dayNumber: 7 }, VERSION_ID, TEMPLATE);
+    const { body } = buildExportRequest(
+      { kind: 'single-day-png', dayNumber: 7 },
+      VERSION_ID,
+      TEMPLATE,
+    );
     expect(body.scope).toBe('SINGLE_DAY');
     expect(body.day_numbers).toEqual([7]);
   });
@@ -45,8 +52,18 @@ describe('buildExportRequest', () => {
      * 传 `[]` 也能通过 TypeScript，但 schema 的 refine 会拒绝它 ——
      * 而那是一个静默的 400。
      */
-    expect(buildExportRequest({ kind: 'full-pdf' }, VERSION_ID, TEMPLATE).body.day_numbers).toBeNull();
-    expect(buildExportRequest({ kind: 'all-days-pdf' }, VERSION_ID, TEMPLATE).body.day_numbers).toBeNull();
+    expect(
+      buildExportRequest({ kind: 'full-pdf' }, VERSION_ID, TEMPLATE).body.day_numbers,
+    ).toBeNull();
+    expect(
+      buildExportRequest({ kind: 'full-png' }, VERSION_ID, TEMPLATE).body.day_numbers,
+    ).toBeNull();
+    expect(
+      buildExportRequest({ kind: 'all-days-pdf' }, VERSION_ID, TEMPLATE).body.day_numbers,
+    ).toBeNull();
+    expect(
+      buildExportRequest({ kind: 'all-days-png' }, VERSION_ID, TEMPLATE).body.day_numbers,
+    ).toBeNull();
   });
 
   it('三种组合用同一套样式套件（R-85）', () => {
@@ -76,11 +93,16 @@ describe('buildExportRequest', () => {
      */
     const choices: ExportChoice[] = [
       { kind: 'full-pdf' },
+      { kind: 'full-png' },
       { kind: 'all-days-pdf' },
+      { kind: 'all-days-png' },
       { kind: 'single-day-png', dayNumber: 2 },
+      { kind: 'single-day-pdf', dayNumber: 2 },
     ];
     for (const choice of choices) {
-      expect(buildExportRequest(choice, VERSION_ID, TEMPLATE).body.plan_version_id).toBe(VERSION_ID);
+      expect(buildExportRequest(choice, VERSION_ID, TEMPLATE).body.plan_version_id).toBe(
+        VERSION_ID,
+      );
     }
   });
 

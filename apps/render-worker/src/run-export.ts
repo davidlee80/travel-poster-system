@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
 import type { ExportJobRow, ExportsRepository, PresentationsRepository } from '@tps/db';
-import { ExportArtifactSchema, EXPORT_URL_TTL_SECONDS, type ExportArtifact } from '@tps/schemas';
+import {
+  ExportArtifactSchema,
+  EXPORT_URL_TTL_SECONDS,
+  type ExportArtifact,
+  type ExportArtifactFormat,
+} from '@tps/schemas';
 import { RENDER_PAGE_KEYS, issueRenderToken, type Logger } from '@tps/shared';
 import {
   exportFileName,
@@ -13,6 +18,7 @@ import type { Browser, BrowserContext } from 'playwright-core';
 
 import type { ExportBilling } from './billing.js';
 import { createRenderContext } from './browser.js';
+import { buildDailyPngZip } from './daily-png-zip.js';
 import { capturePdf, mergePdfs } from './pdf.js';
 import { capturePng } from './png.js';
 import { recordRenderFailure, recordRenderQuality } from './render-metrics.js';
@@ -37,6 +43,7 @@ import { renderPage } from './render-page.js';
  * PDF + SINGLE_DAY   1 个单页 PDF
  * PDF + ALL_DAYS     **1 个 N 页 PDF**（不是 N 个文件）
  * PDF + FULL_PLAN    1 个多页 PDF
+ * PNG + ALL_DAYS     还会附加 1 个 ZIP，供浏览器一键下载全部每日图
  * ```
  *
  * ## PARTIAL 的判定（13.6）
@@ -374,10 +381,13 @@ async function upload(
    * 合并而不是返回 N 个 PDF —— 用户要的是一份能打印的行程，
    * 而 14 个单页 PDF 需要他自己按文件名排序再合并。
    */
-  if (format === 'PDF' && captured.length > 1) {
+  if (format === 'PDF' && scope === 'ALL_DAYS') {
     const ordered = [...captured].sort((a, b) => (a.dayNumber ?? 0) - (b.dayNumber ?? 0));
-    const merged = await mergePdfs(ordered.map((item) => Buffer.from(item.bytes)));
-    return [await putOne(deps, space, exportId, format, scope, null, merged, contentType)];
+    const combined =
+      ordered.length === 1
+        ? ordered[0]!.bytes
+        : await mergePdfs(ordered.map((item) => Buffer.from(item.bytes)));
+    return [await putOne(deps, space, exportId, format, scope, null, combined, contentType)];
   }
 
   const ordered = [...captured].sort((a, b) => (a.dayNumber ?? 0) - (b.dayNumber ?? 0));
@@ -387,6 +397,13 @@ async function upload(
       await putOne(deps, space, exportId, format, scope, item.dayNumber, item.bytes, contentType),
     );
   }
+
+  if (format === 'PNG' && scope === 'ALL_DAYS') {
+    const archive = buildDailyPngZip(ordered);
+    artifacts.push(
+      await putOne(deps, space, exportId, 'ZIP', scope, null, archive, 'application/zip'),
+    );
+  }
   return artifacts;
 }
 
@@ -394,7 +411,7 @@ async function putOne(
   deps: RunExportDeps,
   space: ContentSpace,
   exportId: string,
-  format: 'PNG' | 'PDF',
+  format: ExportArtifactFormat,
   scope: 'ALL_DAYS' | 'SINGLE_DAY' | 'FULL_PLAN',
   dayNumber: number | null,
   bytes: Uint8Array,

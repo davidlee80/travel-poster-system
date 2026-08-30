@@ -48,6 +48,7 @@ export {
   createExportsRepository,
   type CreateExportInput,
   type ExportJobRow,
+  type ExportDownloadRow,
   type ExportRow,
   type ExportsRepository,
   type FinishExportInput,

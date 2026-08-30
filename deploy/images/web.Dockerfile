@@ -24,10 +24,14 @@ RUN mkdir -p /manifests \
 
 FROM node:24-bookworm-slim AS build
 
+ARG NPM_REGISTRY=https://registry.npmjs.org
+
 ENV PNPM_HOME=/pnpm
 ENV PATH="$PNPM_HOME:$PATH"
 ENV CI=true
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV COREPACK_NPM_REGISTRY=${NPM_REGISTRY}
+ENV npm_config_registry=${NPM_REGISTRY}
 RUN corepack enable
 
 WORKDIR /repo

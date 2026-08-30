@@ -46,7 +46,12 @@
 | 方法与路径                                   | 责任                 | 返回/注意点                             |
 | -------------------------------------------- | -------------------- | --------------------------------------- |
 | `POST /api/v1/travel-plans/:plan_id/exports` | 创建导出任务         | 201；幂等命中/并发竞态时 200 返回原任务 |
+| `GET /api/v1/travel-plans/:plan_id/exports`  | 查询计划的导出历史   | 刷新结果页后恢复进行中与已完成任务      |
 | `GET /api/v1/exports/:export_id`             | 查询结果并签下载 URL | 只按数据库归属授权；完成文件 URL 可重签 |
+
+导出详情的 `files[].file_name` 是后端生成的纯 ASCII 拼音文件名；预签名下载响应
+携带 `Content-Disposition: attachment`。`PNG + ALL_DAYS` 返回逐日 PNG，并附加
+一个 ZIP 合集供一键下载。导出终态为 `COMPLETED/PARTIAL/FAILED`。
 
 ### CR 钱包（仅计费开关打开时注册）
 

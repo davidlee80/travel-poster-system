@@ -72,6 +72,14 @@ export interface ExportJobRow extends ExportRow {
   readonly planVersionCreatedAt: Date;
 }
 
+/** API 下载与历史列表需要的稳定命名上下文。 */
+export interface ExportDownloadRow extends ExportRow {
+  readonly destinationName: string;
+  readonly startDate: string;
+  readonly totalDays: number;
+  readonly versionNumber: number;
+}
+
 export interface FinishExportInput {
   readonly exportId: string;
   readonly status: 'COMPLETED' | 'PARTIAL' | 'FAILED';
@@ -86,7 +94,9 @@ export interface ExportsRepository {
   create(input: CreateExportInput): Promise<ExportRow>;
   findByIdempotencyKey(key: string): Promise<ExportRow | null>;
   /** 13.6：**必须带 `user_id` 谓词**（13.0） */
-  findForUser(exportId: string, userId: string): Promise<ExportRow | null>;
+  findForUser(exportId: string, userId: string): Promise<ExportDownloadRow | null>;
+  /** 结果页刷新后恢复该计划的导出任务；查询本身必须带 user_id 谓词。 */
+  listForPlanForUser(planId: string, userId: string): Promise<readonly ExportDownloadRow[]>;
   /** Worker 侧：无 `user_id`（消费自己入队的任务，与 `findJobContext` 同一例外） */
   findById(exportId: string): Promise<ExportJobRow | null>;
   markRendering(exportId: string): Promise<boolean>;
@@ -114,6 +124,13 @@ interface Row {
   finished_at: Date | null;
 }
 
+interface DownloadRow extends Row {
+  destination_name: string;
+  start_date: string;
+  total_days: number;
+  version_number: number;
+}
+
 const COLUMNS = `id, user_id, plan_id, plan_version_id, template_id, format, scope,
                  day_numbers, status, progress, files, error_code, created_at, finished_at`;
 
@@ -138,6 +155,16 @@ function toRow(row: Row): ExportRow {
     errorCode: row.error_code,
     createdAt: row.created_at,
     finishedAt: row.finished_at,
+  };
+}
+
+function toDownloadRow(row: DownloadRow): ExportDownloadRow {
+  return {
+    ...toRow(row),
+    destinationName: row.destination_name,
+    startDate: row.start_date,
+    totalDays: row.total_days,
+    versionNumber: row.version_number,
   };
 }
 
@@ -186,11 +213,30 @@ export function createExportsRepository(pool: Pool): ExportsRepository {
     },
 
     async findForUser(exportId, userId) {
-      const { rows } = await pool.query<Row>(
-        `SELECT ${COLUMNS} FROM exports WHERE id = $1 AND user_id = $2`,
+      const { rows } = await pool.query<DownloadRow>(
+        `SELECT ${COLUMNS_PREFIXED}, p.destination_name, p.start_date::text AS start_date,
+                p.total_days, v.version_number
+           FROM exports e
+           JOIN travel_plans p ON p.id = e.plan_id
+           JOIN travel_plan_versions v ON v.id = e.plan_version_id
+          WHERE e.id = $1 AND e.user_id = $2`,
         [exportId, userId],
       );
-      return rows[0] === undefined ? null : toRow(rows[0]);
+      return rows[0] === undefined ? null : toDownloadRow(rows[0]);
+    },
+
+    async listForPlanForUser(planId, userId) {
+      const { rows } = await pool.query<DownloadRow>(
+        `SELECT ${COLUMNS_PREFIXED}, p.destination_name, p.start_date::text AS start_date,
+                p.total_days, v.version_number
+           FROM exports e
+           JOIN travel_plans p ON p.id = e.plan_id
+           JOIN travel_plan_versions v ON v.id = e.plan_version_id
+          WHERE e.plan_id = $1 AND e.user_id = $2
+          ORDER BY e.created_at DESC, e.id DESC`,
+        [planId, userId],
+      );
+      return rows.map(toDownloadRow);
     },
 
     async findById(exportId) {

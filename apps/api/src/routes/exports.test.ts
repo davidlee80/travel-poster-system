@@ -2,6 +2,7 @@ import {
   InMemoryCreditWalletRepository,
   UniqueViolationError,
   samplePriceBook,
+  type ExportDownloadRow,
   type ExportJobRow,
   type ExportRow,
   type ExportsRepository,
@@ -81,9 +82,29 @@ class FakeExports implements ExportsRepository {
     return Promise.resolve(id === undefined ? null : (this.rows.get(id) ?? null));
   }
 
-  findForUser(exportId: string, userId: string): Promise<ExportRow | null> {
+  private downloadRow(row: ExportRow): ExportDownloadRow {
+    return {
+      ...row,
+      destinationName: '成都',
+      startDate: '2026-10-01',
+      totalDays: 3,
+      versionNumber: 1,
+    };
+  }
+
+  findForUser(exportId: string, userId: string): Promise<ExportDownloadRow | null> {
     const row = this.rows.get(exportId);
-    return Promise.resolve(row !== undefined && row.userId === userId ? row : null);
+    return Promise.resolve(
+      row !== undefined && row.userId === userId ? this.downloadRow(row) : null,
+    );
+  }
+
+  listForPlanForUser(planId: string, userId: string): Promise<readonly ExportDownloadRow[]> {
+    return Promise.resolve(
+      [...this.rows.values()]
+        .filter((row) => row.planId === planId && row.userId === userId)
+        .map((row) => this.downloadRow(row)),
+    );
   }
 
   /*
@@ -594,7 +615,11 @@ describe('13.6 GET /exports/{export_id}', () => {
       headers: { cookie },
     });
 
-    const a = first.json<{ status: string; progress: number; files: { url: string }[] }>();
+    const a = first.json<{
+      status: string;
+      progress: number;
+      files: { url: string; file_name: string }[];
+    }>();
     const b = second.json<{ files: { url: string }[] }>();
 
     expect(a.status).toBe('COMPLETED');
@@ -603,6 +628,24 @@ describe('13.6 GET /exports/{export_id}', () => {
     // 每次都重签 → URL 不同，但都指向同一个对象键
     expect(b.files[0]!.url).not.toBe(a.files[0]!.url);
     expect(a.files[0]!.url).toContain(`exports/${exportId}/all-days.pdf`);
+    expect(a.files[0]!.file_name).toBe('chengdu-2026-10-01_2026-10-03-meiri-gonglue-v1.pdf');
+    expect(a.files[0]!.url).toContain('response-content-disposition=');
+  });
+
+  it('按计划列出导出历史，刷新结果页后可以恢复任务', async () => {
+    const cookie = await ownerCookie();
+    const exportId = await created(cookie);
+
+    const response = await h().app.inject({
+      method: 'GET',
+      url: `/api/v1/travel-plans/${PLAN_ID}/exports`,
+      headers: { cookie },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(
+      response.json<{ items: { export_id: string; plan_version_id: string }[] }>().items,
+    ).toEqual([expect.objectContaining({ export_id: exportId, plan_version_id: VERSION_ID })]);
   });
 
   it('files 结构不符合当前契约时返回空数组而不是 500（旧行）', async () => {

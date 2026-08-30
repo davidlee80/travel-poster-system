@@ -239,7 +239,25 @@ export default function PlanPage({
   }
 
   return (
-    <>
+    <main className="plan-page">
+      <header className="plan-page__toolbar">
+        <a href="/" className="plan-page__back">
+          返回首页
+        </a>
+        <div className="plan-page__identity">
+          <strong>{state.viewModel.overview.destination}</strong>
+          <span>{state.viewModel.overview.date_range_text}</span>
+        </div>
+        <nav aria-label="结果页操作">
+          <a href="#top">攻略总览</a>
+          <a href="#day-1">每日攻略</a>
+          {state.source === 'presentation' ? (
+            <a href="#downloads" className="plan-page__download-link">
+              下载攻略
+            </a>
+          ) : null}
+        </nav>
+      </header>
       {state.upgrading ? (
         <p className="plan-page__notice" role="status">
           行程已生成，配图仍在准备中 —— 就绪后本页会自动更新。
@@ -255,8 +273,12 @@ export default function PlanPage({
           部分配图使用了默认样式。
         </p>
       ) : null}
-      <FullPlanTemplate viewModel={state.viewModel} />
-      {planId === null ? null : <ExportPanel planId={planId} viewModel={state.viewModel} />}
-    </>
+      <div id="top" className="plan-page__preview">
+        <FullPlanTemplate viewModel={state.viewModel} />
+      </div>
+      {planId === null || state.source !== 'presentation' ? null : (
+        <ExportPanel planId={planId} viewModel={state.viewModel} />
+      )}
+    </main>
   );
 }

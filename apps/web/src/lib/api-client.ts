@@ -275,19 +275,34 @@ export interface JobStatusResponse {
 /** 13.5 / 13.6 的导出任务。字段名与 `ExportDetailSchema` 一致 */
 export interface ExportResponse {
   readonly export_id: string;
+  readonly plan_version_id: string;
+  readonly template_id: string;
   readonly status: 'QUEUED' | 'RENDERING' | 'COMPLETED' | 'PARTIAL' | 'FAILED';
   readonly format: 'PNG' | 'PDF';
   readonly scope: 'ALL_DAYS' | 'SINGLE_DAY' | 'FULL_PLAN';
+  readonly day_numbers: readonly number[] | null;
   readonly progress: number;
   readonly files: readonly {
-    readonly format: 'PNG' | 'PDF';
+    readonly format: 'PNG' | 'PDF' | 'ZIP';
     /** `ALL_DAYS` 的 PNG 每天一项；PDF 合并为一个文件，此处为 null */
     readonly day_number: number | null;
+    readonly file_name: string;
     readonly url: string;
     readonly byte_size: number;
     readonly expires_at: string;
   }[];
+  readonly created_at: string;
+  readonly finished_at: string | null;
   readonly error: { readonly code: string; readonly message: string } | null;
+}
+
+export interface CreateExportResponse {
+  readonly export_id: string;
+  readonly status: ExportResponse['status'];
+}
+
+export interface ExportHistoryResponse {
+  readonly items: readonly ExportResponse[];
 }
 
 /** 13.4 的展示数据。`view_model` 由调用方用 schema 解析 */
@@ -404,11 +419,22 @@ export function createExport(
     readonly day_numbers: readonly number[] | null;
     readonly plan_version_id?: string;
   },
-): Promise<ApiResult<ExportResponse>> {
-  return request<ExportResponse>(`/api/v1/travel-plans/${encodeURIComponent(planId)}/exports`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
+): Promise<ApiResult<CreateExportResponse>> {
+  return request<CreateExportResponse>(
+    `/api/v1/travel-plans/${encodeURIComponent(planId)}/exports`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+/** 结果页刷新后恢复该计划已有的导出任务。 */
+export function listExports(planId: string): Promise<ApiResult<ExportHistoryResponse>> {
+  return request<ExportHistoryResponse>(
+    `/api/v1/travel-plans/${encodeURIComponent(planId)}/exports`,
+    { method: 'GET' },
+  );
 }
 
 /**

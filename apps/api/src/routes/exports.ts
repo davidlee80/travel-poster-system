@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   UniqueViolationError,
+  type ExportDownloadRow,
   type ExportRow,
   type ExportsRepository,
   type PresentationsRepository,
@@ -37,6 +38,7 @@ import { ALL_FEATURES_ON, featureGateTotal } from '../feature-gate.js';
 import { recordCreditGate } from '../credits/metrics.js';
 import type { CreditsService } from '../credits/service.js';
 import { resolveIdentity, type IdentityContextDeps } from './identity-context.js';
+import { buildDownloadFileName } from '../download-file-name.js';
 
 /**
  * 导出端点（TP-4-12/13/16，设计稿 13.5、13.6）。
@@ -127,13 +129,27 @@ function parseArtifacts(files: unknown): readonly ExportArtifact[] {
 async function signedFiles(
   storage: Pick<ExportStorage, 'presign'>,
   artifacts: readonly ExportArtifact[],
+  row: ExportDownloadRow,
 ): Promise<ExportDetail['files']> {
   return Promise.all(
     artifacts.map(async (artifact) => {
-      const signed = await storage.presign(artifact.storage_key, EXPORT_URL_TTL_SECONDS);
+      const fileName = buildDownloadFileName(
+        {
+          destinationName: row.destinationName,
+          startDate: row.startDate,
+          totalDays: row.totalDays,
+          versionNumber: row.versionNumber,
+          scope: row.scope,
+        },
+        { format: artifact.format, dayNumber: artifact.day_number },
+      );
+      const signed = await storage.presign(artifact.storage_key, EXPORT_URL_TTL_SECONDS, {
+        downloadName: fileName,
+      });
       return {
         format: artifact.format,
         day_number: artifact.day_number,
+        file_name: fileName,
         url: signed.url,
         byte_size: artifact.byte_size,
         expires_at: signed.expiresAt.toISOString(),
@@ -144,17 +160,22 @@ async function signedFiles(
 
 async function toDetail(
   storage: Pick<ExportStorage, 'presign'>,
-  row: ExportRow,
+  row: ExportDownloadRow,
 ): Promise<ExportDetail> {
   const status = row.status as ExportStatus;
   return {
     export_id: row.exportId,
+    plan_version_id: row.planVersionId,
+    template_id: row.templateId,
     status,
     format: row.format,
     scope: row.scope,
+    day_numbers: row.dayNumbers === null ? null : [...row.dayNumbers],
     // 13.6：progress 查表而不是估算（与 16.2 同一处理）
     progress: EXPORT_PROGRESS[status] ?? row.progress,
-    files: await signedFiles(storage, parseArtifacts(row.files)),
+    files: await signedFiles(storage, parseArtifacts(row.files), row),
+    created_at: row.createdAt.toISOString(),
+    finished_at: row.finishedAt?.toISOString() ?? null,
     error:
       row.errorCode === null
         ? null
@@ -381,6 +402,28 @@ export function registerExportRoutes(app: FastifyInstance, deps: ExportRoutesDep
       if (row === null) return fail(request, reply, 'EXPORT_NOT_FOUND');
 
       return reply.code(200).send(await toDetail(storage, row));
+    },
+  );
+
+  /** 结果页刷新后恢复该计划的导出任务，数量受每计划导出配额限制。 */
+  app.get<{ Params: { plan_id: string } }>(
+    '/api/v1/travel-plans/:plan_id/exports',
+    async (request, reply) => {
+      const resolved = await resolveIdentity(deps, request, reply, {
+        allowAnonymousCreation: false,
+      });
+      if (resolved === null) return reply;
+
+      const plan = await plans.findPlanForUser(request.params.plan_id, resolved.identity.userId);
+      if (plan === null) return fail(request, reply, 'PLAN_NOT_FOUND');
+
+      const rows = await repository.listForPlanForUser(
+        request.params.plan_id,
+        resolved.identity.userId,
+      );
+      return reply
+        .code(200)
+        .send({ items: await Promise.all(rows.map((row) => toDetail(storage, row))) });
     },
   );
 }

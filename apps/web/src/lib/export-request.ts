@@ -12,11 +12,14 @@
  * 但那样这三种组合就只有点一遍界面才能验证。
  */
 
-/** 界面提供的三种导出，对应 13.5 的三种产物组织 */
+/** 结果页提供的导出预设；请求格式仍只有 PNG/PDF。 */
 export type ExportChoice =
   | { readonly kind: 'full-pdf' }
+  | { readonly kind: 'full-png' }
   | { readonly kind: 'all-days-pdf' }
-  | { readonly kind: 'single-day-png'; readonly dayNumber: number };
+  | { readonly kind: 'all-days-png' }
+  | { readonly kind: 'single-day-png'; readonly dayNumber: number }
+  | { readonly kind: 'single-day-pdf'; readonly dayNumber: number };
 
 export interface ExportRequestBody {
   readonly format: 'PNG' | 'PDF';
@@ -68,6 +71,19 @@ export function buildExportRequest(
     };
   }
 
+  if (choice.kind === 'full-png') {
+    return {
+      body: {
+        format: 'PNG',
+        template_id: templateId,
+        scope: 'FULL_PLAN',
+        day_numbers: null,
+        plan_version_id: planVersionId,
+      },
+      label: '完整攻略长图',
+    };
+  }
+
   if (choice.kind === 'all-days-pdf') {
     return {
       body: {
@@ -82,14 +98,30 @@ export function buildExportRequest(
     };
   }
 
+  if (choice.kind === 'all-days-png') {
+    return {
+      body: {
+        format: 'PNG',
+        template_id: templateId,
+        scope: 'ALL_DAYS',
+        day_numbers: null,
+        plan_version_id: planVersionId,
+      },
+      label: '全部每日攻略 PNG',
+    };
+  }
+
   return {
     body: {
-      format: 'PNG',
+      format: choice.kind === 'single-day-pdf' ? 'PDF' : 'PNG',
       template_id: templateId,
       scope: 'SINGLE_DAY',
       day_numbers: [choice.dayNumber],
       plan_version_id: planVersionId,
     },
-    label: `第 ${String(choice.dayNumber)} 天长图`,
+    label:
+      choice.kind === 'single-day-pdf'
+        ? `第 ${String(choice.dayNumber)} 天 PDF`
+        : `第 ${String(choice.dayNumber)} 天长图`,
   };
 }
