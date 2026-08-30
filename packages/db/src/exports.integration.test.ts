@@ -267,6 +267,24 @@ describeIntegration('exports 仓储（集成，需 PostgreSQL）', () => {
       ).toBeNull();
     });
 
+    it('listForPlanForUser 返回下载命名上下文且强制 user_id 谓词', async () => {
+      const seeded = await seed();
+      const created = await repository.create(input(seeded));
+
+      const mine = await repository.listForPlanForUser(seeded.planId, seeded.userId);
+      expect(mine).toHaveLength(1);
+      expect(mine[0]).toMatchObject({
+        exportId: created.exportId,
+        destinationName: '杭州',
+        totalDays: 5,
+        versionNumber: 1,
+      });
+
+      expect(
+        await repository.listForPlanForUser(seeded.planId, '00000000-0000-4000-8000-000000000000'),
+      ).toEqual([]);
+    });
+
     it('删除用户时导出行级联删除（15.1）', async () => {
       const seeded = await seed();
       await repository.create(input(seeded));

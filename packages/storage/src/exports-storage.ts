@@ -43,6 +43,7 @@ export interface ExportStorage {
   presign(
     key: string,
     ttlSeconds: number,
+    options?: { readonly downloadName?: string },
   ): Promise<{ readonly url: string; readonly expiresAt: Date }>;
   /**
    * 逐键删除（TP-6-14，设计稿 15.1 / R-50）。
@@ -79,11 +80,12 @@ export function exportObjectKey(exportId: string, fileName: string): string {
  * 在文件管理器里看到的顺序就是行程顺序（`day-02` 而不是 `day-2`）。
  */
 export function exportFileName(
-  format: 'PNG' | 'PDF',
+  format: 'PNG' | 'PDF' | 'ZIP',
   scope: 'ALL_DAYS' | 'SINGLE_DAY' | 'FULL_PLAN',
   dayNumber: number | null,
 ): string {
   const extension = format.toLowerCase();
+  if (format === 'ZIP') return `all-days.${extension}`;
   if (dayNumber !== null) return `day-${String(dayNumber).padStart(2, '0')}.${extension}`;
   return scope === 'FULL_PLAN' ? `full-plan.${extension}` : `all-days.${extension}`;
 }
@@ -148,10 +150,20 @@ export class S3ExportStorage implements ExportStorage {
     }
   }
 
-  async presign(key: string, ttlSeconds: number): Promise<{ url: string; expiresAt: Date }> {
+  async presign(
+    key: string,
+    ttlSeconds: number,
+    options?: { readonly downloadName?: string },
+  ): Promise<{ url: string; expiresAt: Date }> {
     const url = await getSignedUrl(
       this.client,
-      new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
+      new GetObjectCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        ...(options?.downloadName === undefined
+          ? {}
+          : { ResponseContentDisposition: `attachment; filename="${options.downloadName}"` }),
+      }),
       { expiresIn: ttlSeconds },
     );
     /*
@@ -196,7 +208,11 @@ export class InMemoryExportStorage implements ExportStorage {
     return Promise.resolve();
   }
 
-  presign(key: string, ttlSeconds: number): Promise<{ url: string; expiresAt: Date }> {
+  presign(
+    key: string,
+    ttlSeconds: number,
+    options?: { readonly downloadName?: string },
+  ): Promise<{ url: string; expiresAt: Date }> {
     /*
      * 假签名里带一个递增的 nonce：13.6 的「重签名」测试要断言
      * 「URL 变了但没有重新渲染」，而两次返回同一个字符串就测不出来。
@@ -204,7 +220,13 @@ export class InMemoryExportStorage implements ExportStorage {
     this.counts.presign += 1;
     this.nonce += 1;
     return Promise.resolve({
-      url: `${this.base}/${key}?sig=${this.nonce}&expires=${ttlSeconds}`,
+      url:
+        `${this.base}/${key}?sig=${this.nonce}&expires=${ttlSeconds}` +
+        (options?.downloadName === undefined
+          ? ''
+          : `&response-content-disposition=${encodeURIComponent(
+              `attachment; filename="${options.downloadName}"`,
+            )}`),
       expiresAt: new Date(Date.now() + ttlSeconds * 1000),
     });
   }

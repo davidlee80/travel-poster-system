@@ -4,6 +4,13 @@ import { ExportFormatSchema, ExportScopeSchema, TemplateIdSchema } from './enums
 import { NonEmptyStringSchema } from './primitives.js';
 
 /**
+ * 请求格式仍只有 PNG/PDF；ZIP 是 `PNG + ALL_DAYS` 的附加打包产物，
+ * 不能作为独立渲染格式提交。
+ */
+export const ExportArtifactFormatSchema = z.enum(['PNG', 'PDF', 'ZIP']);
+export type ExportArtifactFormat = z.infer<typeof ExportArtifactFormatSchema>;
+
+/**
  * 导出契约（TP-4-12/13，设计稿 13.5、13.6）。
  *
  * ## `day_numbers` 是数组而不是标量
@@ -69,11 +76,13 @@ export const EXPORT_STATUS_VALUES = [
 export const ExportStatusSchema = z.enum(EXPORT_STATUS_VALUES);
 export type ExportStatus = (typeof EXPORT_STATUS_VALUES)[number];
 
-/** 13.6 的 `files[]`，也是 `exports.files` 的 JSONB 结构 */
+/** 13.6 公网响应的 `files[]`；用户可见文件名只在签发下载链接时生成。 */
 export const ExportFileSchema = z.object({
-  format: ExportFormatSchema,
+  format: ExportArtifactFormatSchema,
   /** `ALL_DAYS` 的 PNG 每天一项；PDF 合并为一个文件，此处为 null */
   day_number: z.number().int().min(1).max(14).nullable(),
+  /** 用户保存到设备时看到的纯 ASCII 拼音文件名 */
+  file_name: NonEmptyStringSchema.regex(/^[a-z0-9][a-z0-9._-]*$/),
   url: NonEmptyStringSchema,
   byte_size: z.number().int().nonnegative(),
   /**
@@ -93,16 +102,21 @@ export type ExportFile = z.infer<typeof ExportFileSchema>;
  */
 export const ExportArtifactSchema = ExportFileSchema.extend({
   storage_key: NonEmptyStringSchema,
-});
+}).omit({ file_name: true });
 export type ExportArtifact = z.infer<typeof ExportArtifactSchema>;
 
 export const ExportDetailSchema = z.object({
   export_id: z.string().uuid(),
+  plan_version_id: z.string().uuid(),
+  template_id: NonEmptyStringSchema,
   status: ExportStatusSchema,
   format: ExportFormatSchema,
   scope: ExportScopeSchema,
+  day_numbers: z.array(z.number().int().min(1).max(14)).nullable(),
   progress: z.number().int().min(0).max(100),
   files: z.array(ExportFileSchema),
+  created_at: NonEmptyStringSchema,
+  finished_at: NonEmptyStringSchema.nullable(),
   /** `PARTIAL` / `FAILED` 时携带 13.0 定义的错误对象 */
   error: z.object({ code: NonEmptyStringSchema, message: NonEmptyStringSchema }).nullable(),
 });

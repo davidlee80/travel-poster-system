@@ -471,6 +471,68 @@ body {
 
 /* ── 用户可见的计划页 ─────────────────────────────────────── */
 
+.plan-page {
+  min-height: 100vh;
+  background: #f4f1ea;
+}
+
+.plan-page__toolbar {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: center;
+  min-height: 64px;
+  padding: 10px max(20px, calc((100vw - 1200px) / 2));
+  border-bottom: 1px solid #ddd6ca;
+  background: rgb(255 255 255 / 94%);
+  backdrop-filter: blur(12px);
+}
+
+.plan-page__back,
+.plan-page__toolbar nav a {
+  color: #31453c;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.plan-page__identity {
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.plan-page__identity strong,
+.plan-page__identity span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-page__identity span {
+  color: #6a6a6a;
+  font-size: 12px;
+}
+
+.plan-page__toolbar nav {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.plan-page__download-link {
+  padding: 8px 12px;
+  border-radius: 6px;
+  color: #fff !important;
+  background: #1b4d3e;
+}
+
+.plan-page__preview {
+  scroll-margin-top: 76px;
+}
+
 .plan-page--pending {
   max-width: 640px;
   margin: 80px auto;
@@ -497,20 +559,73 @@ body {
   font-size: 14px;
 }
 
+@media (max-width: 720px) {
+  .plan-page__toolbar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 8px 12px;
+  }
+
+  .plan-page__toolbar nav a:not(.plan-page__download-link) {
+    display: none;
+  }
+}
+
 /* ── 导出面板（13.5 / 13.6）───────────────────────────────── */
 
 .export-panel {
   max-width: 1200px;
   margin: 24px auto 64px;
-  padding: 20px 24px;
-  border-top: 1px solid #e5e5e5;
+  padding: 24px;
+  border: 1px solid #e3ded2;
+  border-radius: 14px;
+  background: #fbfaf7;
+}
+
+.export-panel__heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-end;
+  margin-bottom: 20px;
+}
+
+.export-panel__eyebrow {
+  margin: 0 0 4px;
+  color: #6a6a6a;
+  font-size: 12px;
+  letter-spacing: 0.08em;
 }
 
 .export-panel__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.export-panel__intro {
+  margin: 0;
+  color: #6a6a6a;
+  font-size: 13px;
+}
+
+.export-panel__groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.export-panel__group {
+  padding: 16px;
+  border: 1px solid #e8e3d9;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.export-panel__group h3,
+.export-panel__history h3 {
   margin: 0 0 12px;
-  font-size: 17px;
-  /* 只用已发布的字重（TP-1-04 发了 400 / 500 / 700）—— 600 会回退到合成加粗 */
-  font-weight: 500;
+  font-size: 14px;
 }
 
 .export-panel__actions {
@@ -529,6 +644,12 @@ body {
   cursor: pointer;
 }
 
+.export-panel__actions .export-panel__primary {
+  border-color: #1b4d3e;
+  color: #fff;
+  background: #1b4d3e;
+}
+
 .export-panel__actions button:disabled {
   /* 导出进行中：按钮变灰而不是消失 —— 消失会让布局跳动 */
   opacity: 0.5;
@@ -536,36 +657,152 @@ body {
 }
 
 .export-panel__day {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   font-size: 14px;
 }
 
-.export-panel__status,
+.export-panel__day select,
+.export-panel__day button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #c8c8c8;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.export-panel__working,
 .export-panel__error,
-.export-panel__result {
+.export-panel__done {
   margin: 12px 0 0;
   font-size: 14px;
+}
+
+.export-panel__working {
+  display: grid;
+  grid-template-columns: minmax(180px, auto) minmax(140px, 1fr) 48px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #eef5f1;
+}
+
+.export-panel__working progress {
+  width: 100%;
 }
 
 .export-panel__error {
   color: #8a2b1f;
 }
 
-.export-panel__result ul {
-  margin: 8px 0;
-  padding-left: 20px;
+.export-panel__done {
+  color: #1b4d3e;
 }
 
-.export-panel__size {
+.export-panel__history {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e3ded2;
+}
+
+.export-panel__history > ul,
+.export-panel__files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.export-panel__history-item {
+  padding: 12px 0;
+  border-bottom: 1px solid #ece8df;
+}
+
+.export-panel__history-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.export-panel__history-title span,
+.export-panel__old-version,
+.export-panel__files span {
   color: #6a6a6a;
+  font-size: 12px;
+}
+
+.export-panel__old-version {
+  margin: 6px 0 0;
+}
+
+.export-panel__files {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.export-panel__files li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.export-panel__files button {
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  color: #1b4d3e;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 .export-panel__hint {
   margin: 8px 0 0;
   font-size: 13px;
   color: #6a6a6a;
+}
+
+@media (max-width: 800px) {
+  .export-panel {
+    margin: 16px 12px 40px;
+    padding: 18px;
+  }
+
+  .export-panel__heading {
+    display: block;
+  }
+
+  .export-panel__intro {
+    margin-top: 8px;
+  }
+
+  .export-panel__groups {
+    grid-template-columns: 1fr;
+  }
+
+  .export-panel__actions button,
+  .export-panel__day button,
+  .export-panel__day select {
+    min-height: 44px;
+  }
+
+  .export-panel__working {
+    grid-template-columns: 1fr auto;
+  }
+
+  .export-panel__working progress {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
 }
 
 /* ── 用户协议与隐私政策页（/legal）──────────────────────── */

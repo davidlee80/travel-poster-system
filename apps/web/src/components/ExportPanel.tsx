@@ -3,46 +3,51 @@
 import type { FullPlanViewModelShape } from '@tps/schemas';
 import { useEffect, useRef, useState } from 'react';
 
-import { createExport, getExport, type ExportResponse } from '@/lib/api-client';
+import { createExport, getExport, listExports, type ExportResponse } from '@/lib/api-client';
 import { buildExportRequest, type ExportChoice } from '@/lib/export-request';
 
-/**
- * 导出入口（设计稿 13.5、13.6，验收标准 10）。
- *
- * ## 为什么这个组件必须存在
- *
- * 13.5/13.6 两个端点、`exports` 表、render-worker 的消费、7 天预签名与重签
- * 在 P4 就全部交付了 —— 但用户界面上没有任何入口。验收标准 10 是
- * 「HTML、PNG、PDF 至少两种输出可用」，而「端点可用」与「用户可用」之间
- * 差的正是这个组件。
- *
- * ## 三种导出，对应 13.5 的产物组织
- *
- * ```text
- * PDF  + FULL_PLAN   一个多页 PDF —— 打印整份行程
- * PNG  + SINGLE_DAY  一张长图 —— 分享某一天
- * PDF  + ALL_DAYS    每日信息图合并成一个 N 页 PDF
- * ```
- *
- * 不提供 `PNG + ALL_DAYS`（那会产出 14 个文件，用户要自己按文件名排序）——
- * 它在契约里合法，但作为界面选项只会制造困惑。需要单日 PNG 的人一次导一天。
- */
-
-/** 13.6 的轮询间隔。导出是秒级任务（21.2：单页 PNG < 8 秒），2 秒足够 */
 const POLL_MS = 2_000;
-
-/**
- * 轮询上限。21.2 最慢的一档是 `ALL_DAYS` 的 14 页 PDF 合并（< 15 秒），
- * 加上排队与重试（`attempts: 2`）留到 120 秒。
- */
 const POLL_TIMEOUT_MS = 120_000;
 
 type Phase =
   | { readonly kind: 'idle' }
-  | { readonly kind: 'working'; readonly progress: number; readonly label: string }
+  | {
+      readonly kind: 'working';
+      readonly exportId: string;
+      readonly progress: number;
+      readonly label: string;
+    }
   | { readonly kind: 'done'; readonly result: ExportResponse; readonly partial: boolean }
   | { readonly kind: 'error'; readonly message: string; readonly retryable: boolean };
 
+function labelFor(result: ExportResponse): string {
+  if (result.scope === 'FULL_PLAN') {
+    return result.format === 'PDF' ? '完整攻略 PDF' : '完整攻略长图';
+  }
+  if (result.scope === 'ALL_DAYS') {
+    return result.format === 'PDF' ? '每日攻略合集 PDF' : '全部每日攻略 PNG';
+  }
+  const day =
+    result.day_numbers?.[0] ?? result.files.find((file) => file.day_number !== null)?.day_number;
+  return `第 ${String(day ?? '')} 天 ${result.format}`.trim();
+}
+
+function sizeText(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function statusText(status: ExportResponse['status']): string {
+  return {
+    QUEUED: '等待导出',
+    RENDERING: '正在渲染',
+    COMPLETED: '已完成',
+    PARTIAL: '部分完成',
+    FAILED: '导出失败',
+  }[status];
+}
+
+/** 用户可见的导出、任务恢复和下载入口。 */
 export function ExportPanel({
   planId,
   viewModel,
@@ -51,176 +56,300 @@ export function ExportPanel({
   readonly viewModel: FullPlanViewModelShape;
 }): React.ReactElement {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
+  const [history, setHistory] = useState<readonly ExportResponse[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState<string | null>(null);
   const [day, setDay] = useState(1);
   const cancelled = useRef(false);
 
-  useEffect(
-    () => () => {
-      cancelled.current = true;
-    },
-    [],
-  );
-
-  /*
-   * 天数从 ViewModel 取而不是另发一次请求：完整页的 `days` 就是可导出的天数
-   * 集合。`Math.max(1, ...)` 是防御性的 —— 一份 days 为空的历史 ViewModel
-   * 不该让下拉框变成空的（那时用户连「第 1 天」都选不了）。
-   */
   const dayCount = Math.max(1, viewModel.days.length);
   const planVersionId = viewModel.plan_version_id;
 
+  function upsertHistory(result: ExportResponse): void {
+    setHistory((current) => [
+      result,
+      ...current.filter((item) => item.export_id !== result.export_id),
+    ]);
+  }
+
+  async function poll(exportId: string, label: string, startedAt = Date.now()): Promise<void> {
+    if (cancelled.current) return;
+    if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+      setPhase({
+        kind: 'error',
+        message: '导出仍在后台处理中。稍后刷新本页可继续查看进度。',
+        retryable: true,
+      });
+      return;
+    }
+
+    const result = await getExport(exportId);
+    if (cancelled.current) return;
+    if (!result.ok) {
+      setPhase({ kind: 'error', message: result.message, retryable: result.retryable });
+      return;
+    }
+
+    upsertHistory(result.data);
+    if (result.data.status === 'COMPLETED' || result.data.status === 'PARTIAL') {
+      setPhase({
+        kind: 'done',
+        result: result.data,
+        partial: result.data.status === 'PARTIAL',
+      });
+      return;
+    }
+    if (result.data.status === 'FAILED') {
+      setPhase({
+        kind: 'error',
+        message: result.data.error?.message ?? '导出失败，请稍后重试。',
+        retryable: true,
+      });
+      return;
+    }
+
+    setPhase({
+      kind: 'working',
+      exportId,
+      progress: result.data.progress,
+      label,
+    });
+    setTimeout(() => void poll(exportId, label, startedAt), POLL_MS);
+  }
+
+  useEffect(() => {
+    cancelled.current = false;
+
+    void (async () => {
+      const result = await listExports(planId);
+      if (cancelled.current) return;
+      setHistoryLoading(false);
+      if (!result.ok) {
+        setDownloadError(result.message);
+        return;
+      }
+
+      setHistory(result.data.items);
+      const active = result.data.items.find(
+        (item) =>
+          item.plan_version_id === planVersionId &&
+          item.template_id === viewModel.template_id &&
+          (item.status === 'QUEUED' || item.status === 'RENDERING'),
+      );
+      if (active !== undefined) {
+        const label = labelFor(active);
+        setPhase({
+          kind: 'working',
+          exportId: active.export_id,
+          progress: active.progress,
+          label,
+        });
+        setTimeout(() => void poll(active.export_id, label), POLL_MS);
+      }
+    })();
+
+    return () => {
+      cancelled.current = true;
+    };
+    // 计划或版本变化时重新恢复导出任务；模板 ID 包含在 ViewModel 版本中。
+  }, [planId, planVersionId]);
+
   async function start(choice: ExportChoice): Promise<void> {
-    /*
-     * 导出用**这份计划的**样式套件（R-85），而不是按导出种类选。
-     * 不一致会被导出侧直接拒：那个套件没有对应的 presentation。
-     */
     const { body, label } = buildExportRequest(choice, planVersionId, viewModel.template_id);
-    setPhase({ kind: 'working', progress: 0, label });
+    setDownloadError(null);
+    setPhase({ kind: 'working', exportId: '', progress: 0, label });
 
     const created = await createExport(planId, body);
     if (cancelled.current) return;
-
     if (!created.ok) {
-      /*
-       * 21.4 的每计划导出次数上限（匿名 3 次、注册 10 次）会在这里以
-       * `AUTH_QUOTA_EXCEEDED` 出现。把服务端的文案原样显示 ——
-       * 它已经写清楚了「注册可以有更多次数」，而前端自己编一句会与政策不一致。
-       */
       setPhase({ kind: 'error', message: created.message, retryable: created.retryable });
       return;
     }
 
-    const startedAt = Date.now();
+    setPhase({
+      kind: 'working',
+      exportId: created.data.export_id,
+      progress: 0,
+      label,
+    });
+    setTimeout(() => void poll(created.data.export_id, label), POLL_MS);
+  }
 
-    const poll = async (exportId: string): Promise<void> => {
-      if (cancelled.current) return;
+  /** 下载前重新 GET，确保链接和 Content-Disposition 都是新签名。 */
+  async function download(exportId: string, fileName: string): Promise<void> {
+    setDownloadError(null);
+    setDownloading(`${exportId}:${fileName}`);
+    const fresh = await getExport(exportId);
+    if (cancelled.current) return;
+    setDownloading(null);
 
-      if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
-        setPhase({
-          kind: 'error',
-          message: '导出用时超出预期。稍后回到本页可以再试一次。',
-          retryable: true,
-        });
-        return;
-      }
-
-      const result = await getExport(exportId);
-      if (cancelled.current) return;
-
-      if (!result.ok) {
-        setPhase({ kind: 'error', message: result.message, retryable: result.retryable });
-        return;
-      }
-
-      const { status, progress } = result.data;
-      if (status === 'COMPLETED' || status === 'PARTIAL') {
-        /*
-         * `PARTIAL` 也是可交付的终态（13.6）：12 页的行程比零页有用，
-         * 而下面的提示会如实说明缺了哪几天 —— 悄悄当成成功才是不能做的事。
-         */
-        setPhase({ kind: 'done', result: result.data, partial: status === 'PARTIAL' });
-        return;
-      }
-      if (status === 'FAILED') {
-        setPhase({
-          kind: 'error',
-          message: result.data.error?.message ?? '导出失败，请稍后重试。',
-          retryable: true,
-        });
-        return;
-      }
-
-      setPhase({ kind: 'working', progress, label });
-      setTimeout(() => void poll(exportId), POLL_MS);
-    };
-
-    // 13.5 返回 201 + QUEUED（或幂等命中时返回既有任务），随即开始轮询
-    setPhase({ kind: 'working', progress: created.data.progress, label });
-    setTimeout(() => void poll(created.data.export_id), POLL_MS);
+    if (!fresh.ok) {
+      setDownloadError(fresh.message);
+      return;
+    }
+    upsertHistory(fresh.data);
+    const file = fresh.data.files.find((item) => item.file_name === fileName);
+    if (file === undefined) {
+      setDownloadError('文件已经更新，请刷新导出列表后重试。');
+      return;
+    }
+    window.location.assign(file.url);
   }
 
   const busy = phase.kind === 'working';
 
   return (
-    <section className="export-panel" aria-label="导出">
-      <h2 className="export-panel__title">导出</h2>
+    <section id="downloads" className="export-panel" aria-label="下载攻略">
+      <div className="export-panel__heading">
+        <div>
+          <p className="export-panel__eyebrow">保存到设备</p>
+          <h2 className="export-panel__title">下载攻略</h2>
+        </div>
+        <p className="export-panel__intro">下载文件固定为当前看到的攻略版本。</p>
+      </div>
 
-      <div className="export-panel__actions">
-        <button type="button" disabled={busy} onClick={() => void start({ kind: 'full-pdf' })}>
-          完整行程 PDF
-        </button>
-        <button type="button" disabled={busy} onClick={() => void start({ kind: 'all-days-pdf' })}>
-          每日信息图 PDF
-        </button>
+      <div className="export-panel__groups">
+        <div className="export-panel__group">
+          <h3>完整攻略</h3>
+          <div className="export-panel__actions">
+            <button
+              type="button"
+              className="export-panel__primary"
+              disabled={busy}
+              onClick={() => void start({ kind: 'full-pdf' })}
+            >
+              完整攻略 PDF
+            </button>
+            <button type="button" disabled={busy} onClick={() => void start({ kind: 'full-png' })}>
+              完整攻略长图
+            </button>
+          </div>
+        </div>
 
-        <span className="export-panel__day">
-          <label htmlFor="export-day">单日长图</label>
-          <select
-            id="export-day"
-            value={day}
-            disabled={busy}
-            onChange={(event) => setDay(Number(event.target.value))}
-          >
-            {Array.from({ length: dayCount }, (_, index) => index + 1).map((value) => (
-              <option key={value} value={value}>
-                第 {value} 天
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void start({ kind: 'single-day-png', dayNumber: day })}
-          >
-            导出 PNG
-          </button>
-        </span>
+        <div className="export-panel__group">
+          <h3>每日攻略合集</h3>
+          <div className="export-panel__actions">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void start({ kind: 'all-days-pdf' })}
+            >
+              合集 PDF
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void start({ kind: 'all-days-png' })}
+            >
+              全部 PNG（含 ZIP）
+            </button>
+          </div>
+        </div>
+
+        <div className="export-panel__group">
+          <h3>单日攻略</h3>
+          <div className="export-panel__day">
+            <label htmlFor="export-day">选择日期</label>
+            <select
+              id="export-day"
+              value={day}
+              disabled={busy}
+              onChange={(event) => setDay(Number(event.target.value))}
+            >
+              {Array.from({ length: dayCount }, (_, index) => index + 1).map((value) => (
+                <option key={value} value={value}>
+                  第 {value} 天
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void start({ kind: 'single-day-png', dayNumber: day })}
+            >
+              PNG
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void start({ kind: 'single-day-pdf', dayNumber: day })}
+            >
+              PDF
+            </button>
+          </div>
+        </div>
       </div>
 
       {phase.kind === 'working' ? (
-        <p className="export-panel__status" role="status">
-          正在生成{phase.label}…（{phase.progress}%）
-        </p>
+        <div className="export-panel__working" role="status" aria-live="polite">
+          <span>正在生成{phase.label}…</span>
+          <progress value={phase.progress} max={100} aria-label="导出进度" />
+          <strong>{phase.progress}%</strong>
+        </div>
       ) : null}
 
       {phase.kind === 'error' ? (
         <p className="export-panel__error" role="alert">
           {phase.message}
-          {phase.retryable ? '' : '（这次请求不会自动重试）'}
+          {phase.retryable ? '' : '（请修改选择后重试）'}
         </p>
       ) : null}
 
       {phase.kind === 'done' ? (
-        <div className="export-panel__result">
-          {phase.partial ? (
-            <p role="status">部分页面导出失败，以下是已生成的产物。</p>
-          ) : (
-            <p role="status">导出完成。</p>
-          )}
-          <ul>
-            {phase.result.files.map((file) => (
-              <li key={file.url}>
-                {/*
-                 * `download` 属性让浏览器直接下载而不是在标签页里打开 PDF。
-                 * 不加 `target="_blank"`：预签名 URL 带签名参数，
-                 * 在新标签页里它会出现在地址栏与浏览历史里。
-                 */}
-                <a href={file.url} download>
-                  {file.day_number === null
-                    ? `${file.format} 文件`
-                    : `第 ${String(file.day_number)} 天 ${file.format}`}
-                </a>
-                <span className="export-panel__size"> {Math.round(file.byte_size / 1024)} KB</span>
-              </li>
-            ))}
-          </ul>
-          {/*
-           * 7 天有效期必须写出来（13.6）。不说的话用户会把链接存进收藏夹，
-           * 一周后打开得到一个 403 —— 而那时他会以为是我们把文件删了。
-           */}
-          <p className="export-panel__hint">下载链接 7 天内有效，过期后回到本页可重新获取。</p>
-        </div>
+        <p className="export-panel__done" role="status" aria-live="polite">
+          {phase.partial ? '部分页面导出失败，可先下载以下成功文件。' : '导出完成，可以下载。'}
+        </p>
       ) : null}
+
+      {downloadError === null ? null : (
+        <p className="export-panel__error" role="alert">
+          {downloadError}
+        </p>
+      )}
+
+      <div className="export-panel__history">
+        <h3>导出记录</h3>
+        {historyLoading ? <p role="status">正在读取导出记录…</p> : null}
+        {!historyLoading && history.length === 0 ? <p>还没有导出记录。</p> : null}
+        <ul>
+          {history.map((item) => (
+            <li key={item.export_id} className="export-panel__history-item">
+              <div className="export-panel__history-title">
+                <strong>{labelFor(item)}</strong>
+                <span>{statusText(item.status)}</span>
+              </div>
+              {item.plan_version_id === planVersionId ? null : (
+                <p className="export-panel__old-version">这是较早版本的下载文件。</p>
+              )}
+              {item.files.length === 0 ? null : (
+                <ul className="export-panel__files">
+                  {[...item.files]
+                    .sort((a, b) => Number(b.format === 'ZIP') - Number(a.format === 'ZIP'))
+                    .map((file) => {
+                      const downloadKey = `${item.export_id}:${file.file_name}`;
+                      return (
+                        <li key={file.file_name}>
+                          <button
+                            type="button"
+                            disabled={downloading === downloadKey}
+                            onClick={() => void download(item.export_id, file.file_name)}
+                          >
+                            {downloading === downloadKey ? '准备下载…' : file.file_name}
+                          </button>
+                          <span>{sizeText(file.byte_size)}</span>
+                        </li>
+                      );
+                    })}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+        <p className="export-panel__hint">
+          下载时会自动获取新的临时链接；链接过期不会重新生成文件。
+        </p>
+      </div>
     </section>
   );
 }
