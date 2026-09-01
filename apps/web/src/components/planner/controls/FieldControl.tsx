@@ -1,6 +1,6 @@
 'use client';
 
-import { PLANNER_RUNTIME_TYPE_META, plannerField, type PlannerFieldId } from '@tps/schemas';
+import { plannerField, type PlannerFieldId } from '@tps/schemas';
 
 import { usePlannerOptionResolver } from '@/components/planner/PlannerConfigProvider';
 import { resolutionTarget } from '@/lib/planner/config-binding';
@@ -66,7 +66,7 @@ export function FieldControl({
   const fieldState = snapshot.states.get(fieldId);
   const error = validateField(state, fieldId);
   const reason = TRIGGER_REASON[fieldId];
-  const meta = PLANNER_RUNTIME_TYPE_META[spec.runtime_type];
+  const showMustBadge = spec.runtime_type === 'HARD';
 
   const hintId = `${fieldId}-hint`;
   const errorId = `${fieldId}-error`;
@@ -87,18 +87,9 @@ export function FieldControl({
           {spec.question}
         </strong>
         <span className="planner-section__meta">
-          {/*
-           * 类型徽标同时给出文字与 aria 文案（规范 20）。显示运行时类型而不是
-           * 「必填 / 可选」：用户真正需要知道的是「这一条会被当成硬约束还是偏好」，
-           * 而那决定了他要不要认真填。
-           */}
-          <span
-            className={`planner-badge planner-badge--${spec.runtime_type.toLowerCase()}`}
-            aria-label={meta.aria}
-          >
-            {meta.label}
-          </span>
-          {spec.required === 'OPTIONAL' ? <span className="planner-label__opt">可跳过</span> : null}
+          {showMustBadge ? (
+            <span className="planner-badge planner-badge--hard">必须满足</span>
+          ) : null}
         </span>
       </div>
 

@@ -1,31 +1,13 @@
 'use client';
 
-import type { PlannerFieldId, PlannerStepId } from '@tps/schemas';
+import { PLANNER_STEPS, type PlannerStepId } from '@tps/schemas';
 
-import type { SummaryChip, SummarySection } from '@/lib/planner/summary';
 import {
   TRIP_STATE_LABEL,
   generateButtonLabel,
   type PlannerSnapshot,
 } from '@/lib/planner/step-state';
 
-/**
- * 右栏：旅行画像五组 + 关键数字 + 生成入口（规范 17）。
- *
- * ## chip 是按钮
- *
- * 规范 17.2 要求点击 chip 回跳来源 Step、滚动到字段并聚焦。做成 `<span>`
- * 的话键盘用户无法触发那个回跳 —— 而它是「用户随时能理解自己告诉了系统什么」
- * 这条体验目标的主要实现方式。
- *
- * ## 「系统自动研究」清单不是营销文案
- *
- * 规范 1.1 的第一条原则是「只问用户才知道的事」。用户判断「为什么不问我签证」
- * 的唯一途径就是看到这一栏 —— 没有它，那条原则在界面上不可见，
- * 表现为用户觉得这个问卷「漏了很多东西」。
- */
-
-/** 后台自动研究的项目（规范 8 与 14 的 system-card 内容）*/
 const RESEARCH_TOPICS = [
   '天气穿衣',
   '签证过境',
@@ -38,70 +20,87 @@ const RESEARCH_TOPICS = [
 ] as const;
 
 export interface SummaryRailProps {
-  readonly sections: readonly SummarySection[];
+  readonly activeStep: PlannerStepId;
   readonly snapshot: PlannerSnapshot;
   readonly metrics: readonly { readonly label: string; readonly value: string }[];
-  readonly onJumpToField: (step: PlannerStepId, fieldId: PlannerFieldId) => void;
   readonly onGenerate: () => void;
   readonly onJumpToVerify: () => void;
   readonly generateDisabled: boolean;
-  /**
-   * 生成按钮下方的一句话（C-6 的 CR 报价）。
-   *
-   * 由调用方传节点而不是让本组件去请求报价：右栏的职责是「把画像与入口
-   * 摆出来」，让它认识钱包会把一个纯展示组件变成一个有网络依赖的组件，
-   * 而它同时也被没装配计费的部署渲染。
-   */
   readonly generateNote?: React.ReactNode;
-  /** 窄屏抽屉是否展开 */
   readonly open: boolean;
 }
 
 export function SummaryRail({
-  sections,
+  activeStep,
   snapshot,
   metrics,
-  onJumpToField,
   onGenerate,
   onJumpToVerify,
   generateDisabled,
   generateNote,
   open,
 }: SummaryRailProps): React.ReactElement {
-  const total = sections.reduce((sum, section) => sum + section.chips.length, 0);
+  const current = PLANNER_STEPS.find((step) => step.step === activeStep);
+  const completed = [...snapshot.stepStates.entries()].filter(
+    ([step, state]) => step !== '10' && state === 'complete',
+  ).length;
 
   return (
     <aside
+      id="planner-summary"
       className={`planner-panel planner-right${open ? ' planner-right--open' : ''}`}
-      aria-label="我的旅行画像"
+      aria-label="规划进度"
     >
       <div className="planner-right__head">
-        <h2 className="planner-right__title">我的旅行画像</h2>
-        <span className="planner-right__count">{total} 项</span>
+        <h2 className="planner-right__title">规划进度</h2>
+        <span className="planner-right__count">{snapshot.completeness}%</span>
       </div>
 
-      {sections.map((section) => (
-        <section
-          key={section.group}
-          className={`planner-snapshot${section.group === 'VERIFY' ? ' planner-snapshot--verify' : ''}`}
+      <div className="planner-right-progress">
+        <div className="planner-right-progress__head">
+          <span>信息完整度</span>
+          <strong>{snapshot.completeness}%</strong>
+        </div>
+        <div
+          className="planner-right-progress__track"
+          role="progressbar"
+          aria-label="旅行规划信息完整度"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={snapshot.completeness}
         >
-          <h3 className="planner-snapshot__head">
-            <span>{section.title}</span>
-            {section.group === 'VERIFY' && snapshot.verifyCount > 0 ? (
-              <span>待核验 · {snapshot.verifyCount}</span>
-            ) : null}
-          </h3>
-          {section.chips.length === 0 ? (
-            <p className="planner-chip__empty">尚未填写</p>
-          ) : (
-            <div className="planner-chips">
-              {section.chips.map((chip) => (
-                <Chip key={chip.fieldId} chip={chip} onJump={onJumpToField} />
-              ))}
-            </div>
-          )}
-        </section>
-      ))}
+          <span style={{ width: `${snapshot.completeness}%` }} />
+        </div>
+        <p>已完成 {completed}/9 个步骤。可随时返回修改，选择会自动保存。</p>
+      </div>
+
+      <section className="planner-current-step">
+        <span>正在填写 · 第 {Number(activeStep)} 步</span>
+        <strong>{current?.nav ?? '旅行规划'}</strong>
+        <p>{current?.intro ?? ''}</p>
+      </section>
+
+      {snapshot.blockers.length > 0 || snapshot.verifyCount > 0 ? (
+        <button type="button" className="planner-attention" onClick={onJumpToVerify}>
+          <span>{snapshot.blockers.length > 0 ? '还有信息需要你补充' : '系统正在核验'}</span>
+          <strong>
+            {snapshot.blockers.length > 0
+              ? `${snapshot.blockers.length} 个由你补充 · ${snapshot.verifyCount} 个系统待核验`
+              : `${snapshot.verifyCount} 项已填写信息待系统核验`}
+          </strong>
+          <small>
+            {snapshot.blockers.length > 0
+              ? '点击查看具体项目，并在“确认旅程”中处理'
+              : '无需重复填写 · 不影响生成初步方案 · 点击查看明细'}
+          </small>
+        </button>
+      ) : (
+        <div className="planner-attention planner-attention--ready">
+          <span>生成准备</span>
+          <strong>关键信息已经齐全</strong>
+          <small>可继续补充偏好，也可以直接生成。</small>
+        </div>
+      )}
 
       <div className="planner-metrics">
         {metrics.map((metric) => (
@@ -113,11 +112,6 @@ export function SummaryRail({
       </div>
 
       <div className="planner-right__actions">
-        {/*
-          按钮文案随 Trip State 变（规范 18 的状态表）。`blocked` 时**不禁用** ——
-          规范原文：「按钮可点击但进入问题定位，不建议纯 disabled；
-          避免用户不知道为何不能生成」。这里只有「正在生成」与「未登录」会禁用。
-        */}
         <button
           type="button"
           className="planner-button planner-button--primary planner-button--large"
@@ -126,22 +120,14 @@ export function SummaryRail({
         >
           {generateButtonLabel(snapshot.tripState, snapshot.verifyCount)}
         </button>
-        {snapshot.verifyCount > 0 ? (
-          <button
-            type="button"
-            className="planner-button planner-button--secondary"
-            onClick={onJumpToVerify}
-          >
-            查看待确认项
-          </button>
-        ) : null}
         {generateNote}
       </div>
 
       <p className="planner-right__note">{TRIP_STATE_LABEL[snapshot.tripState]}</p>
 
       <div className="planner-research">
-        <strong>系统自动研究，不要求你填写</strong>
+        <strong>这些信息由系统自动研究</strong>
+        <p>不用在问卷里逐项填写。</p>
         <ul>
           {RESEARCH_TOPICS.map((topic) => (
             <li key={topic}>{topic}</li>
@@ -149,29 +135,5 @@ export function SummaryRail({
         </ul>
       </div>
     </aside>
-  );
-}
-
-function Chip({
-  chip,
-  onJump,
-}: {
-  readonly chip: SummaryChip;
-  readonly onJump: (step: PlannerStepId, fieldId: PlannerFieldId) => void;
-}): React.ReactElement {
-  return (
-    <button
-      type="button"
-      className={`planner-chip planner-chip--${chip.kind}`}
-      onClick={() => onJump(chip.step, chip.fieldId)}
-      /*
-       * aria-label 里带上「前往第 N 步修改」：chip 的可见文字是它的内容，
-       * 而屏读用户需要知道点它会发生什么。只读内容的话它听起来像一段静态文本。
-       */
-      aria-label={`${chip.text}，前往第 ${chip.step} 步修改`}
-      title={chip.blocking ? '这一项会影响生成' : undefined}
-    >
-      {chip.text}
-    </button>
   );
 }

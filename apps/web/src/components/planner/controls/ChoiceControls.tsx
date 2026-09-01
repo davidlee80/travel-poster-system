@@ -1,7 +1,6 @@
 'use client';
 
 import { PLANNER_STANCE_VALUES, type PlannerStance } from '@tps/schemas';
-import { useEffect, useRef, useState } from 'react';
 
 import { selectedValues } from '@/lib/planner/field-io';
 
@@ -21,7 +20,7 @@ import type { ControlProps } from './control-props';
  * ## 状态一律同时用文字表达（规范 20）
  *
  * 「任何状态不能只依赖颜色，必须同时使用文字、图标和 aria-label」。因此：
- * 选中的卡片有 `aria-pressed`、三态标签把态写在标签文字里（「公共交通 · 必须」）、
+ * 选中的卡片有 `aria-pressed`、三态标签在选项文字前显示状态图标（「★ 直飞」）、
  * 排序项显示序号数字。把这些做成纯色差会让色觉障碍用户读不出自己选了什么，
  * 而问卷的每一个答案都会进入硬约束。
  */
@@ -86,6 +85,14 @@ export function CheckGroup({
       : undefined;
   const max = part.max;
   const full = max !== undefined && selected.length >= max;
+  const explicitEmpty =
+    part.empty_label !== undefined &&
+    (wrapped
+      ? typeof value === 'object' &&
+        value !== null &&
+        Array.isArray((value as Record<string, unknown>)['values']) &&
+        ((value as Record<string, unknown>)['values'] as readonly unknown[]).length === 0
+      : Array.isArray(value) && value.length === 0);
 
   const write = (values: readonly string[], other?: unknown): void => {
     if (!wrapped) {
@@ -104,6 +111,16 @@ export function CheckGroup({
   return (
     <div id={id} {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}>
       <div className="planner-choices" role="group">
+        {part.empty_label === undefined ? null : (
+          <button
+            type="button"
+            className={`planner-choice planner-choice--check${explicitEmpty ? ' planner-choice--on' : ''}`}
+            aria-pressed={explicitEmpty}
+            onClick={() => onChange(explicitEmpty ? undefined : wrapped ? { values: [] } : [])}
+          >
+            {part.empty_label}
+          </button>
+        )}
         {options.map((option) => {
           const on = selected.includes(option);
           return (
@@ -165,10 +182,10 @@ const STANCE_TEXT: Record<PlannerStance, string> = {
   EXCLUDE: '不要',
 };
 
-const STANCE_MARK: Record<PlannerStance, string> = {
-  PREFER: '♥',
-  REQUIRE: '★',
-  EXCLUDE: '✕',
+const STANCE_VISUAL: Record<PlannerStance, { readonly icon: string; readonly aria: string }> = {
+  PREFER: { icon: '♡', aria: '优先考虑' },
+  REQUIRE: { icon: '★', aria: '必须满足' },
+  EXCLUDE: { icon: '×', aria: '明确排除' },
 };
 
 export function TriStateTag({
@@ -180,8 +197,6 @@ export function TriStateTag({
   describedBy,
 }: ControlProps): React.ReactElement {
   const selections = asSelections(value);
-  /** 正在选态的那个 code。移动端的 bottom sheet 靠它显示（规范 19）*/
-  const [sheetCode, setSheetCode] = useState<string | null>(null);
 
   const nextStance = (current: PlannerStance | undefined): PlannerStance | undefined => {
     const index = STANCE_CYCLE.indexOf(current);
@@ -194,146 +209,42 @@ export function TriStateTag({
     onChange(next.length === 0 ? undefined : next);
   };
 
-  const sheetStance =
-    sheetCode === null ? undefined : selections.find((entry) => entry.code === sheetCode)?.stance;
-
   return (
-    <div
-      className="planner-tags"
-      role="group"
-      id={id}
-      {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}
-    >
-      {options.map((code) => {
-        const stance = selections.find((entry) => entry.code === code)?.stance;
-        const label = labelOf(code);
-        const upcoming = nextStance(stance);
-        return (
-          <span className="planner-tag-wrap" key={code}>
+    <div id={id} {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}>
+      <div className="planner-stance-guide" aria-label="多状态按钮说明">
+        <span className="planner-stance-guide__require">★ 必须满足</span>
+        <span className="planner-stance-guide__prefer">♡ 优先考虑</span>
+        <span className="planner-stance-guide__exclude">× 明确排除</span>
+        <small>连续点击可切换状态，再点一次可取消。</small>
+      </div>
+      <div className="planner-tags" role="group">
+        {options.map((code) => {
+          const stance = selections.find((entry) => entry.code === code)?.stance;
+          const label = labelOf(code);
+          const upcoming = nextStance(stance);
+          const visual = stance === undefined ? undefined : STANCE_VISUAL[stance];
+          return (
             <button
               type="button"
+              key={code}
               className={`planner-tag${stance === undefined ? '' : ` planner-tag--${stance.toLowerCase()}`}`}
               aria-label={
                 stance === undefined
-                  ? `${label}，未选择。点击设为${STANCE_TEXT[upcoming ?? 'PREFER']}`
-                  : `${label}，当前${STANCE_TEXT[stance]}。点击改为${upcoming === undefined ? '未选择' : STANCE_TEXT[upcoming]}`
+                  ? `${label}，未选择。点击设为${STANCE_VISUAL[upcoming ?? 'PREFER'].aria}`
+                  : `${label}，当前${visual?.aria ?? STANCE_TEXT[stance]}。点击改为${
+                      upcoming === undefined ? '未选择' : STANCE_VISUAL[upcoming].aria
+                    }`
               }
+              aria-pressed={stance !== undefined}
+              data-stance={stance ?? 'NONE'}
               onClick={() => write(code, upcoming)}
             >
-              {stance === undefined ? null : (
+              {visual === undefined ? null : (
                 <span className="planner-tag__mark" aria-hidden="true">
-                  {STANCE_MARK[stance]}
+                  {visual.icon}
                 </span>
               )}
-              {label}
-              {stance === undefined ? null : (
-                <span className="planner-tag__state"> · {STANCE_TEXT[stance]}</span>
-              )}
-            </button>
-
-            {/*
-              「更多」按钮：直接选态，不必循环点击（规范 19）。
-              CSS 只在 <768px 显示它 —— 桌面端循环点击很顺手，
-              而移动端「点三次才到不要」既慢又要求用户记住顺序。
-            */}
-            <button
-              type="button"
-              className="planner-tag__more"
-              aria-label={`${label}：直接选择偏好、必须或不要`}
-              aria-haspopup="dialog"
-              onClick={() => setSheetCode(code)}
-            >
-              ⋯
-            </button>
-          </span>
-        );
-      })}
-
-      {sheetCode === null ? null : (
-        <StanceSheet
-          label={labelOf(sheetCode)}
-          current={sheetStance}
-          onPick={(stance) => {
-            write(sheetCode, stance);
-            setSheetCode(null);
-          }}
-          onClose={() => setSheetCode(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-/**
- * 三态选择的 bottom sheet（规范 19：「不依赖连续点击或颜色记忆」）。
- *
- * 四个选项各占一行，当前态带勾。这是循环点击之外的**第二条**路径 ——
- * 循环点击在桌面端很顺手，但在移动端它要求用户记住「点第三次是不要」，
- * 而那正是规范 19 明令反对的。
- *
- * ## 为什么不用 `<dialog>`
- *
- * `showModal()` 需要 effect 或 ref 去调用，而 Esc 关闭、焦点陷阱、
- * 滚动锁定这些行为在这里都不需要（它是一个四项的选择器，不是表单）。
- * 一个带 `role="dialog"` 的 div 加 Esc 监听更小且行为可预测。
- */
-function StanceSheet({
-  label,
-  current,
-  onPick,
-  onClose,
-}: {
-  readonly label: string;
-  readonly current: PlannerStance | undefined;
-  readonly onPick: (stance: PlannerStance | undefined) => void;
-  readonly onClose: () => void;
-}): React.ReactElement {
-  const panel = useRef<HTMLDivElement>(null);
-
-  /* 打开时把焦点移进来 —— 否则键盘用户按 Tab 会走到被遮住的页面里 */
-  useEffect(() => {
-    panel.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const choices: readonly { readonly stance: PlannerStance | undefined; readonly text: string }[] =
-    [
-      { stance: 'PREFER', text: STANCE_TEXT.PREFER },
-      { stance: 'REQUIRE', text: STANCE_TEXT.REQUIRE },
-      { stance: 'EXCLUDE', text: STANCE_TEXT.EXCLUDE },
-      { stance: undefined, text: '不选' },
-    ];
-
-  return (
-    <div className="planner-sheet" role="presentation">
-      <div className="planner-sheet__scrim" onClick={onClose} aria-hidden="true" />
-      <div
-        className="planner-sheet__panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${label}：选择态度`}
-        tabIndex={-1}
-        ref={panel}
-      >
-        <p className="planner-sheet__title">{label}</p>
-        {choices.map((choice) => {
-          const on = choice.stance === current;
-          return (
-            <button
-              key={choice.text}
-              type="button"
-              className={`planner-sheet__option${on ? ' planner-sheet__option--on' : ''}`}
-              aria-pressed={on}
-              onClick={() => onPick(choice.stance)}
-            >
-              <span aria-hidden="true">{on ? '✓' : '　'}</span> {choice.text}
+              <span className="planner-tag__label">{label}</span>
             </button>
           );
         })}

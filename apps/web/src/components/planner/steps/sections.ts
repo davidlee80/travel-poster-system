@@ -47,7 +47,7 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
   ],
 
   '02': [
-    { title: '有几个人', fields: ['PV2-02-001', 'PV2-02-002'] },
+    { title: '旅行人员', fields: ['PV2-02-001', 'PV2-02-002'] },
     {
       title: '需要照顾的同行人',
       intro: '年龄是事实，行动能力是功能性约束 —— 我们不用年龄替代能力判断。',

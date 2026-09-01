@@ -1,13 +1,17 @@
 'use client';
 
-import { PLANNER_STEPS, type PlannerFieldId, type PlannerStepId } from '@tps/schemas';
+import {
+  PLANNER_FIELDS,
+  PLANNER_STEPS,
+  type PlannerFieldId,
+  type PlannerStepId,
+} from '@tps/schemas';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import { generatePlan, getJobStatus } from '@/lib/api-client';
 import { CreditHint, useCreditQuote } from './CreditHint';
 import type { GenerationPhase } from '@/lib/generation-dialog';
 import { buildPlannerRequest } from '@/lib/planner/request';
-import { buildSummary } from '@/lib/planner/summary';
 import { buildSnapshot, generateButtonLabel } from '@/lib/planner/step-state';
 import {
   INITIAL_PLANNER_STATE,
@@ -18,13 +22,14 @@ import {
 import { clearDraft, loadDraft, saveDraft, type SaveState } from '@/lib/planner/persistence';
 import { browserTimezone, newClientRequestId } from '@/lib/travel-request-form';
 import { AuthPanel } from '../AuthPanel';
-import { useSummaryLabel } from './PlannerConfigProvider';
 import { useSession } from '../SessionProvider';
+import { BudgetControl } from './BudgetControl';
 import { GenerationDialog } from './GenerationDialog';
 import { PrepCenter } from './PrepCenter';
 import { BlockerList, ReviewPanel } from './ReviewBoard';
 import { StepPage } from './StepPage';
 import { TemplatePicker } from './TemplatePicker';
+import { TravelersControl } from './TravelersControl';
 import { StepNav } from './shell/StepNav';
 import { SummaryRail } from './shell/SummaryRail';
 import { TopBar } from './shell/TopBar';
@@ -175,12 +180,6 @@ export function Planner(): React.ReactElement {
     () => buildSnapshot(state, { planGenerated: planId !== null }),
     [state, planId],
   );
-  /* 右栏文案与主栏用同一份配置，见 summary.ts 的 `LabelResolver` */
-  const summaryLabel = useSummaryLabel();
-  const sections = useMemo(
-    () => buildSummary(state, snapshot, summaryLabel),
-    [state, snapshot, summaryLabel],
-  );
   const metrics = useMemo(() => buildMetrics(state), [state]);
 
   /*
@@ -226,6 +225,19 @@ export function Planner(): React.ReactElement {
     }, 0);
   }, []);
 
+  /** 右栏状态卡直接定位到具体问题清单，避免只跳到确认页顶部却看不到要确认什么。 */
+  const jumpToReviewIssues = useCallback(() => {
+    goToStep('09');
+    setSummaryOpen(false);
+    setTimeout(() => {
+      const target = document.getElementById(
+        snapshot.blockers.length > 0 ? 'planner-blockers' : 'planner-verifications',
+      );
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target?.focus({ preventScroll: true });
+    }, 0);
+  }, [goToStep, snapshot.blockers.length]);
+
   async function poll(jobId: string, generatedPlanId: string): Promise<void> {
     const deadline = Date.now() + POLL_TIMEOUT_MS;
 
@@ -236,7 +248,7 @@ export function Planner(): React.ReactElement {
         reauthOn401(result.status);
         setPhase({
           kind: 'error',
-          message: result.message,
+          message: generationRequestError(result.message, result.field),
           retryable: result.retryable,
           needsAuth: result.status === 401,
         });
@@ -287,8 +299,7 @@ export function Planner(): React.ReactElement {
    */
   async function submit(): Promise<void> {
     if (snapshot.tripState === 'blocked' || snapshot.tripState === 'draft') {
-      goToStep('09');
-      setSummaryOpen(false);
+      jumpToReviewIssues();
       return;
     }
 
@@ -319,7 +330,7 @@ export function Planner(): React.ReactElement {
         reauthOn401(result.status);
         setPhase({
           kind: 'error',
-          message: result.message,
+          message: generationRequestError(result.message, result.field),
           retryable: result.retryable,
           needsAuth: result.status === 401,
           /*
@@ -381,6 +392,14 @@ export function Planner(): React.ReactElement {
     ),
   } as const;
 
+  const travelerSlots = {
+    'PV2-02-001': <TravelersControl state={state} dispatch={dispatch} />,
+  } as const;
+
+  const budgetSlots = {
+    'PV2-03-001': <BudgetControl state={state} dispatch={dispatch} />,
+  } as const;
+
   return (
     <div className="planner">
       <TopBar
@@ -391,12 +410,17 @@ export function Planner(): React.ReactElement {
         devMode={state.devMode}
         onToggleDevMode={() => dispatch({ type: 'setDevMode', on: !state.devMode })}
         showDevToggle={devAvailable}
+        menuOpen={menuOpen}
         onReset={() => {
+          if (!window.confirm('重新开始会清空当前旅行问卷，且无法撤销。确定继续吗？')) return;
           clearDraft();
           dispatch({ type: 'reset' });
           setSaveState('idle');
         }}
-        onToggleMenu={() => setMenuOpen((open) => !open)}
+        onToggleMenu={() => {
+          setSummaryOpen(false);
+          setMenuOpen((open) => !open);
+        }}
       >
         <AuthPanel />
       </TopBar>
@@ -411,7 +435,7 @@ export function Planner(): React.ReactElement {
         />
 
         <main className="planner-main">
-          {MAIN_STEPS.map((step) => (
+          {MAIN_STEPS.filter((step) => step === state.activeStep).map((step) => (
             <StepPage
               key={step}
               step={step}
@@ -423,6 +447,15 @@ export function Planner(): React.ReactElement {
               onNext={nextStep === undefined ? null : () => goToStep(nextStep)}
               nextLabel={nextMeta === undefined ? null : `下一步 · ${nextMeta.nav} →`}
               registerField={registerField}
+              {...(step === '02'
+                ? { slots: travelerSlots, hiddenFields: ['PV2-02-002'] as const }
+                : {})}
+              {...(step === '03'
+                ? {
+                    slots: budgetSlots,
+                    hiddenFields: ['PV2-03-002', 'PV2-03-003', 'PV2-03-004', 'PV2-03-005'] as const,
+                  }
+                : {})}
               {...(step === '09'
                 ? {
                     slots: reviewSlots,
@@ -462,10 +495,9 @@ export function Planner(): React.ReactElement {
         </main>
 
         <SummaryRail
-          sections={sections}
+          activeStep={state.activeStep}
           snapshot={snapshot}
           metrics={metrics}
-          onJumpToField={jumpToField}
           /*
            * 右栏的生成入口与第 9 步底部那个是**同一个动作**。
            *
@@ -476,20 +508,24 @@ export function Planner(): React.ReactElement {
            * 绕不过去，同时已经填完的用户也不必多点一次。
            */
           onGenerate={() => void submit()}
-          onJumpToVerify={() => goToStep('09')}
+          onJumpToVerify={jumpToReviewIssues}
           generateDisabled={busy || !signedIn || credits.insufficient}
           generateNote={<CreditHint hint={credits.hint} />}
           open={summaryOpen}
         />
       </div>
 
-      <button
-        type="button"
-        className="planner-button planner-button--primary planner-mobile-summary"
-        onClick={() => setSummaryOpen((open) => !open)}
-      >
-        查看旅行画像
-      </button>
+      {menuOpen || summaryOpen ? null : (
+        <button
+          type="button"
+          className="planner-button planner-button--primary planner-mobile-summary"
+          onClick={() => setSummaryOpen(true)}
+          aria-expanded="false"
+          aria-controls="planner-summary"
+        >
+          查看规划进度
+        </button>
+      )}
 
       {/* 窄屏抽屉的遮罩。点它收起，不改任何答案 */}
       <div
@@ -523,6 +559,32 @@ export function Planner(): React.ReactElement {
       </>
     );
   }
+}
+
+/**
+ * API 的错误信封已经带首个失败字段；生成弹层必须把它保留下来。
+ * `planner_profile` 内的路径优先翻译为问卷问题，原始路径继续显示，便于日志和
+ * 页面提示使用同一个定位依据。未知的投影字段也至少不会再被通用文案吞掉。
+ */
+function generationRequestError(message: string, field?: string): string {
+  if (field === undefined || field === 'body') return message;
+
+  const profilePath = field.startsWith('planner_profile.')
+    ? field.slice('planner_profile.'.length)
+    : null;
+  const spec =
+    profilePath === null
+      ? undefined
+      : [...PLANNER_FIELDS]
+          .sort((left, right) => right.api_key.length - left.api_key.length)
+          .find(
+            (candidate) =>
+              profilePath === candidate.api_key || profilePath.startsWith(`${candidate.api_key}.`),
+          );
+
+  return spec === undefined
+    ? `${message}（字段：${field}）`
+    : `${message}；请检查“${spec.question}”（字段：${field}）。`;
 }
 
 /**

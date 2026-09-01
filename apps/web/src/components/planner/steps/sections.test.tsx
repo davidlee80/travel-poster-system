@@ -263,6 +263,38 @@ describe('九步渲染出全部主问卷字段', () => {
 });
 
 describe('控件真的渲染出来了', () => {
+  it('空数组答案有明确的“无”入口，而不是要求用户先选中再取消', () => {
+    const snapshot = buildSnapshot(EMPTY);
+    const step7 = renderToStaticMarkup(
+      <StepPage
+        step="07"
+        active
+        state={EMPTY}
+        snapshot={snapshot}
+        dispatch={() => undefined}
+        onPrev={null}
+        onNext={null}
+        nextLabel={null}
+        registerField={() => undefined}
+      />,
+    );
+    const step8 = renderToStaticMarkup(
+      <StepPage
+        step="08"
+        active
+        state={EMPTY}
+        snapshot={snapshot}
+        dispatch={() => undefined}
+        onPrev={null}
+        onNext={null}
+        nextLabel={null}
+        registerField={() => undefined}
+      />,
+    );
+    expect(step7).toContain('没有特殊饮食要求');
+    expect(step8).toContain('没有相关活动');
+  });
+
   it('单选卡片渲染成一组 aria-pressed 按钮', () => {
     /*
      * 只断言 `data-field` 存在是不够的：一个空的 `<div data-field>` 也能过。
@@ -287,7 +319,7 @@ describe('控件真的渲染出来了', () => {
     expect(html).toContain('前后可差 3 天');
   });
 
-  it('三态标签把当前态写进文字与 aria-label，而不只靠颜色（规范 20）', () => {
+  it('三态标签只在选项文字前显示状态图标，并用 aria 属性表达具体含义', () => {
     const snapshot = buildSnapshot(RICH);
     const html = renderToStaticMarkup(
       <StepPage
@@ -302,8 +334,13 @@ describe('控件真的渲染出来了', () => {
         registerField={() => undefined}
       />,
     );
-    expect(html).toContain('· 偏好');
-    expect(html).toMatch(/aria-label="[^"]*当前偏好/);
+    expect(html).toContain('data-stance="PREFER"');
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toMatch(/planner-tag__mark[^>]*>♡<\/span><span class="planner-tag__label">/);
+    expect(html).toContain('★ 必须满足');
+    expect(html).toContain('× 明确排除');
+    expect(html).not.toContain('planner-tag__state');
+    expect(html).toMatch(/aria-label="[^"]*当前优先考虑/);
   });
 
   it('条件分支首次展开时带触发原因（规范 6 的「触发解释」）', () => {
@@ -416,12 +453,11 @@ describe('可访问性的可自动化部分（附录 C）', () => {
     expect(dangling).toEqual([]);
   });
 
-  it('状态不只靠颜色：三态标签与类型徽标都带文字', () => {
+  it('三态状态有可访问名称，字段头只显示“必须满足”徽标', () => {
     const markup = allMarkup();
-    /* 三态：选中的标签把态写在文字里 */
-    expect(markup).toMatch(/planner-tag__state[^>]*> · (偏好|必须|不要)/);
-    /* 类型徽标：文字 + aria-label */
-    expect(markup).toMatch(/planner-badge[^>]*aria-label="[^"]+"/);
+    expect(markup).toMatch(/planner-tag--prefer[^>]*aria-label="[^"]*当前优先考虑/);
+    expect(markup).toContain('planner-badge planner-badge--hard">必须满足');
+    expect(markup).not.toContain('planner-badge--fact');
   });
 
   it('折叠区用 aria-expanded 而不是只换一个图标', () => {

@@ -1,6 +1,6 @@
 import { plannerField, type PlannerFieldId } from '@tps/schemas';
 
-import { hasValue, readAnswer, type PlannerState } from './state';
+import { hasValue, isExplicitEmptyAnswer, readAnswer, type PlannerState } from './state';
 import { isTriggered } from './triggers';
 import { validateField } from './validation';
 
@@ -41,7 +41,8 @@ export type FieldState = (typeof FIELD_STATE_VALUES)[number];
 export function fieldState(state: PlannerState, fieldId: PlannerFieldId): FieldState {
   const spec = plannerField(fieldId);
   const value = readAnswer(state.answers, spec.api_key);
-  const answered = hasValue(value);
+  const explicitEmpty = isExplicitEmptyAnswer(state, fieldId);
+  const answered = hasValue(value) || explicitEmpty;
 
   if (!isTriggered(state, fieldId)) {
     return answered ? 'inactive' : 'hidden';
@@ -55,10 +56,13 @@ export function fieldState(state: PlannerState, fieldId: PlannerFieldId): FieldS
 
   if (!answered) return 'unanswered';
 
+  /* 明确选择“无”没有外部事实需要核验，即使字段类型是 VERIFY_BLOCKING。 */
+  if (explicitEmpty) return 'answered';
+
   /*
    * VERIFY 两级都落 `verify_pending`：用户答完了，但外部核验没做。
-   * 两级的差别在**是否阻塞生成**（见 step-state 与 trip-state），
-   * 不在字段状态 —— 把它编进状态会让状态机多两个态却不带新信息。
+   * 历史字段类型仍保留两级风险分类，但两者都不阻止初步方案生成；
+   * 核验优先级属于后台任务，不应该变成用户流程状态。
    */
   if (spec.runtime_type === 'VERIFY_BLOCKING' || spec.runtime_type === 'VERIFY_NONBLOCKING') {
     return 'verify_pending';

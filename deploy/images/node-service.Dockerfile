@@ -57,6 +57,7 @@ COPY tsconfig.base.json turbo.json ./
 COPY tools/ tools/
 COPY packages/ packages/
 COPY apps/ apps/
+COPY infrastructure/migrations infrastructure/migrations
 
 RUN pnpm --filter "@tps/${APP}..." run build
 
@@ -93,6 +94,9 @@ RUN groupadd --gid 10001 tps \
 
 WORKDIR /app
 COPY --from=build --chown=10001:10001 /out ./
+# 数据库迁移任务通过 MIGRATIONS_DIR=/app/migrations 使用；应用镜像也带同一份
+# 不可变迁移，避免“代码已经升级、数据库仍停在旧版本”的静默漂移。
+COPY --from=build --chown=10001:10001 /repo/infrastructure/migrations ./migrations
 
 USER 10001:10001
 EXPOSE ${PROBE_PORT}

@@ -7,6 +7,7 @@ import { buildSnapshot } from './step-state';
 import {
   INITIAL_PLANNER_STATE,
   hasValue,
+  isAnswered,
   plannerReducer,
   type PlannerAnswerPatch,
   type PlannerState,
@@ -71,6 +72,31 @@ describe('hasValue 的五种包装形状', () => {
 });
 
 describe('Field State（规范 5.1）', () => {
+  it('明确选择“无”的空数组算已回答，且无需进入外部核验', () => {
+    const state = answer(INITIAL_PLANNER_STATE, [
+      ['PV2-07-002', { food: { dietary_requirements: { values: [] } } }],
+      ['PV2-08-003', { special: { high_risk_activities: [] } }],
+    ]);
+
+    expect(isAnswered(state, 'PV2-07-002')).toBe(true);
+    expect(isAnswered(state, 'PV2-08-003')).toBe(true);
+    expect(fieldState(state, 'PV2-07-002')).toBe('answered');
+    expect(fieldState(state, 'PV2-08-003')).toBe('answered');
+
+    const snapshot = buildSnapshot(state);
+    expect(snapshot.blockers).not.toContain('PV2-07-002');
+    expect(snapshot.blockers).not.toContain('PV2-08-003');
+  });
+
+  it('旧草稿只有空数组但没有 touched 时仍是未回答', () => {
+    const restored: PlannerState = {
+      ...INITIAL_PLANNER_STATE,
+      answers: { special: { high_risk_activities: [] } },
+    };
+    expect(isAnswered(restored, 'PV2-08-003')).toBe(false);
+    expect(fieldState(restored, 'PV2-08-003')).toBe('unanswered');
+  });
+
   it('未触发且无草稿是 hidden，未触发但有草稿是 inactive', () => {
     const base = answer(INITIAL_PLANNER_STATE, SKELETON);
     expect(fieldState(base, 'PV2-07-004')).toBe('hidden');
@@ -208,20 +234,49 @@ describe('Trip State 与三个指标（规范 5.3、17.1）', () => {
     expect(snapshot.completeness).toBeLessThanOrEqual(100);
     expect(['draft', 'ready-for-plan', 'research-needed', 'blocked']).toContain(snapshot.tripState);
     expect(snapshot.verifyCount).toBe(0);
-    expect(snapshot.blockingVerifyCount).toBe(0);
   });
 
-  it('待核验总数与其中影响生成的数量分开（规范 17.1）', () => {
+  it('用户已回答后，系统待核验只计数，不阻碍生成流程', () => {
     const international = answer(INITIAL_PLANNER_STATE, [
       ...SKELETON,
       ['PV2-01-003', { trip: { destinations: [{ text: '东京', country: '日本' }] } }],
-      ['PV2-08-006', { documents: { passport_status: { user_reported: { status: 'VALID' } } } }],
+      ['PV2-06-002', { lodging: { rooms_count: 1 } }],
+      [
+        'PV2-06-003',
+        { lodging: { room_configuration: [{ room_index: 1, bed_type: 'DOUBLE', capacity: 2 }] } },
+      ],
+      ['PV2-07-002', { food: { dietary_requirements: { values: [] } } }],
+      ['PV2-07-003', { food: { has_allergies: 'NO' } }],
+      ['PV2-08-001', { special: { has_health_or_accessibility_needs: 'NO' } }],
+      ['PV2-08-003', { special: { high_risk_activities: [] } }],
+      ['PV2-08-004', { special: { medication_status: { user_reported: 'NO' } } }],
+      [
+        'PV2-08-005',
+        { documents: { nationality_residency: { nationality: '中国', residency: '中国' } } },
+      ],
+      [
+        'PV2-08-006',
+        {
+          documents: {
+            passport_status: {
+              user_reported: { status: 'VALID', expiry_date: '2030-01-01' },
+            },
+          },
+        },
+      ],
+      ['PV2-08-007', { documents: { visa_status: { user_reported: { status: 'MAYBE_EXEMPT' } } } }],
       ['PV2-08-008', { insurance: { status: { user_reported: 'WILL_BUY' } } }],
+      [
+        'PV2-09-001',
+        { review: { constraints_snapshot: { acknowledged_groups: ['SKELETON', 'MUST'] } } },
+      ],
+      ['PV2-09-005', { privacy: { trip_processing_consent: true } }],
     ]);
     const snapshot = buildSnapshot(international);
-    expect(snapshot.verifyCount).toBe(2);
-    /* 护照是 VERIFY-BLOCKING，保险是 VERIFY-NONBLOCKING */
-    expect(snapshot.blockingVerifyCount).toBe(1);
+    expect(snapshot.blockers).toEqual([]);
+    expect(snapshot.verifyCount).toBeGreaterThan(0);
+    expect(snapshot.stepStates.get('08')).not.toBe('needs-attention');
+    expect(snapshot.tripState).toBe('research-needed');
   });
 
   it('未触发的字段不拉低完整度（规范 6）', () => {
@@ -304,7 +359,7 @@ describe('右侧画像五组（规范 17）', () => {
     expect(locked.length).toBeGreaterThan(0);
   });
 
-  it('blocking 的待核验项排在「还需要确认」最前', () => {
+  it('待核验统一归入“系统待核验”，不再标记阻塞等级', () => {
     const state = answer(INITIAL_PLANNER_STATE, [
       ...SKELETON,
       ['PV2-01-003', { trip: { destinations: [{ text: '东京', country: '日本' }] } }],
@@ -312,7 +367,11 @@ describe('右侧画像五组（规范 17）', () => {
       ['PV2-08-007', { documents: { visa_status: { user_reported: { status: 'NOT_APPLIED' } } } }],
     ]);
     const verify = buildSummary(state, buildSnapshot(state)).find((s) => s.group === 'VERIFY');
-    expect(verify?.chips[0]?.blocking).toBe(true);
+    expect(verify?.title).toBe('系统待核验');
+    expect(verify?.chips.every((chip) => chip.kind === 'verify')).toBe(true);
+    expect(verify?.chips.map((chip) => chip.fieldId)).toEqual(
+      expect.arrayContaining(['PV2-08-007', 'PV2-08-008']),
+    );
   });
 
   it('每个 chip 都带回跳所需的来源字段与步骤（规范 17.2）', () => {

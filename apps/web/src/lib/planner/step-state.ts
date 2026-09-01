@@ -1,9 +1,4 @@
-import {
-  PLANNER_STEP_IDS,
-  plannerField,
-  type PlannerFieldId,
-  type PlannerStepId,
-} from '@tps/schemas';
+import { PLANNER_STEP_IDS, type PlannerFieldId, type PlannerStepId } from '@tps/schemas';
 
 import { fieldState, isSatisfied, type FieldState } from './field-state';
 import { fieldsOfStep, readAnswer, type PlannerState } from './state';
@@ -49,8 +44,6 @@ export interface PlannerSnapshot {
   readonly completeness: number;
   /** 待核验总数（规范 17.1 的第三个指标）*/
   readonly verifyCount: number;
-  /** 其中影响生成的（VERIFY-BLOCKING 未完成）*/
-  readonly blockingVerifyCount: number;
   /** 已触发但未满足的阻塞字段 */
   readonly blockers: readonly PlannerFieldId[];
 }
@@ -82,13 +75,9 @@ export function buildSnapshot(
 
   let answered = 0;
   let verifyCount = 0;
-  let blockingVerifyCount = 0;
-  for (const [fieldId, fs] of states) {
+  for (const fs of states.values()) {
     if (isSatisfied(fs)) answered += 1;
-    if (fs === 'verify_pending') {
-      verifyCount += 1;
-      if (plannerField(fieldId).runtime_type === 'VERIFY_BLOCKING') blockingVerifyCount += 1;
-    }
+    if (fs === 'verify_pending') verifyCount += 1;
   }
 
   /*
@@ -108,14 +97,12 @@ export function buildSnapshot(
     stepStates,
     tripState: computeTripState(state, {
       blockers,
-      blockingVerifyCount,
       verifyCount,
       invalidCount: [...states.values()].filter((fs) => fs === 'invalid').length,
       planGenerated: options.planGenerated ?? false,
     }),
     completeness,
     verifyCount,
-    blockingVerifyCount,
     blockers,
   };
 }
@@ -133,17 +120,11 @@ function computeStepState(
   const touchedHere = fields.some((spec) => state.touched.includes(spec.field_id));
 
   const hasInvalid = fields.some((spec) => states.get(spec.field_id) === 'invalid');
-  const hasBlockingVerify = fields.some(
-    (spec) =>
-      spec.runtime_type === 'VERIFY_BLOCKING' && states.get(spec.field_id) === 'verify_pending',
-  );
-
   /*
-   * needs-attention 优先于一切，且**不要求用户碰过这一步**：跨境条件是由第 1 步的
-   * 目的地自动触发的，用户可能从没打开过第 8 步而那里已经有一个阻塞的护照问题。
-   * 要求 touched 才报警会让那个红点永远不亮。
+   * needs-attention 只表示用户仍需修正无效输入。系统待核验是后台工作，
+   * 用户已经完成回答，因此不能让步骤变红或阻止用户继续。
    */
-  if (hasInvalid || hasBlockingVerify) return 'needs-attention';
+  if (hasInvalid) return 'needs-attention';
 
   const missingBlockers = fields.filter((spec) => blockerSet.has(spec.field_id));
   if (missingBlockers.length > 0) return touchedHere ? 'in-progress' : 'untouched';
@@ -167,7 +148,6 @@ function computeTripState(
   state: PlannerState,
   input: {
     readonly blockers: readonly PlannerFieldId[];
-    readonly blockingVerifyCount: number;
     readonly verifyCount: number;
     readonly invalidCount: number;
     readonly planGenerated: boolean;
@@ -183,14 +163,14 @@ function computeTripState(
    */
   if (state.touched.length === 0) return 'draft';
 
-  if (input.blockers.length > 0 || input.blockingVerifyCount > 0 || input.invalidCount > 0) {
+  if (input.blockers.length > 0 || input.invalidCount > 0) {
     return 'blocked';
   }
 
   /* 授权是独立的阻塞项：不同意就不能处理需要敏感数据的功能（规范 15）*/
   if (readAnswer(state.answers, 'privacy.trip_processing_consent') !== true) return 'blocked';
 
-  /* 非阻塞 VERIFY 允许先生成，但输出必须带待核验标识（规范 5.3）*/
+  /* 所有系统待核验项都允许先生成，输出中保留待核验标识。 */
   return input.verifyCount > 0 ? 'research-needed' : 'ready-for-plan';
 }
 
@@ -211,7 +191,7 @@ export const STEP_STATE_LABEL: Record<StepState, string> = {
 export const TRIP_STATE_LABEL: Record<TripState, string> = {
   draft: '继续完善旅行画像',
   'ready-for-plan': '可以生成初步方案',
-  'research-needed': '可以生成，仍有待确认项',
+  'research-needed': '可以生成，仍有系统待核验项',
   blocked: '还有问题需要处理',
   'plan-generated': '已生成初步方案',
 };
@@ -229,7 +209,7 @@ export const TRIP_STATE_LABEL: Record<TripState, string> = {
 export function generateButtonLabel(tripState: TripState, verifyCount: number): string {
   switch (tripState) {
     case 'research-needed':
-      return `生成初步方案 · 仍有 ${verifyCount} 项待确认`;
+      return `生成初步方案 · 仍有 ${verifyCount} 项系统待核验`;
     /* 可点击而不是 disabled：点了进入问题定位（规范 18 明确反对纯 disabled）*/
     case 'blocked':
       return '查看还有什么问题';

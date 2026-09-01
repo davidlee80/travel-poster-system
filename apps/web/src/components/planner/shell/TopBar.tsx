@@ -19,6 +19,7 @@ export interface TopBarProps {
   readonly onToggleDevMode: () => void;
   /** 是否显示 Dev Mode 开关。生产端默认隐藏（规范 21.1）*/
   readonly showDevToggle: boolean;
+  readonly menuOpen: boolean;
   readonly onReset: () => void;
   readonly onToggleMenu: () => void;
   /** 账号入口。由调用方传入 `<AuthPanel />`，本组件不关心登录逻辑 */
@@ -31,6 +32,7 @@ export function TopBar({
   devMode,
   onToggleDevMode,
   showDevToggle,
+  menuOpen,
   onReset,
   onToggleMenu,
   children,
@@ -44,7 +46,9 @@ export function TopBar({
           type="button"
           className="planner-menu-button planner-button planner-button--light"
           onClick={onToggleMenu}
-          aria-label="打开步骤导航"
+          aria-label={menuOpen ? '关闭步骤导航' : '打开步骤导航'}
+          aria-expanded={menuOpen}
+          aria-controls="planner-step-nav"
         >
           ☰
         </button>
@@ -62,16 +66,22 @@ export function TopBar({
           `aria-live="polite"`：保存状态是自动变化的，屏读用户需要被动知道它。
           用 polite 而不是 assertive —— 它不该打断用户正在填的那个字段。
         */}
-        <button
-          type="button"
-          className="planner-save-state"
-          onClick={failed ? onRetrySave : undefined}
-          disabled={!failed}
-          aria-live="polite"
-        >
-          <i className={`planner-save-state__dot planner-save-state__dot--${saveState}`} />
-          {SAVE_STATE_LABEL[saveState]}
-        </button>
+        {failed ? (
+          <button
+            type="button"
+            className="planner-save-state"
+            onClick={onRetrySave}
+            aria-live="polite"
+          >
+            <i className={`planner-save-state__dot planner-save-state__dot--${saveState}`} />
+            {SAVE_STATE_LABEL[saveState]}
+          </button>
+        ) : (
+          <div className="planner-save-state" role="status" aria-live="polite">
+            <i className={`planner-save-state__dot planner-save-state__dot--${saveState}`} />
+            {SAVE_STATE_LABEL[saveState]}
+          </div>
+        )}
 
         {showDevToggle ? (
           <button

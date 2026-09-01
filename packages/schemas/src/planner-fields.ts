@@ -235,10 +235,10 @@ export const PLANNER_STEPS = [
   },
   {
     step: '02',
-    nav: '同行伙伴',
-    title: '谁会和你一起出发？',
+    nav: '旅行人员',
+    title: '这次旅行都有谁？',
     module: '谁一起旅行',
-    intro: '年龄与关系是事实，行动能力和儿童需求是功能性约束，不用年龄替代能力判断。',
+    intro: '包括你自己在内，按年龄段添加所有旅行人员；行动能力仍由你单独判断。',
   },
   {
     step: '03',
@@ -287,7 +287,7 @@ export const PLANNER_STEPS = [
     nav: '确认旅程',
     title: '这是我们理解的你',
     module: '确认你的旅行画像',
-    intro: '不重复问卷，而是确认理解、集中解决待确认项、完成授权并进入生成。',
+    intro: '不重复问卷，而是确认理解、集中解决待补充项、查看系统核验状态、完成授权并进入生成。',
   },
   {
     step: '10',
@@ -1431,7 +1431,7 @@ export const PLANNER_FIELDS = [
     summary_group: 'VERIFY',
     sensitivity: 'SENSITIVE',
     data_type: 'object',
-    question: '补充会阻塞方案的待确认问题',
+    question: '补充会阻塞方案生成的问题',
     control: '动态问题列表',
     trigger: '存在blocker=是且状态未完成',
     validation: '只显示真正阻塞或高风险项目',
@@ -1702,15 +1702,15 @@ export const PLANNER_RUNTIME_TYPE_META: Record<PlannerRuntimeType, PlannerRuntim
     summary_group: 'PREFER',
   },
   VERIFY_BLOCKING: {
-    label: '待确认（阻塞）',
-    semantic: '未完成必要回答或确认时阻止生成',
-    aria: '待确认，会影响生成',
+    label: '待系统核验',
+    semantic: '用户完成必要回答后由系统继续核验，不阻止初步方案生成',
+    aria: '待系统核验，不影响生成',
     summary_group: 'VERIFY',
   },
   VERIFY_NONBLOCKING: {
-    label: '待确认',
+    label: '待系统核验',
     semantic: '可先生成初步方案，但结果中必须标明尚未核验',
-    aria: '待确认，不影响生成',
+    aria: '待系统核验，不影响生成',
     summary_group: 'VERIFY',
   },
   CONSENT: {

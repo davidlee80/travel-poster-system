@@ -132,9 +132,35 @@ export function hasValue(value: unknown): boolean {
   return Object.values(record).some((entry) => hasValue(entry));
 }
 
+/**
+ * 这些契约字段用空数组表达用户明确选择了「无」。
+ *
+ * 只有值为空且字段确实被操作过才算答案；恢复一份仅带默认空数组、但没有
+ * touched 记录的旧草稿时仍保持“未回答”，避免把机器默认值冒充用户确认。
+ */
+const EXPLICIT_EMPTY_FIELDS = new Set<PlannerFieldId>([
+  'PV2-01-008',
+  'PV2-07-002',
+  'PV2-08-003',
+  'PV2-08-009',
+]);
+
+export function isExplicitEmptyAnswer(state: PlannerState, fieldId: PlannerFieldId): boolean {
+  if (!EXPLICIT_EMPTY_FIELDS.has(fieldId) || !isTouched(state, fieldId)) return false;
+  const value = readAnswer(state.answers, plannerField(fieldId).api_key);
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value !== 'object' || value === null) return false;
+  const values = (value as Record<string, unknown>)['values'];
+  const other = (value as Record<string, unknown>)['other_text'];
+  return Array.isArray(values) && values.length === 0 && !hasValue(other);
+}
+
 /** 这个字段有没有答案 */
 export function isAnswered(state: PlannerState, fieldId: PlannerFieldId): boolean {
-  return hasValue(readAnswer(state.answers, plannerField(fieldId).api_key));
+  return (
+    hasValue(readAnswer(state.answers, plannerField(fieldId).api_key)) ||
+    isExplicitEmptyAnswer(state, fieldId)
+  );
 }
 
 export function isTouched(state: PlannerState, fieldId: PlannerFieldId): boolean {

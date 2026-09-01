@@ -185,10 +185,13 @@ export function PlaceList({
       ) : (
         <button
           type="button"
-          className="planner-button planner-button--light"
+          className="planner-add-card"
           onClick={() => onChange([...places, { text: '' }])}
         >
-          ＋ {part.add_label ?? '添加'}
+          <span className="planner-add-card__plus" aria-hidden="true">
+            ＋
+          </span>
+          <span>{part.add_label ?? '添加目的地 / 备选目的地'}</span>
         </button>
       )}
     </div>

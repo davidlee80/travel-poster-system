@@ -246,8 +246,23 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
 
     const parsed = TravelRequestUISchema.safeParse(request.body);
     if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const field = issue?.path.join('.') ?? 'body';
+      /*
+       * 不记录请求值，只记录 Zod 的结构化路径与错误类型。否则前端仅显示
+       * REQ_SCHEMA_INVALID 时，服务端也无法判断究竟是哪一个表单字段失配；
+       * 直接记录 request.body 又会把健康、证件等敏感答案写进日志。
+       */
+      request.log.warn(
+        {
+          error_code: 'REQ_SCHEMA_INVALID',
+          field,
+          issue_code: issue?.code ?? 'unknown',
+        },
+        '旅行攻略生成请求格式校验失败',
+      );
       return fail(request, reply, 'REQ_SCHEMA_INVALID', {
-        field: parsed.error.issues[0]?.path.join('.') ?? 'body',
+        field,
       });
     }
 

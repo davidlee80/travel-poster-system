@@ -231,6 +231,13 @@ export interface FieldPart {
   readonly step?: number;
   readonly placeholder?: string;
   readonly hint?: string;
+  /**
+   * 多选允许用空数组表达「明确没有」时显示的选项。
+   *
+   * `undefined` 是尚未回答，`[]` / `{ values: [] }` 是用户明确选择了没有；
+   * 两者不能只靠选项数组长度区分，因此由描述符显式声明入口。
+   */
+  readonly empty_label?: string;
   /** 兄弟键选中某个值时才显示。为空时恒显示 */
   readonly requires?: { readonly key: string; readonly value: string };
   /** `object-list` 每行的部件 */
@@ -297,7 +304,10 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   'PV2-01-005': one('choice', { options: DATE_FLEXIBILITY_VALUES }),
   'PV2-01-006': one('check-other', { options: TRIP_PURPOSE_VALUES, max: 4 }),
   'PV2-01-007': one('rank-other', { options: TOP_GOAL_VALUES, max: 3 }),
-  'PV2-01-008': one('check', { options: LOCKED_ORDER_TYPE_VALUES }),
+  'PV2-01-008': one('check', {
+    options: LOCKED_ORDER_TYPE_VALUES,
+    empty_label: '暂无不可变预订',
+  }),
   'PV2-01-009': {
     kind: 'parts',
     parts: [
@@ -549,14 +559,17 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
         primitive: 'time',
         label: '预计到店时间',
         requires: { key: 'needs', value: 'LATE_CHECK_IN' },
-        hint: '晚于前台服务时间时，我们会把它列为待确认项。',
+        hint: '晚于前台服务时间时，我们会把它列为供应商待核验项。',
       },
     ],
   },
 
   // ── 07 吃好也玩好 ────────────────────────────────────────
   'PV2-07-001': one('check', { options: FOOD_EXPERIENCE_VALUES }),
-  'PV2-07-002': one('check-other', { options: DIETARY_REQUIREMENT_VALUES }),
+  'PV2-07-002': one('check-other', {
+    options: DIETARY_REQUIREMENT_VALUES,
+    empty_label: '没有特殊饮食要求',
+  }),
   'PV2-07-003': one('choice', { options: TRISTATE_ANSWER_VALUES }),
   'PV2-07-004': {
     kind: 'parts',
@@ -642,7 +655,10 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   // ── 08 特别关照 ──────────────────────────────────────────
   'PV2-08-001': one('choice', { options: TRISTATE_ANSWER_VALUES }),
   'PV2-08-002': one('check-other', { options: HEALTH_NEED_VALUES }),
-  'PV2-08-003': one('check', { options: HIGH_RISK_ACTIVITY_VALUES }),
+  'PV2-08-003': one('check', {
+    options: HIGH_RISK_ACTIVITY_VALUES,
+    empty_label: '没有相关活动',
+  }),
   'PV2-08-004': {
     kind: 'parts',
     reported: true,
@@ -676,7 +692,10 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
     reported: true,
     parts: [{ key: null, primitive: 'choice', options: INSURANCE_STATUS_VALUES }],
   },
-  'PV2-08-009': one('check', { options: SAFETY_CONTEXT_VALUES }),
+  'PV2-08-009': one('check', {
+    options: SAFETY_CONTEXT_VALUES,
+    empty_label: '没有需要补充的安全背景',
+  }),
   'PV2-08-010': {
     kind: 'parts',
     toggle: '行程中有不能移动的工作安排',

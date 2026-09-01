@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+
 import { asStringList } from '@/lib/planner/field-io';
 
 import type { ControlProps } from './control-props';
@@ -185,12 +187,18 @@ export function MoneyRange({
 }: ControlProps): React.ReactElement {
   const record =
     typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
-  const min = record['min'];
-  const max = record['max'];
+  const externalMin = typeof record['min'] === 'number' ? String(record['min']) : '';
+  const externalMax = typeof record['max'] === 'number' ? String(record['max']) : '';
+  const [draft, setDraft] = useState({ min: externalMin, max: externalMax });
 
-  const write = (nextMin: unknown, nextMax: unknown): void => {
-    if (typeof nextMin === 'number' && typeof nextMax === 'number') {
-      onChange({ min: nextMin, max: nextMax });
+  useEffect(() => {
+    setDraft({ min: externalMin, max: externalMax });
+  }, [externalMin, externalMax]);
+
+  const write = (nextMin: string, nextMax: string): void => {
+    setDraft({ min: nextMin, max: nextMax });
+    if (nextMin !== '' && nextMax !== '') {
+      onChange({ min: Number(nextMin), max: Number(nextMax) });
       return;
     }
     /*
@@ -214,10 +222,8 @@ export function MoneyRange({
         min={part.min ?? 0}
         aria-label="最低"
         placeholder="最低"
-        value={typeof min === 'number' ? String(min) : ''}
-        onChange={(event) =>
-          write(event.target.value === '' ? undefined : Number(event.target.value), max)
-        }
+        value={draft.min}
+        onChange={(event) => write(event.target.value, draft.max)}
       />
       <span className="planner-range__sep" aria-hidden="true">
         ～
@@ -229,10 +235,8 @@ export function MoneyRange({
         min={part.min ?? 0}
         aria-label="最高"
         placeholder="最高"
-        value={typeof max === 'number' ? String(max) : ''}
-        onChange={(event) =>
-          write(min, event.target.value === '' ? undefined : Number(event.target.value))
-        }
+        value={draft.max}
+        onChange={(event) => write(draft.min, event.target.value)}
       />
     </div>
   );
@@ -257,10 +261,16 @@ export function TimeInput({ value, onChange, id, describedBy }: ControlProps): R
 export function DualTime({ value, onChange, id, describedBy }: ControlProps): React.ReactElement {
   const record =
     typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
-  const start = typeof record['start'] === 'string' ? record['start'] : '';
-  const end = typeof record['end'] === 'string' ? record['end'] : '';
+  const externalStart = typeof record['start'] === 'string' ? record['start'] : '';
+  const externalEnd = typeof record['end'] === 'string' ? record['end'] : '';
+  const [draft, setDraft] = useState({ start: externalStart, end: externalEnd });
+
+  useEffect(() => {
+    setDraft({ start: externalStart, end: externalEnd });
+  }, [externalStart, externalEnd]);
 
   const write = (nextStart: string, nextEnd: string): void => {
+    setDraft({ start: nextStart, end: nextEnd });
     if (nextStart === '' || nextEnd === '') {
       onChange(undefined);
       return;
@@ -268,7 +278,7 @@ export function DualTime({ value, onChange, id, describedBy }: ControlProps): Re
     onChange({ start: nextStart, end: nextEnd });
   };
 
-  const crossesMidnight = start !== '' && end !== '' && end <= start;
+  const crossesMidnight = draft.start !== '' && draft.end !== '' && draft.end <= draft.start;
 
   return (
     <div id={id} {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}>
@@ -277,8 +287,8 @@ export function DualTime({ value, onChange, id, describedBy }: ControlProps): Re
           className="planner-input planner-input--time"
           type="time"
           aria-label="开始时间"
-          value={start}
-          onChange={(event) => write(event.target.value, end)}
+          value={draft.start}
+          onChange={(event) => write(event.target.value, draft.end)}
         />
         <span className="planner-range__sep" aria-hidden="true">
           –
@@ -287,8 +297,8 @@ export function DualTime({ value, onChange, id, describedBy }: ControlProps): Re
           className="planner-input planner-input--time"
           type="time"
           aria-label="结束时间"
-          value={end}
-          onChange={(event) => write(start, event.target.value)}
+          value={draft.end}
+          onChange={(event) => write(draft.start, event.target.value)}
         />
       </div>
       {crossesMidnight ? (
@@ -315,10 +325,16 @@ export function DateInput({ value, onChange, id, describedBy }: ControlProps): R
 export function DateRange({ value, onChange, id, describedBy }: ControlProps): React.ReactElement {
   const record =
     typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
-  const start = typeof record['start_date'] === 'string' ? record['start_date'] : '';
-  const end = typeof record['end_date'] === 'string' ? record['end_date'] : '';
+  const externalStart = typeof record['start_date'] === 'string' ? record['start_date'] : '';
+  const externalEnd = typeof record['end_date'] === 'string' ? record['end_date'] : '';
+  const [draft, setDraft] = useState({ start: externalStart, end: externalEnd });
+
+  useEffect(() => {
+    setDraft({ start: externalStart, end: externalEnd });
+  }, [externalStart, externalEnd]);
 
   const write = (nextStart: string, nextEnd: string): void => {
+    setDraft({ start: nextStart, end: nextEnd });
     if (nextStart === '' || nextEnd === '') {
       onChange(undefined);
       return;
@@ -336,8 +352,8 @@ export function DateRange({ value, onChange, id, describedBy }: ControlProps): R
         className="planner-input planner-input--date"
         type="date"
         aria-label="出发日期"
-        value={start}
-        onChange={(event) => write(event.target.value, end)}
+        value={draft.start}
+        onChange={(event) => write(event.target.value, draft.end)}
       />
       <span className="planner-range__sep" aria-hidden="true">
         至
@@ -346,8 +362,8 @@ export function DateRange({ value, onChange, id, describedBy }: ControlProps): R
         className="planner-input planner-input--date"
         type="date"
         aria-label="返回日期"
-        value={end}
-        onChange={(event) => write(start, event.target.value)}
+        value={draft.end}
+        onChange={(event) => write(draft.start, event.target.value)}
       />
     </div>
   );

@@ -38,6 +38,8 @@ export interface StepPageProps {
   readonly registerField: (fieldId: PlannerFieldId, node: HTMLElement | null) => void;
   /** 某些字段的内容由本步骤的专用面板承载（第 9 步的复核面板与阻塞项列表） */
   readonly slots?: Partial<Record<PlannerFieldId, React.ReactNode>>;
+  /** 被组合控件承载、无需重复显示的底层字段。字段仍保留在数据契约和状态机中。 */
+  readonly hiddenFields?: readonly PlannerFieldId[];
   /**
    * 字段区块之后、底部动作区之前的内容（第 9 步的输出样式选择器）。
    *
@@ -62,11 +64,13 @@ export function StepPage({
   nextLabel,
   registerField,
   slots,
+  hiddenFields = [],
   beforeActions,
   actions,
 }: StepPageProps): React.ReactElement {
   const meta = PLANNER_STEPS.find((entry) => entry.step === step);
   const triggered = new Set(snapshot.triggered);
+  const hidden = new Set(hiddenFields);
   const sections = STEP_SECTIONS[step];
 
   return (
@@ -93,7 +97,9 @@ export function StepPage({
       </header>
 
       {sections.map((section) => {
-        const fields = section.fields.filter((fieldId) => triggered.has(fieldId));
+        const fields = section.fields.filter(
+          (fieldId) => triggered.has(fieldId) && !hidden.has(fieldId),
+        );
         if (fields.length === 0) return null;
         return (
           <div className="planner-block" key={section.title}>

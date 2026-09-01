@@ -369,6 +369,12 @@ describe('D-06 订单链与阻塞项', () => {
     expect(blockers).not.toContain('PV2-07-004');
   });
 
+  it('未填写的可选硬约束不阻塞生成', () => {
+    const blockers = unresolvedBlockers(DOMESTIC_TWO_ADULTS);
+    expect(blockers).not.toContain('PV2-03-005');
+    expect(blockers).not.toContain('PV2-07-008');
+  });
+
   it('阻塞清单不含 PV2-09-002 —— 它的触发条件就是这份清单，会无限递归', () => {
     expect(unresolvedBlockers(INITIAL_PLANNER_STATE)).not.toContain('PV2-09-002');
   });

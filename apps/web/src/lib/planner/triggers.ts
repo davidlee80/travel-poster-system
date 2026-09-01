@@ -6,7 +6,7 @@ import {
   type PlannerStance,
 } from '@tps/schemas';
 
-import { hasValue, isOptedIn, type PlannerState } from './state';
+import { hasValue, isAnswered, isOptedIn, type PlannerState } from './state';
 
 /**
  * 条件触发引擎（规范 6 与附录 B 的 D-01～D-08）。
@@ -296,8 +296,10 @@ export function triggeredFields(state: PlannerState): readonly PlannerFieldId[] 
 /**
  * 已触发但仍未满足的阻塞字段。
  *
- * 「阻塞」= 元数据的 `blocking` 为 `ALWAYS`，或为 `CONDITIONAL` 且已触发。
+ * 「阻塞」= 必填字段的 `blocking` 为 `ALWAYS`，或为 `CONDITIONAL` 且已触发。
  * 只看已触发的字段（规范 6：未触发字段不占完成度、不作为缺失项）。
+ * `OPTIONAL + CONDITIONAL` 表示「用户填写后作为硬约束校验」，并不表示空值也要阻塞；
+ * 这类字段的半成品由 validation 负责拦截。
  *
  * **跳过 PV2-09-002**：它自己的触发条件就是「存在未完成的阻塞项」，
  * 算进来会无限递归。它是一个元字段 —— 承载的是「在第 9 步就地补答」这个动作，
@@ -309,21 +311,14 @@ export function unresolvedBlockers(state: PlannerState): readonly PlannerFieldId
     if (spec.field_id === 'PV2-09-002') return false;
     if (spec.level === 'POST_PLAN') return false;
     if (spec.blocking === 'NEVER') return false;
+    if (spec.required === 'OPTIONAL') return false;
 
     const trigger = TRIGGERS[spec.field_id];
     const triggered = trigger === undefined || trigger(ctx, state);
     if (!triggered) return false;
 
-    return !hasValue(readAnswerOf(state, spec.field_id));
+    return !isAnswered(state, spec.field_id);
   }).map((spec) => spec.field_id);
-}
-
-function readAnswerOf(state: PlannerState, fieldId: PlannerFieldId): unknown {
-  const spec = plannerField(fieldId);
-  const dot = spec.api_key.indexOf('.');
-  const block = (state.answers as Record<string, unknown>)[spec.api_key.slice(0, dot)];
-  if (typeof block !== 'object' || block === null) return undefined;
-  return (block as Record<string, unknown>)[spec.api_key.slice(dot + 1)];
 }
 
 /**
@@ -353,5 +348,5 @@ export const TRIGGER_REASON: Partial<Record<PlannerFieldId, string>> = {
   'PV2-08-007': '因为这是跨境旅行，签证或 ETA 的办理时间需要排进时间线。',
   'PV2-08-009': '因为存在独行、夜间活动或深夜抵达，我们会提高安全阈值。',
   'PV2-08-010': '因为行程中有不能移动的工作安排，它会成为硬约束。',
-  'PV2-09-002': '这些是会影响生成结果的问题，就地补答即可，不必回到前面的步骤。',
+  'PV2-09-002': '这些信息仍需要你补充，就地回答即可，不必回到前面的步骤。',
 };

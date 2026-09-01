@@ -49,6 +49,7 @@ export function StepNav({
 }: StepNavProps): React.ReactElement {
   return (
     <aside
+      id="planner-step-nav"
       className={`planner-panel planner-left${open ? ' planner-left--open' : ''}`}
       aria-label="步骤导航与旅行画像进度"
     >
@@ -114,19 +115,11 @@ export function StepNav({
           {TRIP_STATE_LABEL[snapshot.tripState]}
         </p>
 
-        {/*
-          待核验的两个数字分开写。规范 17.1 给的范例就是这句：
-          「3 项待确认，其中 1 项影响最终锁定」。只写总数会让用户无法判断
-          现在能不能生成。
-        */}
+        {/* 待核验是后台状态，不代表用户还有未完成事项，也不阻碍生成。 */}
         <p className="planner-progress__verify">
           {snapshot.verifyCount === 0
-            ? '暂无待确认项'
-            : `${snapshot.verifyCount} 项待确认${
-                snapshot.blockingVerifyCount > 0
-                  ? `，其中 ${snapshot.blockingVerifyCount} 项影响生成`
-                  : ''
-              }`}
+            ? '暂无系统待核验项'
+            : `${snapshot.verifyCount} 项待系统核验，不影响生成`}
         </p>
       </div>
 

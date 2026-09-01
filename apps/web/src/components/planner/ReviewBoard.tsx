@@ -59,8 +59,14 @@ export function ReviewPanel({
 }: Omit<ReviewBoardProps, 'registerField'>): React.ReactElement {
   /* 右栏文案与主栏用同一份配置，见 summary.ts 的 `LabelResolver` */
   const summaryLabel = useSummaryLabel();
-  const sections = buildSummary(state, snapshot, summaryLabel);
+  /* VERIFY 已由上方的系统核验清单集中展示，避免同一答案在确认页重复出现。 */
+  const sections = buildSummary(state, snapshot, summaryLabel).filter(
+    (section) => section.group !== 'VERIFY',
+  );
   const conflicts = invalidFields(state, snapshot.triggered);
+  const pendingVerify = snapshot.triggered.filter(
+    (fieldId) => snapshot.states.get(fieldId) === 'verify_pending',
+  );
 
   const acknowledged = acknowledgedGroups(state);
   const toggleGroup = (group: string): void => {
@@ -110,6 +116,10 @@ export function ReviewPanel({
         </div>
       )}
 
+      {pendingVerify.length === 0 ? null : (
+        <VerificationList pending={pendingVerify} onJumpToField={onJumpToField} />
+      )}
+
       {sections.map((section) => {
         const done = acknowledged.includes(section.group);
         return (
@@ -151,8 +161,8 @@ export function ReviewPanel({
       {/*
         三个指标分开显示（规范 17.1）。
         它们**不是**同一件事的三种说法：完整度高不代表可以生成（可能缺一个
-        阻塞项），可以生成也不代表没有待核验项。合成一个数字会让用户
-        无法判断自己该做什么。
+        阻塞项），待核验只代表系统还有后台工作。合成一个数字会让用户
+        误以为自己还需要操作。
       */}
       <dl className="planner-review__metrics">
         <div>
@@ -160,13 +170,8 @@ export function ReviewPanel({
           <dd>{snapshot.completeness}%</dd>
         </div>
         <div>
-          <dt>待确认</dt>
-          <dd>
-            {snapshot.verifyCount} 项
-            {snapshot.blockingVerifyCount > 0
-              ? `（其中 ${snapshot.blockingVerifyCount} 项影响生成）`
-              : ''}
-          </dd>
+          <dt>系统待核验</dt>
+          <dd>{snapshot.verifyCount} 项（不影响生成）</dd>
         </div>
         <div>
           <dt>还缺</dt>
@@ -183,12 +188,8 @@ export function ReviewPanel({
  * 列表里同时有两类项目，且它们的处理方式不同：
  *
  *   - **未回答的阻塞字段**（`snapshot.blockers`）—— 渲染真正的控件，就地填。
- *   - **已回答但待外部核验的阻塞字段**（VERIFY-BLOCKING）—— 用户那一侧已经
- *     做完了，不该再要他填一次。这里只列出来说明「它为什么还拦着」，
- *     因为后台核验不在本轮范围内（见实施计划的「明确不在本轮范围」）。
- *
- * 把两类合成一个「请补充」列表会让第二类变成一个永远填不完的项目 ——
- * 用户反复填同一个护照状态，而按钮始终说「还有 1 项待确认」。
+ * 已回答但待外部核验的字段由上面的 `ReviewPanel` 单独列出；不能把它们合成
+ * 一个「请补充」列表，否则用户会反复填写同一项，而状态始终不消失。
  */
 export function BlockerList({
   state,
@@ -197,13 +198,7 @@ export function BlockerList({
   onJumpToField,
   registerField,
 }: ReviewBoardProps): React.ReactElement {
-  const pendingVerify = snapshot.triggered.filter(
-    (fieldId) =>
-      plannerField(fieldId).runtime_type === 'VERIFY_BLOCKING' &&
-      snapshot.states.get(fieldId) === 'verify_pending',
-  );
-
-  if (snapshot.blockers.length === 0 && pendingVerify.length === 0) {
+  if (snapshot.blockers.length === 0) {
     return <p className="planner-hint">没有会阻塞生成的问题了。</p>;
   }
 
@@ -234,50 +229,91 @@ export function BlockerList({
   };
 
   return (
-    <div className="planner-blockers">
-      {snapshot.blockers.map((fieldId) => (
-        <div className="planner-blockers__item" key={fieldId}>
-          <p className="planner-blockers__from">{whereFrom(fieldId)}</p>
-          {/*
-            就地渲染真正的控件。`registerField` 仍然传下去 —— 摘要 chip 的回跳
-            目标可能正是这个字段，而它此刻在第 9 步而不是原步骤。
-            两处注册同一个 field_id 时后挂载的那个赢，也就是用户当前看到的那个。
-          */}
-          <FieldControl
-            fieldId={fieldId}
-            state={state}
-            snapshot={snapshot}
-            dispatch={answerHere}
-            registerField={registerField}
-          />
-        </div>
-      ))}
+    <div
+      className="planner-blockers"
+      id="planner-blockers"
+      tabIndex={-1}
+      aria-label="需要用户补充的问题"
+    >
+      {snapshot.blockers.map((fieldId) => {
+        const spec = plannerField(fieldId);
+        const belongsToReviewStep = spec.step === '09';
+        return (
+          <div className="planner-blockers__item" key={fieldId}>
+            <p className="planner-blockers__from">{whereFrom(fieldId)}</p>
+            {belongsToReviewStep ? (
+              <div className="planner-blockers__same-step">
+                <strong>{spec.question}</strong>
+                <button
+                  type="button"
+                  className="planner-button planner-button--light"
+                  onClick={() => onJumpToField('09', fieldId)}
+                >
+                  前往填写
+                </button>
+              </div>
+            ) : (
+              /*
+               * 其他步骤当前没有挂载，因此这里可以安全复用真正的控件。
+               * 第 9 步自己的字段只提供聚焦入口，避免同一页出现重复 id。
+               */
+              <FieldControl
+                fieldId={fieldId}
+                state={state}
+                snapshot={snapshot}
+                dispatch={answerHere}
+                registerField={registerField}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
-      {pendingVerify.length === 0 ? null : (
-        <div className="planner-blockers__verify">
-          <strong>这些你已经填了，我们还在核实</strong>
-          <ul className="planner-review__list">
-            {pendingVerify.map((fieldId) => {
-              const spec = plannerField(fieldId);
-              return (
-                <li key={fieldId}>
-                  <span className="planner-review__what">{spec.question}</span>
-                  <button
-                    type="button"
-                    className="planner-button planner-button--light"
-                    onClick={() => onJumpToField(spec.step, fieldId)}
-                  >
-                    去看看
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          <p className="planner-hint">
-            自报不等于已核验（规范 4.3）。核实完成前，方案里会标明这几项尚未确认。
-          </p>
+function VerificationList({
+  pending,
+  onJumpToField,
+}: {
+  readonly pending: readonly PlannerFieldId[];
+  readonly onJumpToField: (step: PlannerStepId, fieldId: PlannerFieldId) => void;
+}): React.ReactElement {
+  return (
+    <div
+      className="planner-blockers__verify"
+      id="planner-verifications"
+      tabIndex={-1}
+      aria-label="系统待核验明细"
+    >
+      <div className="planner-blockers__verify-head">
+        <div>
+          <strong>系统待核验（{pending.length}）</strong>
+          <p>你的回答已经保存，无需重复填写。系统会在后台继续核验，不阻碍生成。</p>
         </div>
-      )}
+        <span className="planner-blockers__verify-status">不影响生成</span>
+      </div>
+      <ul className="planner-review__list planner-blockers__verify-list">
+        {pending.map((fieldId) => {
+          const spec = plannerField(fieldId);
+          return (
+            <li key={fieldId}>
+              <span className="planner-blockers__verify-copy">
+                <span className="planner-blockers__from">{whereFrom(fieldId)}</span>
+                <strong className="planner-review__what">{spec.question}</strong>
+                <small>不影响生成；初步方案会标记为待核验。</small>
+              </span>
+              <button
+                type="button"
+                className="planner-button planner-button--light"
+                onClick={() => onJumpToField(spec.step, fieldId)}
+              >
+                查看原回答
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

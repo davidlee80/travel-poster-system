@@ -742,8 +742,13 @@ export const PlannerInterestsSchema = z.object({
    */
   wish_and_exclude: z
     .object({
-      wish: z.array(z.string().max(200)).max(20),
-      exclude: z.array(z.string().max(200)).max(20),
+      /*
+       * 两个列表由两个独立控件填写。用户只填其中一侧时，另一侧不会出现在
+       * 请求 JSON 中；缺省应当等价于“这一侧没有条目”，而不是让整个生成
+       * 请求因缺字段被拒绝。
+       */
+      wish: z.array(z.string().max(200)).max(20).default([]),
+      exclude: z.array(z.string().max(200)).max(20).default([]),
     })
     .optional(),
 });

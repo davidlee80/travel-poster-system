@@ -31,7 +31,7 @@ export const SUMMARY_GROUPS = [
   { group: 'MUST', title: '必须满足', collapsible: false },
   { group: 'PREFER', title: '优先满足', collapsible: true },
   { group: 'EXCLUDE', title: '明确不要', collapsible: true },
-  { group: 'VERIFY', title: '还需要确认', collapsible: false },
+  { group: 'VERIFY', title: '系统待核验', collapsible: false },
 ] as const satisfies readonly {
   readonly group: PlannerSummaryGroup;
   readonly title: string;
@@ -46,8 +46,6 @@ export interface SummaryChip {
   /** 显示文案。高度敏感字段是抽象状态而不是具体值 */
   readonly text: string;
   readonly kind: SummaryChipKind;
-  /** VERIFY 项里影响生成的那些。右栏高亮它们（规范 17）*/
-  readonly blocking: boolean;
 }
 
 export interface SummarySection {
@@ -180,7 +178,6 @@ export function buildSummary(
       step: spec.step,
       text,
       kind: lockedIds.has(fieldId) ? 'locked' : KIND_BY_GROUP[spec.summary_group],
-      blocking: spec.runtime_type === 'VERIFY_BLOCKING' && fs === 'verify_pending',
     });
   }
 
@@ -188,10 +185,7 @@ export function buildSummary(
     group: entry.group,
     title: entry.title,
     collapsible: entry.collapsible,
-    /* blocking 项置顶（规范 17：blocking 项高亮）*/
-    chips: (chipsByGroup.get(entry.group) ?? []).sort(
-      (a, b) => Number(b.blocking) - Number(a.blocking),
-    ),
+    chips: chipsByGroup.get(entry.group) ?? [],
   }));
 }
 
@@ -231,7 +225,7 @@ function hasLockedOrders(state: PlannerState): boolean {
   return Array.isArray(orders) && orders.length > 0;
 }
 
-/** 待核验清单。右栏「还需要确认」与第 9 步的 blocker 列表共用 */
+/** 系统待核验清单。它只展示后台状态，不参与 blocker 判断。 */
 export function verifyItems(
   state: PlannerState,
   snapshot: PlannerSnapshot,

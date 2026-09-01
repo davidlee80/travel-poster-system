@@ -30,6 +30,33 @@
 # 的 filter 规则）—— 必须靠云厂商安全组只放 22/80/443。
 
 services:
+  # 一次性迁移任务。所有读写数据库的应用都等它成功后再启动，避免容器镜像
+  # 已升级而持久卷仍停在旧 schema（前端模板目录为空就是这种漂移的表现）。
+  migrate:
+    # 复用 API 运行镜像：API 的生产依赖已包含 @tps/db，避免为同一套 Node
+    # 依赖再构建一份迁移镜像，也保证迁移程序与 API 精确同版。
+    image: tps/api:local
+    build:
+      context: ..
+      dockerfile: deploy/images/node-service.Dockerfile
+      args:
+        APP: api
+        PROBE_PORT: '3001'
+    container_name: tps-db-migrate
+    restart: 'no'
+    env_file:
+      - ../.env.deploy
+    environment:
+      MIGRATIONS_DIR: /app/migrations
+    volumes:
+      # 本地/单机 compose 保留只读挂载，旧镜像升级编排文件时也能先执行最新迁移；
+      # 新镜像自身同样内置该目录，因此离开源码树部署时仍可独立运行。
+      - ../infrastructure/migrations:/app/migrations:ro
+    command: ['node', 'node_modules/@tps/db/dist/cli.js', 'migrate']
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     image: tps/api:local
     build:
@@ -49,8 +76,8 @@ services:
     # 22.3.3：必须大于应用侧的停机预算（SHUTDOWN_TIMEOUT_MS=25000）
     stop_grace_period: 45s
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     healthcheck:
@@ -121,8 +148,8 @@ services:
       - '127.0.0.1:3011:3011'
     stop_grace_period: 45s
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
@@ -166,8 +193,8 @@ services:
       - '127.0.0.1:3012:3012'
     stop_grace_period: 45s
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
@@ -207,8 +234,8 @@ services:
       - '127.0.0.1:3013:3013'
     stop_grace_period: 45s
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       minio:
         condition: service_healthy
     healthcheck:
