@@ -33,6 +33,15 @@ export interface CreateGenerationInput {
   readonly endDate: string;
   readonly totalDays: number;
   readonly travelerCount: number;
+  /**
+   * 13.8 的幂等窗口下界（通常是 `now - 7 天`）。创建时会把同键且
+   * `created_at <= ` 它的旧行标为已取代，从而腾出部分唯一索引的键位。
+   *
+   * 与 `findByIdempotencyKey` 的 `notBefore` 必须取同一个时刻：
+   * 两边错开的话会出现「查不到但插不进去」的缝 ——
+   * 路由拿到 `UniqueViolationError` 后回查仍然为空，终结于 500。
+   */
+  readonly supersedeBefore: Date;
 }
 
 export interface GenerationHandles {
@@ -229,7 +238,18 @@ export interface TravelPlansRepository {
    * 幂等键冲突时抛 `UniqueViolationError`，由调用方转为查既有任务（13.8）。
    */
   createGeneration(input: CreateGenerationInput): Promise<GenerationHandles>;
-  findByIdempotencyKey(userId: string, key: string): Promise<ExistingGeneration | null>;
+  findByIdempotencyKey(
+    userId: string,
+    key: string,
+    /**
+     * 13.8 的幂等结果窗口下界（通常是 `now - 7 天`）。
+     *
+     * **必填而不给默认值**：给一个默认值（比如时间原点）会让
+     * 「忘传」退化成「窗口无限大」，而那正是这个参数要修的缺陷 ——
+     * 缺陷能默默重现的接口不如一个编译期错误。
+     */
+    notBefore: Date,
+  ): Promise<ExistingGeneration | null>;
   findPlanForUser(planId: string, userId: string): Promise<PlanDetail | null>;
   findJobForUser(jobId: string, userId: string): Promise<JobDetail | null>;
   listPlansForUser(input: ListPlansInput): Promise<PlanListPage>;
@@ -355,6 +375,25 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
       try {
         await client.query('BEGIN');
 
+        /*
+         * 13.8 的 7 天窗口（迁移 0019）：先取代同键的过期行，再插新行。
+         *
+         * 与 INSERT 同一事务：分开的话两个并发请求可能都取代了旧行然后
+         * 都插入成功 —— 同一个幂等键下出现两行活跃记录，而那正是
+         * 部分唯一索引要禁止的。同事务下第二个会撞索引并回到
+         * 「查既有请求」分支。
+         *
+         * 没有过期行时这条语句改 0 行，代价是一次走部分唯一索引的点查。
+         */
+        await client.query(
+          `UPDATE travel_requests
+              SET superseded_at = NOW()
+            WHERE idempotency_key = $1
+              AND superseded_at IS NULL
+              AND created_at <= $2`,
+          [input.idempotencyKey, input.supersedeBefore],
+        );
+
         const request = await client.query<{ id: string }>(
           `INSERT INTO travel_requests (
              user_id, client_request_id, idempotency_key, raw_request, normalized_request,
@@ -407,7 +446,7 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
       }
     },
 
-    async findByIdempotencyKey(userId, key) {
+    async findByIdempotencyKey(userId, key, notBefore) {
       /*
        * `user_id` 谓词在这里是**必要的**，尽管 idempotency_key 已经含
        * user_id 因此全局唯一。理由是 13.9.4 的归并：归并**不重算**
@@ -415,6 +454,12 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
        * 「key 是按匿名 id 算的、user_id 已经是注册 id」的行。
        * 不带 user_id 谓词的话，那个匿名用户（若未被清理）重放同一请求时
        * 会读到已经改挂给别人的任务。
+       *
+       * 后两个谓词是 13.8 的 7 天窗口（迁移 0019）：
+       *   `superseded_at IS NULL`  与部分唯一索引同一谓词
+       *   `created_at > $3`        窗口本身（索引里放不下，`now()` 不是 IMMUTABLE）
+       * 缺一个都会读到不该读的行：前者读到已被取代的历史行，
+       * 后者把用户永久锁在一份过期结果上。
        */
       const { rows } = await pool.query<{
         request_id: string;
@@ -432,9 +477,11 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
            LEFT JOIN generation_jobs j ON j.request_id = r.id
           WHERE r.idempotency_key = $1
             AND r.user_id = $2
+            AND r.superseded_at IS NULL
+            AND r.created_at > $3
           ORDER BY j.created_at DESC
           LIMIT 1`,
-        [key, userId],
+        [key, userId, notBefore],
       );
 
       const row = rows[0];

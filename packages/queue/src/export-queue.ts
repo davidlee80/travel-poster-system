@@ -83,7 +83,21 @@ export class BullMqExportQueue implements ExportQueue {
 export class InMemoryExportQueue implements ExportQueue {
   readonly enqueued: ExportJobPayload[] = [];
 
+  /**
+   * 下一次 `enqueue` 抛错（抛后自动复位）。
+   *
+   * 存在的理由是入队失败是一条**真实且当时无人处理**的路径：
+   * 走到入队时钱已经扣了、行已经建了，Redis 抖动让异常直接冒出去
+   * 会把那一行永久卡在 QUEUED 且占着幂等键。没有注入点的话，
+   * 那条路径只能靠真的把 Redis 打挂才能测 —— 于是它不会被测。
+   */
+  failNext = false;
+
   enqueue(payload: ExportJobPayload): Promise<string> {
+    if (this.failNext) {
+      this.failNext = false;
+      return Promise.reject(new Error('队列不可用'));
+    }
     if (!this.enqueued.some((entry) => entry.exportId === payload.exportId)) {
       this.enqueued.push(payload);
     }

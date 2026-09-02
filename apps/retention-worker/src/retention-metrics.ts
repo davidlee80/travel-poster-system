@@ -29,3 +29,22 @@ export const knowledgeRows = createGauge({
   name: 'travel_knowledge_rows',
   help: 'plan_knowledge 行数（15.1 的知识转存累积量）',
 });
+
+/**
+ * 过期 CR 预留的回收结局。
+ *
+ * `outcome` 取 `expired`（真的退了一笔）与 `failed`（那一轮报错）。
+ *
+ * ## 它恒为 0 有两种相反的解释
+ *
+ * 「没有预留泄漏」与「清理器根本没在跑」在这条曲线上长得一模一样，
+ * 而后者正是这个功能之前的状态 —— 它被文档承诺了却从未存在。
+ * 因此告警必须用 `absent()` 盯「指标在不在」，而不是盯它的值；
+ * 同理，清理器每转一圈都要把 `expired` 那一维至少初始化为 0，
+ * 否则序列在第一笔泄漏发生前根本不存在。
+ */
+export const creditHoldExpiredTotal = createCounter({
+  name: 'travel_credit_hold_expired_total',
+  help: '过期 CR 预留的回收结局（未结算的预留会永久冻住用户余额）',
+  labelNames: ['outcome'],
+});

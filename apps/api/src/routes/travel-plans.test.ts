@@ -132,6 +132,10 @@ class FakePresentationsRepository implements PresentationsRepository {
  * 不模拟 SQL。模拟 SQL 的假实现会让测试通过而真实查询失败 ——
  * 那正是 `travel-plans.integration.test.ts` 的职责。
  */
+
+/** 13.8 的幂等结果窗口宽度，与 `IDEMPOTENCY_RESULT_TTL_DAYS` 一致 */
+const IDEMPOTENCY_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000;
+
 class FakePlansRepository implements TravelPlansRepository {
   private sequence = 0;
   readonly byKey = new Map<
@@ -164,6 +168,7 @@ class FakePlansRepository implements TravelPlansRepository {
   createGeneration(input: {
     userId: string;
     idempotencyKey: string;
+    supersedeBefore: Date;
   }): Promise<{ requestId: string; planId: string; jobId: string }> {
     if (this.forceUniqueViolation) {
       this.forceUniqueViolation = false;
@@ -179,7 +184,11 @@ class FakePlansRepository implements TravelPlansRepository {
     this.byKey.set(input.idempotencyKey, {
       ...handles,
       jobStatus: 'QUEUED',
-      createdAt: new Date('2026-04-01T00:00:00Z'),
+      /*
+       * 新行的 `created_at` 取「刚刚」—— 用固定的过去时刻会让它一生下来
+       * 就在 7 天窗口之外，于是测幂等命中的用例全部失效。
+       */
+      createdAt: new Date(input.supersedeBefore.getTime() + IDEMPOTENCY_WINDOW_MS),
       userId: input.userId,
     });
     this.jobs.set(handles.jobId, {
@@ -193,9 +202,14 @@ class FakePlansRepository implements TravelPlansRepository {
     return Promise.resolve(handles);
   }
 
-  findByIdempotencyKey(userId: string, key: string) {
+  findByIdempotencyKey(userId: string, key: string, notBefore: Date) {
     const row = this.byKey.get(key);
     if (row === undefined || row.userId !== userId) return Promise.resolve(null);
+    /*
+     * 13.8 的 7 天窗口（迁移 0019）。假仓储不跟着守这一条的话，
+     * 「过期后视为新任务」那条测试会在假仓储上红而在真库上绿。
+     */
+    if (row.createdAt <= notBefore) return Promise.resolve(null);
     return Promise.resolve({
       requestId: row.requestId,
       planId: row.planId,
@@ -573,6 +587,85 @@ describe('13.8 幂等', () => {
         jobStatus: 'COMPLETED',
       });
     }
+
+    const again = await h().app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
+      payload,
+    });
+
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toMatchObject({ plan_id: 'plan-1', job_id: 'job-1' });
+  });
+
+  it('超过 7 天的同键请求视为新任务（13.8）', async () => {
+    /*
+     * `IDEMPOTENCY_RESULT_TTL_DAYS = 7` 曾经只是一个常量 —— 它被定义、
+     * 被导出、还有一条测试断言它等于 7，而没有任何 SQL 用过它。
+     * 常量注释自己写了后果：「否则用户想『重新生成』时会被永久锁死在
+     * 旧结果上」。
+     *
+     * 锁要用可推进的时钟：Redis 锁的 TTL 是 300 秒，8 天后它在生产环境里
+     * 早已过期；而默认的内存锁跟的是真实壁钟，同一个测试里它仍然持有 ——
+     * 不推进它的话第二次请求会卡在抢锁失败那条分支上，拿到 409。
+     */
+    let lockClock = Date.now();
+    harness = build(new InMemoryIdempotencyLock(() => lockClock));
+
+    const cookie = await anonymousCookie();
+    const payload = body();
+
+    const first = await h().app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
+      payload,
+    });
+    expect(first.statusCode).toBe(201);
+
+    /* 把那一行推到 7 天以前，并置为终态（否则会先撞上 409） */
+    const key = [...h().repository.byKey.keys()][0]!;
+    const row = h().repository.byKey.get(key)!;
+    h().repository.byKey.set(key, {
+      ...row,
+      jobStatus: 'COMPLETED',
+      createdAt: new Date(NOW.getTime() - 8 * 24 * 60 * 60 * 1_000),
+    });
+    /* 锁也跟着过去 8 天 */
+    lockClock += 8 * 24 * 60 * 60 * 1_000;
+
+    const again = await h().app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
+      payload,
+    });
+
+    /* 201 + 新的一组 ID，而不是 200 + plan-1 */
+    expect(again.statusCode).toBe(201);
+    expect(again.json()).toMatchObject({ plan_id: 'plan-2', job_id: 'job-2' });
+  });
+
+  it('7 天内的同键请求仍然幂等（窗口没有放得太宽）', async () => {
+    const cookie = await anonymousCookie();
+    const payload = body();
+
+    await h().app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
+      payload,
+    });
+
+    /* 刚好差一小时到期 —— 仍在窗口内 */
+    const key = [...h().repository.byKey.keys()][0]!;
+    const row = h().repository.byKey.get(key)!;
+    h().repository.byKey.set(key, {
+      ...row,
+      jobStatus: 'COMPLETED',
+      createdAt: new Date(NOW.getTime() - (7 * 24 - 1) * 60 * 60 * 1_000),
+    });
 
     const again = await h().app.inject({
       method: 'POST',

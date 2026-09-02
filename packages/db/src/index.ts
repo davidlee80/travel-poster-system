@@ -124,6 +124,7 @@ export {
   createCreditWalletRepository,
   type CreditHold,
   type CreditWalletRepository,
+  type ExpiredHoldOutcome,
   type LedgerEntry,
   type LedgerKind,
   type ReserveResult,

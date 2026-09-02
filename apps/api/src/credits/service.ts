@@ -330,13 +330,24 @@ export class CreditsService {
    * 导出成本是几秒 Chromium CPU + 存储，量级比生成小三个数量级，且**与内容
    * 无关** —— 定价固定，因此没有「估多估少」的问题，两阶段没有意义。
    *
-   * 幂等键复用导出自己的幂等键，因此同一份导出重复请求只扣一次。
+   * ## 幂等键按 `export_id` 而不是导出幂等键
+   *
+   * 两者的区别在重试时才显现。导出幂等键只由（版本、格式、范围、天号、
+   * 模板）算出，因此**跨次尝试相同**：上一次失败已退款之后，
+   * 用同一个键再扣一次会被只追加流水的 `ON CONFLICT DO NOTHING`
+   * 当成重放默默吐掉 —— 表现是**重试免费**，而且账上看不出异常。
+   *
+   * `export_id` 每次尝试都是新的，因此每次真的产出了任务的尝试都收一次钱。
+   * 并发重复请求不依靠这个键去去重，而是靠调用方先 `create`（唯一索引
+   * 定胜负）再扣费 —— 输的一方拿到 `UniqueViolationError` 时还没扣过。
+   *
+   * 与 render-worker 的退款键取齐（`refund:export:<export_id>`）：
+   * 两侧用同一个键，因此同一笔不会被退两次。
    */
   async chargeExport(input: {
     readonly userId: string;
     readonly exportId: string;
     readonly format: 'PNG' | 'PDF';
-    readonly exportIdempotencyKey: string;
   }): Promise<ExportChargeOutcome> {
     const book = await this.priceBook();
     if (book === null) return { kind: 'free' };
@@ -355,7 +366,7 @@ export class CreditsService {
     const charged = await this.deps.wallet.charge({
       userId: input.userId,
       amountCr: priced.totalCr,
-      idempotencyKey: `export:${input.exportIdempotencyKey}`,
+      idempotencyKey: `export:${input.exportId}`,
       refType: 'EXPORT',
       refId: input.exportId,
       priceVersion: book.version,
@@ -368,17 +379,21 @@ export class CreditsService {
     return { kind: 'charged', amountCr: priced.totalCr };
   }
 
-  /** 导出任务没能建起来时把刚扣的退回去 */
+  /**
+   * 导出没能真的产出时把刚扣的退回去。
+   *
+   * 键与 render-worker 的退款完全一致（`refund:export:<export_id>`）——
+   * 两侧共用一个键是**安全属性**：同一笔扣费不可能被退两次。
+   */
   async refundExport(input: {
     readonly userId: string;
     readonly amountCr: number;
     readonly exportId: string;
-    readonly exportIdempotencyKey: string;
   }): Promise<void> {
     await this.deps.wallet.refund({
       userId: input.userId,
       amountCr: input.amountCr,
-      idempotencyKey: `refund:export:${input.exportIdempotencyKey}`,
+      idempotencyKey: `refund:export:${input.exportId}`,
       refType: 'EXPORT',
       refId: input.exportId,
     });

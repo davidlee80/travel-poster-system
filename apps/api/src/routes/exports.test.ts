@@ -79,7 +79,14 @@ class FakeExports implements ExportsRepository {
 
   findByIdempotencyKey(key: string): Promise<ExportRow | null> {
     const id = this.byKey.get(key);
-    return Promise.resolve(id === undefined ? null : (this.rows.get(id) ?? null));
+    const row = id === undefined ? null : (this.rows.get(id) ?? null);
+    /*
+     * 与迁移 0018 的部分唯一索引同一谓词：失败的导出不占用幂等键。
+     * 假仓储不跟着改的话，「失败后可重试」那条测试会在假仓储上绿、
+     * 在真库上红 —— 而那正是这类假仓储最常见的失效方式。
+     */
+    if (row !== null && row.status === 'FAILED') return Promise.resolve(null);
+    return Promise.resolve(row);
   }
 
   private downloadRow(row: ExportRow): ExportDownloadRow {
@@ -125,7 +132,21 @@ class FakeExports implements ExportsRepository {
     return Promise.resolve(true);
   }
 
-  finish(): Promise<void> {
+  finish(input: Parameters<ExportsRepository['finish']>[0]): Promise<void> {
+    /*
+     * 真的应用状态而不是空实现：入队失败那条路径靠它把行置为 FAILED
+     * 来腾出幂等键，而空实现会让那条断言毫无意义地通过。
+     */
+    const row = this.rows.get(input.exportId);
+    if (row !== undefined) {
+      this.rows.set(input.exportId, {
+        ...row,
+        status: input.status,
+        files: input.files,
+        errorCode: input.errorCode,
+        finishedAt: new Date('2026-08-18T10:05:00Z'),
+      });
+    }
     return Promise.resolve();
   }
 
@@ -726,10 +747,11 @@ describe('CR 扣费（C-3）', () => {
     });
   }
 
-  it('余额为 0 → 402，且不建导出行、不入队', async () => {
+  it('余额为 0 → 402，不入队，且不占着幂等键', async () => {
     /*
-     * 先扣钱再建行，因此这条断言同时验证了顺序：反过来的话余额不足时会留下
-     * 一行永远不会渲染的导出任务，而它占着幂等键 —— 用户充值后重试会拿到它。
+     * 现在是先建行再扣费（扣费幂等键按 export_id，并发去重只能靠唯一索引），
+     * 因此 402 时会有一行 —— 但它必须是 `FAILED`。留在 QUEUED 的话它
+     * 既不会被渲染又占着幂等键，用户充值后重试会拿到那一行。
      */
     const { cookie } = await billingOwner();
 
@@ -742,8 +764,24 @@ describe('CR 扣费（C-3）', () => {
     expect(error.code).toBe('AUTH_INSUFFICIENT_CREDITS');
     /* PDF 的假价目是 80 CR */
     expect(error.details).toEqual({ required_cr: 80, balance_cr: 0 });
-    expect(h().exports.rows.size).toBe(0);
+    expect([...h().exports.rows.values()].map((row) => row.status)).toEqual(['FAILED']);
     expect(h().queue.enqueued).toHaveLength(0);
+  });
+
+  it('余额不足被拒后充值，同一组参数能重试成功', async () => {
+    /*
+     * 这正是旧实现担心的那个场景（注释里写的「用户充值后重试会拿到那一行」）。
+     * 它现在由 0018 的部分索引 + abandon() 解决，而不是靠「先扣费」回避。
+     */
+    const { cookie, userId } = await billingOwner();
+    expect((await createExport(cookie)).statusCode).toBe(402);
+
+    h().wallet.seed(userId, 500);
+    const retried = await createExport(cookie);
+
+    expect(retried.statusCode).toBe(201);
+    expect((await h().wallet.balance(userId)).balanceCr).toBe(420);
+    expect(h().queue.enqueued).toHaveLength(1);
   });
 
   it('余额够 → 201 并扣掉固定价（PDF 比 PNG 贵）', async () => {
@@ -770,5 +808,97 @@ describe('CR 扣费（C-3）', () => {
     const cookie = await ownerCookie();
     expect((await createExport(cookie)).statusCode).toBe(201);
     expect(h().wallet.entries()).toHaveLength(0);
+  });
+
+  /*
+   * ── 入队失败的补偿（F2）──
+   *
+   * 这条路径之前完全没有补偿：`await queue.enqueue(...)` 裸写在
+   * 扣费与建行之后，Redis 抖动时异常直接冒到 500。后果不是「一次 500」
+   * 而是永久卡死 —— 13.5 的幂等键不含 nonce，用户重试只会一直命中
+   * 那一行没人消费的 QUEUED。
+   */
+  it('入队失败 → 503、退款、行置 FAILED', async () => {
+    const { cookie, userId } = await billingOwner();
+    h().wallet.seed(userId, 500);
+    h().queue.failNext = true;
+
+    const response = await createExport(cookie, 'PDF');
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json<{ error: { code: string } }>().error.code).toBe(
+      'SYS_DEPENDENCY_UNAVAILABLE',
+    );
+    /* 钱必须回来：不退的话用户为一份不存在的导出付了 80 CR */
+    expect((await h().wallet.balance(userId)).balanceCr).toBe(500);
+    /* 行置 FAILED 而不是留在 QUEUED：后者永远不会被消费 */
+    expect([...h().exports.rows.values()].map((row) => row.status)).toEqual(['FAILED']);
+    expect(h().queue.enqueued).toHaveLength(0);
+  });
+
+  it('入队失败后同一组参数可重试，拿到全新的导出', async () => {
+    const { cookie, userId } = await billingOwner();
+    h().wallet.seed(userId, 500);
+    h().queue.failNext = true;
+
+    const failed = await createExport(cookie, 'PDF');
+    expect(failed.statusCode).toBe(503);
+
+    /*
+     * 重试。迁移 0018 把幂等唯一索引改成排除 FAILED 的部分索引，
+     * 因此那一行不再占着键位 —— 这一次应当是 201（全新任务）
+     * 而不是 200（返回那个失败的）。
+     */
+    const retried = await createExport(cookie, 'PDF');
+    expect(retried.statusCode).toBe(201);
+
+    const newId = retried.json<{ export_id: string }>().export_id;
+    expect(newId).not.toBe(failed.json<{ export_id?: string }>().export_id);
+    expect(h().queue.enqueued.map((job) => job.exportId)).toEqual([newId]);
+    /* 重试真的产出了任务，因此这一次的钱该收 */
+    expect((await h().wallet.balance(userId)).balanceCr).toBe(420);
+  });
+
+  /*
+   * ── 失败后可重试（F3）──
+   *
+   * 与上面两条同一个根因但不同入口：渲染失败（而不是入队失败）
+   * 同样会留下一行 FAILED，而它之前也永久堵住那组参数。
+   */
+  it('渲染失败的导出不堵住重试', async () => {
+    const cookie = await ownerCookie();
+
+    const first = await createExport(cookie, 'PDF');
+    expect(first.statusCode).toBe(201);
+    const firstId = first.json<{ export_id: string }>().export_id;
+
+    /* Worker 把它置为 FAILED（渲染重试耗尽） */
+    await h().exports.finish({
+      exportId: firstId,
+      status: 'FAILED',
+      files: [],
+      errorCode: 'EXPORT_PDF_FAILED',
+    });
+
+    const retried = await createExport(cookie, 'PDF');
+    expect(retried.statusCode).toBe(201);
+    expect(retried.json<{ export_id: string }>().export_id).not.toBe(firstId);
+  });
+
+  it('已完成的导出仍然幂等（不因为 F3 而重渲）', async () => {
+    const cookie = await ownerCookie();
+
+    const first = await createExport(cookie, 'PDF');
+    const firstId = first.json<{ export_id: string }>().export_id;
+    h().exports.complete(firstId, []);
+
+    /*
+     * COMPLETED 不在部分索引的排除范围内，因此仍然占着键位。
+     * 这条守的是 F3 没有把幂等放得太宽 —— 放宽了的表现是
+     * 用户每次刷结果页都重渲一遍 14 天的 PDF。
+     */
+    const again = await createExport(cookie, 'PDF');
+    expect(again.statusCode).toBe(200);
+    expect(again.json<{ export_id: string }>().export_id).toBe(firstId);
   });
 });

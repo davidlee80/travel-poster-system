@@ -1,4 +1,10 @@
-import { checkDatabase, createPool, createRetentionRepository, loadDbConfig } from '@tps/db';
+import {
+  checkDatabase,
+  createCreditWalletRepository,
+  createPool,
+  createRetentionRepository,
+  loadDbConfig,
+} from '@tps/db';
 import {
   metricsContentType,
   metricsText,
@@ -6,9 +12,10 @@ import {
   loadTracingConfig,
   startTracing,
 } from '@tps/observability';
-import { optionalInt, optionalString, runWorker } from '@tps/shared';
+import { optionalBool, optionalInt, optionalString, runWorker } from '@tps/shared';
 import { S3ExportStorage, loadExportsStorageConfig } from '@tps/storage';
 
+import { HOLD_SWEEP_BATCH_SIZE, HOLD_SWEEP_INTERVAL_MS, runHoldSweep } from './hold-sweep.js';
 import { PURGE_BATCH_SIZE, PURGE_GRACE_DAYS, runPurgeRound } from './purge.js';
 
 /**
@@ -70,6 +77,18 @@ const intervalMs = optionalInt('RETENTION_INTERVAL_MS', 24 * 60 * 60 * 1000);
 const batchSize = optionalInt('RETENTION_BATCH_SIZE', PURGE_BATCH_SIZE);
 const graceDays = optionalInt('ANON_RETENTION_GRACE_DAYS', PURGE_GRACE_DAYS);
 
+/*
+ * 过期预留回收（F1）。与计费的总开关同一个名字 —— 关着时钱包表
+ * 可能根本不存在（库未迁到 0013），而对一张不存在的表每 15 分钟查一次
+ * 会让日志里堆满无意义的错误。
+ *
+ * 周期独立于匿名清理：后者按 15.1 是每日一次，而预留 TTL 只有 2 小时。
+ * 拿 24 小时的周期扫它，用户的钱最坏要冻 26 小时。
+ */
+const billingEnabled = optionalBool('CREDIT_BILLING_ENABLED', false);
+const holdSweepIntervalMs = optionalInt('CREDIT_HOLD_SWEEP_INTERVAL_MS', HOLD_SWEEP_INTERVAL_MS);
+const holdSweepBatchSize = optionalInt('CREDIT_HOLD_SWEEP_BATCH_SIZE', HOLD_SWEEP_BATCH_SIZE);
+
 await runWorker({
   serviceName: SERVICE_NAME,
   probePort: 3013,
@@ -122,15 +141,61 @@ await runWorker({
     // 定时器不该拖住进程退出（停机由 GracefulShutdown 管）
     timer.unref();
 
+    /*
+     * ── 过期预留回收（F1）──
+     *
+     * 独立的定时器与独立的串行链：它与匿名清理没有共享状态，而共用一条链会让
+     * 一次 24 小时的清理把 15 分钟的回收堵在后面 —— 那正是这个功能要避免的延迟。
+     */
+    let sweepTimer: NodeJS.Timeout | undefined;
+    let sweeping: Promise<unknown> = Promise.resolve();
+
+    if (billingEnabled) {
+      const wallet = createCreditWalletRepository(dbPool);
+      const sweepTick = (): void => {
+        if (handle.isDraining()) return;
+        sweeping = sweeping
+          .then(() =>
+            runHoldSweep({ wallet, logger: handle.logger, batchSize: holdSweepBatchSize }),
+          )
+          .catch((error: unknown) => {
+            /*
+             * 与匿名清理同一处理：整轮失败不让进程退出。
+             * 指标已由 runHoldSweep 打上 `failed`，因此这次失败不是静默的。
+             */
+            handle.logger.error({ stage: 'billing' }, `过期预留回收整轮失败：${String(error)}`);
+          });
+      };
+
+      handle.logger.info(
+        { batch_size: holdSweepBatchSize },
+        `过期预留回收已启用，每 ${Math.round(holdSweepIntervalMs / 1000)} 秒扫描一次`,
+      );
+      sweepTick();
+      sweepTimer = setInterval(sweepTick, holdSweepIntervalMs);
+      sweepTimer.unref();
+    } else {
+      /*
+       * 关闭时说明一声。少了这一句，「预留一直没被回收」的排查会从
+       * 「清理器是不是挂了」开始，而答案其实是「它没被启用」。
+       */
+      handle.logger.info({ stage: 'billing' }, 'CREDIT_BILLING_ENABLED 未开启，跳过过期预留回收');
+    }
+
     return Promise.resolve(async () => {
       handle.logger.info('保留期 Worker 停止调度新批次');
       clearInterval(timer);
+      if (sweepTimer !== undefined) clearInterval(sweepTimer);
       /*
        * 等当前这一轮跑完再退出。中断在「已删除 users 行但未转存知识」之间
        * 不会造成不可恢复的损失（两者同一事务），但让当前用户的事务被
        * 连接池强行关掉会留下一条需要人工确认的日志 —— 等几秒更省事。
+       *
+       * 回收链一并等：它逐笔独立事务，中断只会让剩下的留到下一轮，
+       * 但正在跑的那一笔仍应当跑完。
        */
       await running;
+      await sweeping;
       await dbPool.end();
     });
   },

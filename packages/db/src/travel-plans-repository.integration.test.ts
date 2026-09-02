@@ -91,11 +91,16 @@ describeIntegration('计划仓储（集成，需 PostgreSQL）', () => {
       endDate: '2026-04-14',
       totalDays: 5,
       travelerCount: 3,
+      /* 13.8 的 7 天窗口下界（迁移 0019） */
+      supersedeBefore: notBefore(),
     };
   }
 
   /** 64 位十六进制的假幂等键 */
   const key = (seed: string): string => seed.padEnd(64, '0').slice(0, 64);
+
+  /** 13.8 的幂等窗口下界：当下往前 7 天 */
+  const notBefore = (): Date => new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000);
 
   describe('createGeneration', () => {
     it('同事务插入请求、计划与任务', async () => {
@@ -176,7 +181,7 @@ describeIntegration('计划仓储（集成，需 PostgreSQL）', () => {
       const userId = await anonymousUser();
       const handles = await repository.createGeneration(generationInput(userId, key('find')));
 
-      const found = await repository.findByIdempotencyKey(userId, key('find'));
+      const found = await repository.findByIdempotencyKey(userId, key('find'), notBefore());
       expect(found).toMatchObject({ ...handles, jobStatus: 'QUEUED' });
     });
 
@@ -185,12 +190,47 @@ describeIntegration('计划仓储（集成，需 PostgreSQL）', () => {
       const other = await anonymousUser();
       await repository.createGeneration(generationInput(owner, key('mine')));
 
-      expect(await repository.findByIdempotencyKey(other, key('mine'))).toBeNull();
+      expect(await repository.findByIdempotencyKey(other, key('mine'), notBefore())).toBeNull();
     });
 
     it('不存在时返回 null', async () => {
       const userId = await anonymousUser();
-      expect(await repository.findByIdempotencyKey(userId, key('none'))).toBeNull();
+      expect(await repository.findByIdempotencyKey(userId, key('none'), notBefore())).toBeNull();
+    });
+
+    it('超出 7 天窗口的行查不到，且同键可以再插一行（13.8）', async () => {
+      /*
+       * 这条同时验两件事，而第二件只能在真库上验：
+       *   1. 带窗口的查询不返回旧行；
+       *   2. 部分唯一索引（迁移 0019）真的允许同键再插一行。
+       *
+       * 少了第 2 条，“光加一个 created_at 谓词”那个版本会在这里报
+       * `UniqueViolationError` —— 而那正是用户会拿到 500 的那条路径。
+       */
+      const userId = await anonymousUser();
+      const first = await repository.createGeneration(generationInput(userId, key('stale')));
+
+      /* 把那一行推到 8 天前 */
+      await pool.query(
+        `UPDATE travel_requests SET created_at = NOW() - interval '8 days' WHERE id = $1`,
+        [first.requestId],
+      );
+
+      expect(await repository.findByIdempotencyKey(userId, key('stale'), notBefore())).toBeNull();
+
+      const second = await repository.createGeneration(generationInput(userId, key('stale')));
+      expect(second.requestId).not.toBe(first.requestId);
+
+      /* 新行才是活跃的那一行 */
+      const found = await repository.findByIdempotencyKey(userId, key('stale'), notBefore());
+      expect(found?.requestId).toBe(second.requestId);
+
+      /* 旧行仍在库里供排查，只是已被标为取代 */
+      const superseded = await pool.query<{ superseded_at: Date | null }>(
+        'SELECT superseded_at FROM travel_requests WHERE id = $1',
+        [first.requestId],
+      );
+      expect(superseded.rows[0]!.superseded_at).not.toBeNull();
     });
   });
 

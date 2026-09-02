@@ -305,36 +305,17 @@ export function registerExportRoutes(app: FastifyInstance, deps: ExportRoutesDep
       const exportId = randomUUID();
 
       /*
-       * ── CR 扣费（C-3）──
+       * ── 建行 ──
        *
-       * 导出**不做预留/结算往返**：成本是几秒 Chromium CPU + 存储，
-       * 量级比生成小三个数量级，且与内容无关 —— 定价固定，因此没有
-       * 「估多估少」的问题，两阶段只是多两次写库。
+       * 在扣费**之前**，与早期实现相反。当时把扣费放在前面的理由是
+       * 「余额不足时会留下一行永远不会渲染的导出任务，而它占着幂等键」，
+       * 而迁移 0018 之后那个理由不再成立：把行置为 `FAILED` 就能腾出键位。
        *
-       * 在建行**之前**扣：反过来的话余额不足时会留下一行永远不会渲染的
-       * 导出任务，而它占着幂等键 —— 用户充值后重试会拿到那一行。
-       *
-       * 幂等键复用导出自己的幂等键（`export:<key>`），因此同一份导出
-       * 重复请求、并发请求都只扣一次。
+       * 而这个顺序修好了一个靠原顺序无法修的问题：扣费幂等键现在按
+       * `export_id`（每次尝试都是新的），并发去重因此不能再靠它 ——
+       * 必须靠**先建行**：唯一索引定胜负，输的一方拿到
+       * `UniqueViolationError` 时还一分钱都没扣。
        */
-      let chargedCr = 0;
-      if (deps.credits !== undefined) {
-        const charged = await deps.credits.chargeExport({
-          userId: resolved.identity.userId,
-          exportId,
-          format: body.format,
-          exportIdempotencyKey: idempotencyKey,
-        });
-        if (charged.kind === 'insufficient') {
-          recordCreditGate('export', 'insufficient');
-          return fail(request, reply, 'AUTH_INSUFFICIENT_CREDITS', {
-            details: { required_cr: charged.requiredCr, balance_cr: charged.balanceCr },
-          });
-        }
-        recordCreditGate('export', charged.kind === 'charged' ? 'allowed' : 'free');
-        if (charged.kind === 'charged') chargedCr = charged.amountCr;
-      }
-
       let created: ExportRow;
       try {
         created = await repository.create({
@@ -349,40 +330,108 @@ export function registerExportRoutes(app: FastifyInstance, deps: ExportRoutesDep
           idempotencyKey,
         });
       } catch (error) {
-        if (!(error instanceof UniqueViolationError)) {
-          /*
-           * 建行失败而钱已经扣了（数据库瞬时故障等）。退回去 ——
-           * 不退的话用户为一份根本不存在的导出付了钱，而他看到的是一个 500，
-           * 不会想到去查流水。
-           *
-           * 并发撞唯一索引不走这里：那种情形下扣费是幂等的（同一个键），
-           * 而胜出的那个请求真的产出了导出任务，钱该收。
-           */
-          if (deps.credits !== undefined && chargedCr > 0) {
-            await deps.credits.refundExport({
-              userId: resolved.identity.userId,
-              amountCr: chargedCr,
-              exportId,
-              exportIdempotencyKey: idempotencyKey,
-            });
-          }
-          throw error;
-        }
+        if (!(error instanceof UniqueViolationError)) throw error;
         /*
          * 唯一索引兜住并发：两个请求同时走到这里，一个成功、一个冲突。
          * 冲突方回查既有任务并返回它 —— 与 13.8 的生成幂等同一手法。
+         * 它没扣过钱，因此也无需退。
          */
         const raced = await repository.findByIdempotencyKey(idempotencyKey);
         if (raced === null) throw error;
         return reply.code(200).send({ export_id: raced.exportId, status: raced.status });
       }
 
+      /**
+       * 把刚建的行置为 `FAILED`。
+       *
+       * 经由迁移 0018 的部分唯一索引，这一步同时**腾出幂等键** ——
+       * 于是用户拿同一组参数重试会得到一份全新的导出，而不是永远命中
+       * 一行没人消费的残局。置 FAILED 而不是删行：`error_code` 是
+       * 「这个用户的导出为何一直失败」的唯一证据。
+       */
+      const abandon = async (errorCode: ErrorCode, reason: string): Promise<void> => {
+        await repository.finish({
+          exportId: created.exportId,
+          status: 'FAILED',
+          files: [],
+          errorCode,
+          errorDetail: { reason },
+        });
+      };
+
+      /*
+       * ── CR 扣费（C-3）──
+       *
+       * 导出**不做预留/结算往返**：成本是几秒 Chromium CPU + 存储，
+       * 量级比生成小三个数量级，且与内容无关 —— 定价固定，因此没有
+       * 「估多估少」的问题，两阶段只是多两次写库。
+       */
+      let chargedCr = 0;
+      if (deps.credits !== undefined) {
+        const charged = await deps.credits.chargeExport({
+          userId: resolved.identity.userId,
+          exportId,
+          format: body.format,
+        });
+        if (charged.kind === 'insufficient') {
+          recordCreditGate('export', 'insufficient');
+          /* 行已经建了，因此必须把它收掉，否则它占着键位 */
+          await abandon('AUTH_INSUFFICIENT_CREDITS', 'INSUFFICIENT_CREDITS');
+          return fail(request, reply, 'AUTH_INSUFFICIENT_CREDITS', {
+            details: { required_cr: charged.requiredCr, balance_cr: charged.balanceCr },
+          });
+        }
+        recordCreditGate('export', charged.kind === 'charged' ? 'allowed' : 'free');
+        if (charged.kind === 'charged') chargedCr = charged.amountCr;
+      }
+
+      /**
+       * 退回本次扣费。
+       *
+       * 前提是「钱已经扣了，而用户拿不到任何东西」。不退的表现是
+       * 用户为一份不存在的导出付了钱，而他看到的只是一个 5xx，
+       * 不会想到去查流水。
+       *
+       * 键是 `refund:export:<export_id>`，与 render-worker 的退款完全一致 ——
+       * 同一笔不可能被退两次。
+       */
+      const refundCharge = async (): Promise<void> => {
+        if (deps.credits === undefined || chargedCr === 0) return;
+        await deps.credits.refundExport({
+          userId: resolved.identity.userId,
+          amountCr: chargedCr,
+          exportId,
+        });
+      };
+
       const traceContext = captureTraceContext();
-      // TP-5-03：理由同 13.1 的入队点
-      await queue.enqueue({
-        exportId: created.exportId,
-        ...(traceContext === undefined ? {} : { traceContext }),
-      });
+      /*
+       * 入队失败必须自己收尾（TP-5-03 的理由同 13.1 的入队点）。
+       *
+       * 走到这一行时，钱已经扣了（chargeExport）、行已经建了（create）。
+       * Redis 抖动让异常直接冒出去的后果不是「一次 500」而是**永久卡死**：
+       * 那一行停在 QUEUED，而队列里没有消息，因此永远不会有人消费它；
+       * 而 13.5 的幂等键不含 nonce，用户拿同一组参数重试只会一直命中它。
+       *
+       * 因此这里做两件事：退钱，并把行置为 `FAILED` —— 后者经由迁移 0018
+       * 的部分唯一索引**腾出幂等键**，于是用户重试会得到一份全新的导出。
+       * 置 FAILED 而不是删行：`error_code` 是「这个用户的导出为何一直失败」
+       * 的唯一证据。
+       */
+      try {
+        await queue.enqueue({
+          exportId: created.exportId,
+          ...(traceContext === undefined ? {} : { traceContext }),
+        });
+      } catch (error) {
+        await refundCharge();
+        await abandon('SYS_DEPENDENCY_UNAVAILABLE', 'ENQUEUE_FAILED');
+        request.log.error(
+          { export_id: created.exportId, error_code: 'SYS_DEPENDENCY_UNAVAILABLE' },
+          `导出入队失败，已退款并释放幂等键：${String(error)}`,
+        );
+        return fail(request, reply, 'SYS_DEPENDENCY_UNAVAILABLE');
+      }
 
       return reply.code(201).send({ export_id: created.exportId, status: created.status });
     },

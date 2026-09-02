@@ -334,6 +334,14 @@ export const METRICS_CATALOG: readonly CatalogEntry[] = [
     note: '15.1 的合规证据：清理任务是否真的在跑，只有它能回答',
   },
   {
+    name: 'travel_credit_hold_expired_total',
+    kind: 'counter',
+    labels: ['outcome'],
+    owner: 'retention-worker',
+    source: 'supplementary',
+    note: 'docs/用户货币与计费.md 承诺「进程被 SIGKILL → 由 expires_at（2 小时）兜住」，而在此之前那个兜底并不存在：迁移 0013 建了 credit_holds_active_expiry_idx 与 EXPIRED 状态，却没有任何代码读 expires_at，于是未被结算的预留永久停在 ACTIVE，用户的可用余额永久减少。这条曲线是该清理器唯一的存在证明 —— 它恒为 0 有两种完全不同的解释（没有泄漏 / 清理器没在跑），因此必须配 absent() 告警而不是阈值告警',
+  },
+  {
     name: 'travel_knowledge_rows',
     kind: 'gauge',
     labels: [],

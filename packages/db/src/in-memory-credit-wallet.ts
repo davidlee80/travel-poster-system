@@ -4,6 +4,7 @@ import type {
   CreditHold,
   CreditSpend,
   CreditWalletRepository,
+  ExpiredHoldOutcome,
   LedgerEntry,
   LedgerKind,
   ReserveResult,
@@ -40,7 +41,15 @@ export class InMemoryCreditWalletRepository implements CreditWalletRepository {
   private readonly keys = new Set<string>();
   private readonly holds = new Map<
     string,
-    { holdId: string; userId: string; amountCr: number; priceVersion: number; status: string }
+    {
+      holdId: string;
+      userId: string;
+      amountCr: number;
+      priceVersion: number;
+      status: string;
+      /** 过期清理靠它判定（与真实实现的 `credit_holds.expires_at` 对应） */
+      expiresAt: Date;
+    }
   >();
   private sequence = 0;
 
@@ -148,6 +157,7 @@ export class InMemoryCreditWalletRepository implements CreditWalletRepository {
       amountCr: input.amountCr,
       priceVersion: input.priceVersion,
       status: 'ACTIVE',
+      expiresAt: input.expiresAt,
     });
     return Promise.resolve({ ok: true, holdId, balanceCr: wallet.balanceCr });
   }
@@ -225,6 +235,49 @@ export class InMemoryCreditWalletRepository implements CreditWalletRepository {
       });
     }
     return Promise.resolve({ refundedCr: hold.amountCr, replayed: false });
+  }
+
+  expireHolds(
+    input: Parameters<CreditWalletRepository['expireHolds']>[0],
+  ): Promise<readonly ExpiredHoldOutcome[]> {
+    const cutoff = input.now ?? new Date();
+    const outcomes: ExpiredHoldOutcome[] = [];
+
+    /* 与真实实现一致：按到期时间升序（最旧的先清），并受 limit 约束 */
+    const expired = [...this.holds.entries()]
+      .filter(([, hold]) => hold.status === 'ACTIVE' && hold.expiresAt < cutoff)
+      .sort((a, b) => a[1].expiresAt.getTime() - b[1].expiresAt.getTime())
+      .slice(0, input.limit);
+
+    for (const [jobId, hold] of expired) {
+      hold.status = 'EXPIRED';
+      const wallet = this.wallet(hold.userId);
+      wallet.heldCr -= hold.amountCr;
+      wallet.balanceCr += hold.amountCr;
+      /* 键与真实实现同形：`expire:<hold_id>`，不与 `refund:<job_id>` 撞 */
+      this.append({
+        userId: hold.userId,
+        kind: 'REFUND',
+        amountCr: hold.amountCr,
+        idempotencyKey: `expire:${hold.holdId}`,
+        refType: 'JOB',
+        refId: jobId,
+        priceVersion: hold.priceVersion,
+        metadata: { reason: 'HOLD_EXPIRED' },
+      });
+      outcomes.push({
+        holdId: hold.holdId,
+        userId: hold.userId,
+        jobId,
+        refundedCr: hold.amountCr,
+        overdueSeconds: Math.max(
+          0,
+          Math.round((cutoff.getTime() - hold.expiresAt.getTime()) / 1000),
+        ),
+      });
+    }
+
+    return Promise.resolve(outcomes);
   }
 
   charge(

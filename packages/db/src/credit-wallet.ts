@@ -84,6 +84,17 @@ export interface CreditSpend {
   readonly priceVersion: number | null;
 }
 
+/** 一笔被过期清理退回的预留。供调用方打点与日志 */
+export interface ExpiredHoldOutcome {
+  readonly holdId: string;
+  readonly userId: string;
+  readonly jobId: string;
+  /** 退回可用余额的金额 */
+  readonly refundedCr: number;
+  /** 该预留已过期的秒数，用于判断清理周期是不是太稀 */
+  readonly overdueSeconds: number;
+}
+
 export interface CreditWalletRepository {
   balance(userId: string): Promise<WalletBalance>;
   history(input: {
@@ -128,6 +139,36 @@ export interface CreditWalletRepository {
     readonly burnedCr: number;
     readonly lines: readonly PricedLine[];
   }): Promise<{ readonly refundedCr: number; readonly replayed: boolean }>;
+
+  /**
+   * 过期预留的回收（docs/用户货币与计费.md 的「进程被 SIGKILL → 由
+   * `expires_at`（2 小时）兜住」）。
+   *
+   * ## 为何必需
+   *
+   * `reserve` 把 CR 从 `balance_cr` 搬到 `held_cr`。正常路径上它由
+   * `settle` / `releaseFailed` 搬回来，但有四条路径不经过它们：
+   * 结算自己抛异常（generate-plan.ts 的 `settleBilling` catch）、
+   * Worker 被 SIGKILL / OOM、`failed` 事件里的 fire-and-forget 释放未完成、
+   * 以及 API 入队失败后没有任何消费者。
+   *
+   * 没有这个清理时，那笔预留永久停在 `ACTIVE` —— 用户的可用余额
+   * **永久减少**，而 `credit_holds_job_uk` 让这个任务也永远无法重新预留。
+   *
+   * ## 与 `settle` 的竞争是安全的
+   *
+   * 过期后又完成的任务调 `settle` 时，那里的 `status !== 'ACTIVE'`
+   * 分支会走重放、**不扣第二次**。代价是那次生成免费 ——
+   * 而这正是 `HOLD_TTL_MS` 取 2 小时（远大于任务 300 秒上限）的理由：
+   * 真在跑的任务不可能被误判。
+   *
+   * 逐笔独立事务：一笔失败不影响其余，与 `purgeUser` 同一形状。
+   */
+  expireHolds(input: {
+    readonly limit: number;
+    /** 注入以便测试可控时间；缺省用数据库时钟 */
+    readonly now?: Date;
+  }): Promise<readonly ExpiredHoldOutcome[]>;
 
   /** 导出：定价固定，一次原子扣减 */
   charge(input: {
@@ -631,6 +672,103 @@ export function createCreditWalletRepository(pool: Pool): CreditWalletRepository
 
         return { refundedCr: holdCr, replayed: false };
       });
+    },
+
+    async expireHolds({ limit, now }) {
+      /*
+       * 先无锁选候选，再逐笔开事务重查 —— 与 retention 的
+       * `findExpiredAnonymous` + `purgeUser` 同一形状。
+       *
+       * 不把整批放进一个事务：一笔出错会回滚已经改好的其余几百笔，
+       * 而下一轮会碰到同一笔并再次全部回滚 —— 表现是清理器永远无法推进。
+       *
+       * `expires_at < $1` 直接比列而不对列做运算，走
+       * `credit_holds_active_expiry_idx`（那个部分索引就是为这条查询建的）。
+       */
+      const cutoff = now ?? new Date();
+      const candidates = await pool.query<{ hold_id: string }>(
+        `SELECT hold_id FROM credit_holds
+          WHERE status = 'ACTIVE' AND expires_at < $1
+          ORDER BY expires_at
+          LIMIT $2`,
+        [cutoff, limit],
+      );
+
+      const outcomes: ExpiredHoldOutcome[] = [];
+      for (const candidate of candidates.rows) {
+        const outcome = await inTransaction(
+          pool,
+          async (client): Promise<ExpiredHoldOutcome | null> => {
+            /*
+             * 重查并上锁。选候选与这里之间有窗口，而那个窗口里
+             * `settle` 完全可能刚好把它结了 —— 不重查就会把一笔
+             * 已经结算的预留再退一次，用户白得一笔钱且流水对不上账。
+             */
+            const holdRow = await client.query<{
+              hold_id: string;
+              user_id: string;
+              job_id: string;
+              amount_cr: string;
+              price_version: string;
+              status: string;
+              expires_at: Date;
+            }>(
+              `SELECT hold_id, user_id, job_id, amount_cr, price_version, status, expires_at
+                 FROM credit_holds WHERE hold_id = $1 FOR UPDATE`,
+              [candidate.hold_id],
+            );
+            const hold = holdRow.rows[0];
+            if (hold === undefined || hold.status !== 'ACTIVE') return null;
+            if (hold.expires_at >= cutoff) return null;
+
+            const holdCr = big(hold.amount_cr);
+            const updated = await client.query<WalletRow>(
+              `UPDATE credit_wallets
+                  SET held_cr = held_cr - $2, balance_cr = balance_cr + $2
+                WHERE user_id = $1 RETURNING balance_cr, held_cr`,
+              [hold.user_id, holdCr],
+            );
+            const balanceAfter = big(updated.rows[0]?.balance_cr ?? '0');
+
+            /*
+             * 幂等键用 `expire:<hold_id>` 而不是 `refund:<job_id>`：
+             * 后者是 `releaseFailed` 的键，撞上它会让这条流水被
+             * `ON CONFLICT DO NOTHING` 默默吐掉 —— 钱退了而流水里没有记录，
+             * 「求和 = 余额」那条自校验从此失效。
+             */
+            await appendLedger(client, {
+              userId: hold.user_id,
+              kind: 'REFUND',
+              amountCr: holdCr,
+              balanceAfterCr: balanceAfter,
+              idempotencyKey: `expire:${hold.hold_id}`,
+              refType: 'JOB',
+              refId: hold.job_id,
+              priceVersion: big(hold.price_version),
+              metadata: { reason: 'HOLD_EXPIRED', expires_at: hold.expires_at.toISOString() },
+            });
+
+            await client.query(
+              `UPDATE credit_holds SET status = 'EXPIRED', settled_at = NOW() WHERE hold_id = $1`,
+              [hold.hold_id],
+            );
+
+            return {
+              holdId: hold.hold_id,
+              userId: hold.user_id,
+              jobId: hold.job_id,
+              refundedCr: holdCr,
+              overdueSeconds: Math.max(
+                0,
+                Math.round((cutoff.getTime() - hold.expires_at.getTime()) / 1000),
+              ),
+            };
+          },
+        );
+        if (outcome !== null) outcomes.push(outcome);
+      }
+
+      return outcomes;
     },
 
     async charge(input) {

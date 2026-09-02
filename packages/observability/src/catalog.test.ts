@@ -80,6 +80,10 @@ describe('21.3 指标目录', () => {
 
   it('缺失一项时报出它的名字', () => {
     const drift = detectCatalogDrift([], ['retention-worker']);
-    expect(drift.missing).toEqual(['travel_anon_purge_total', 'travel_knowledge_rows']);
+    expect(drift.missing).toEqual([
+      'travel_anon_purge_total',
+      'travel_credit_hold_expired_total',
+      'travel_knowledge_rows',
+    ]);
   });
 });

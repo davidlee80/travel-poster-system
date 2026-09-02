@@ -190,7 +190,6 @@ describe('CreditsService 报价', () => {
         userId: 'u1',
         exportId: 'e1',
         format: 'PDF',
-        exportIdempotencyKey: 'k1',
       }),
     ).toEqual({ kind: 'free' });
     expect((await service.balance('u1')).balanceCr).toBe(500);
@@ -330,13 +329,11 @@ describe('CreditsService 导出扣费', () => {
       userId: 'u1',
       exportId: 'e1',
       format: 'PNG',
-      exportIdempotencyKey: 'k1',
     });
     const second = await service.chargeExport({
       userId: 'u1',
       exportId: 'e2',
       format: 'PNG',
-      exportIdempotencyKey: 'k2',
     });
 
     expect(second).toEqual(first);
@@ -351,7 +348,6 @@ describe('CreditsService 导出扣费', () => {
       userId: 'u1',
       exportId: 'e1',
       format: 'PNG',
-      exportIdempotencyKey: 'k1',
     });
     expect(png).toEqual({ kind: 'charged', amountCr: 50 });
     expect((await service.balance('u1')).balanceCr).toBe(450);
@@ -360,7 +356,6 @@ describe('CreditsService 导出扣费', () => {
       userId: 'u1',
       exportId: 'e2',
       format: 'PDF',
-      exportIdempotencyKey: 'k2',
     });
     expect(pdf).toEqual({ kind: 'charged', amountCr: 80 });
   });
@@ -374,7 +369,6 @@ describe('CreditsService 导出扣费', () => {
         userId: 'u1',
         exportId: 'e1',
         format: 'PNG',
-        exportIdempotencyKey: 'same',
       });
     }
     expect((await service.balance('u1')).balanceCr).toBe(450);
@@ -388,7 +382,6 @@ describe('CreditsService 导出扣费', () => {
       userId: 'u1',
       exportId: 'e1',
       format: 'PDF',
-      exportIdempotencyKey: 'k1',
     });
     expect(result).toEqual({ kind: 'insufficient', requiredCr: 80, balanceCr: 10 });
     expect((await service.balance('u1')).balanceCr).toBe(10);
@@ -404,7 +397,6 @@ describe('CreditsService 导出扣费', () => {
         userId: 'u1',
         exportId: 'e1',
         format: 'PNG',
-        exportIdempotencyKey: 'k1',
       }),
     ).toEqual({ kind: 'free' });
     expect((await service.balance('u1')).balanceCr).toBe(500);

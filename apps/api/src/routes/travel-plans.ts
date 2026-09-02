@@ -2,6 +2,7 @@ import { captureTraceContext, type PlanQueue } from '@tps/queue';
 import { prepareTravelRequest } from '@tps/planning';
 import {
   IDEMPOTENCY_LOCK_TTL_SECONDS,
+  IDEMPOTENCY_RESULT_TTL_DAYS,
   computeIdempotencyKey,
   decideFeature,
   type FeatureFlags,
@@ -299,7 +300,22 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
       normalized,
     });
 
-    const existing = await plans.findByIdempotencyKey(resolved.identity.userId, idempotencyKey);
+    /*
+     * 13.8：幂等结果有效期 7 天。超过后同一幂等键视为新任务。
+     *
+     * 只算**一次**并同时传给查询与创建：两边各自取 `now()` 的话，
+     * 中间那几毫秒里正好跨过窗口边界的行会变成「查不到但插不进去」——
+     * 而那一种缝只在刚好第 7 天那一刻重现，基本不可能被排查到。
+     */
+    const idempotencyNotBefore = new Date(
+      deps.now().getTime() - IDEMPOTENCY_RESULT_TTL_DAYS * 24 * 60 * 60 * 1_000,
+    );
+
+    const existing = await plans.findByIdempotencyKey(
+      resolved.identity.userId,
+      idempotencyKey,
+      idempotencyNotBefore,
+    );
     if (existing !== null) {
       if (!isTerminalJobStatus(existing.jobStatus as JobStatus)) {
         // 13.8：进行中 → 409 并携带既有 job_id，客户端应改为轮询它
@@ -328,7 +344,11 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
        * 返回 409 而不是等待 —— 客户端拿到 409 后轮询任务状态，
        * 而等待会把 HTTP 请求挂在那里，并发一高就耗尽连接。
        */
-      const raced = await plans.findByIdempotencyKey(resolved.identity.userId, idempotencyKey);
+      const raced = await plans.findByIdempotencyKey(
+        resolved.identity.userId,
+        idempotencyKey,
+        idempotencyNotBefore,
+      );
       if (raced !== null && isTerminalJobStatus(raced.jobStatus as JobStatus)) {
         return reply.code(200).send(generateResponse(raced));
       }
@@ -399,12 +419,17 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
         endDate: normalized.end_date,
         totalDays: normalized.total_days,
         travelerCount: normalized.traveler_count,
+        supersedeBefore: idempotencyNotBefore,
       });
     } catch (error) {
       if (!(error instanceof UniqueViolationError)) throw error;
 
       // 唯一索引兜底命中（Redis 不可用时的正常路径）
-      const raced = await plans.findByIdempotencyKey(resolved.identity.userId, idempotencyKey);
+      const raced = await plans.findByIdempotencyKey(
+        resolved.identity.userId,
+        idempotencyKey,
+        idempotencyNotBefore,
+      );
       if (raced === null) return fail(request, reply, 'SYS_INTERNAL_ERROR');
       if (!isTerminalJobStatus(raced.jobStatus as JobStatus)) {
         reply.header('x-tps-job-id', raced.jobId);

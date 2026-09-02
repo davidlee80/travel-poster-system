@@ -74,6 +74,8 @@ describeIntegration('exports 仓储（集成，需 PostgreSQL）', () => {
       endDate: '2026-09-14',
       totalDays: 5,
       travelerCount: 2,
+      /* 13.8 的 7 天窗口下界（迁移 0019） */
+      supersedeBefore: new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000),
     });
 
     const versionId = randomUUID();

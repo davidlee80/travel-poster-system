@@ -92,6 +92,14 @@ export interface FinishExportInput {
 export interface ExportsRepository {
   /** 幂等键冲突时抛 `UniqueViolationError`，由调用方转为查既有任务（13.5） */
   create(input: CreateExportInput): Promise<ExportRow>;
+  /**
+   * 按幂等键回查**活跃**的导出。
+   *
+   * 谓词必须与迁移 0018 的部分唯一索引一致（`status <> 'FAILED'`）。
+   * 两边不一致会弄出一个没有出路的状态：这里返回了历史失败行，
+   * 路由于是返回 200 + 一个已经没人消费的 `export_id`，
+   * 而用户永远等不到它完成。
+   */
   findByIdempotencyKey(key: string): Promise<ExportRow | null>;
   /** 13.6：**必须带 `user_id` 谓词**（13.0） */
   findForUser(exportId: string, userId: string): Promise<ExportDownloadRow | null>;
@@ -205,8 +213,15 @@ export function createExportsRepository(pool: Pool): ExportsRepository {
     },
 
     async findByIdempotencyKey(key) {
+      /*
+       * `status <> 'FAILED'` 与迁移 0018 的部分唯一索引同一谓词 ——
+       * 失败的导出不占用幂等键，因此也不应当被当成「已有任务」返回。
+       * 同一个键下可能有多行历史 FAILED，而活跃行最多一行，
+       * 因此这条查询仍然最多命中一行。
+       */
       const { rows } = await pool.query<Row>(
-        `SELECT ${COLUMNS} FROM exports WHERE idempotency_key = $1`,
+        `SELECT ${COLUMNS} FROM exports
+          WHERE idempotency_key = $1 AND status <> 'FAILED'`,
         [key],
       );
       return rows[0] === undefined ? null : toRow(rows[0]);
