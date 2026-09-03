@@ -347,7 +347,7 @@ export const METRICS_CATALOG: readonly CatalogEntry[] = [
     labels: ['outcome'],
     owner: 'retention-worker',
     source: 'supplementary',
-    note: 'docs/用户货币与计费.md 承诺「进程被 SIGKILL → 由 expires_at（2 小时）兜住」，而在此之前那个兜底并不存在：迁移 0013 建了 credit_holds_active_expiry_idx 与 EXPIRED 状态，却没有任何代码读 expires_at，于是未被结算的预留永久停在 ACTIVE，用户的可用余额永久减少。这条曲线是该清理器唯一的存在证明 —— 它恒为 0 有两种完全不同的解释（没有泄漏 / 清理器没在跑），因此必须配 absent() 告警而不是阈值告警',
+    note: 'docs/用户货币与计费.md 承诺「进程被 SIGKILL → 由 expires_at（2 小时）兜住」，而在此之前那个兜底并不存在：迁移 0013 建了 credit_holds_active_expiry_idx 与 EXPIRED 状态，却没有任何代码读 expires_at，于是未被结算的预留永久停在 ACTIVE，用户的可用余额永久减少。outcome 分 expired（真的退了一笔）与 failed（那一轮报错），对应两条告警（TravelCreditHoldExpiredHigh / TravelCreditHoldSweepFailing）—— 前者是「回收在工作、上游有问题」，后者是「回收本身坏了」。**不能用 absent() 盯它**：该指标只在 CREDIT_BILLING_ENABLED 开启时存在（回收器受同一个开关门控），而默认部署是关的 —— absent() 会在每个未开计费的环境里持续误报。「回收器根本没在跑」靠运维手册里的人工核对',
   },
   {
     name: 'travel_knowledge_rows',

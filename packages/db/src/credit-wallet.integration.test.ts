@@ -580,29 +580,64 @@ describeIntegration('CR 钱包（集成，需 PostgreSQL）', () => {
   });
 
   describe('按版本取价目（C-4）', () => {
+    /**
+     * 下一个没被占用的版本号。
+     *
+     * 硬编码 2 曾经让这条测试在迁移 0014 之后永久报
+     * `duplicate key ... credit_price_versions_version_key` —— 0014 已经
+     * 占了版本 2（开发期定价）。而当时那条测试末尾还有一句
+     * `DELETE FROM credit_price_versions WHERE version = 2`：一旦它真的跑到，
+     * 就会把 0014 种下的开发期定价删掉，而那是本地计费链路唯一的输入。
+     */
+    async function nextFreeVersion(): Promise<number> {
+      const { rows } = await pool.query<{ next: string }>(
+        'SELECT COALESCE(MAX(version), 0) + 1 AS next FROM credit_price_versions',
+      );
+      return Number(rows[0]!.next);
+    }
+
+    /** 当前发布版。不硬编码 —— 它随迁移推进（0013 给 1，0014 发布 2） */
+    async function publishedVersion(): Promise<number> {
+      const { rows } = await pool.query<{ version: number }>(
+        "SELECT version FROM credit_price_versions WHERE status = 'PUBLISHED'",
+      );
+      return rows[0]!.version;
+    }
+
     it('取得到尚未发布的草稿版 —— 结算要的正是「可能已不是发布版」的那一版', async () => {
       /*
        * 这条断言是「已提交的任务不受调价影响」那句承诺的落点：
        * `credit_prices_current` 视图只含发布版，而结算要按预留锁定的版本算钱。
        * 用视图实现的话，运营一发布新版，在途任务全部按新价结算。
        */
-      await pool.query(`SELECT clone_credit_prices(1, 2, '测试用草稿')`);
+      const published = await publishedVersion();
+      const draft = await nextFreeVersion();
+
+      await pool.query('SELECT clone_credit_prices($1, $2, $3)', [published, draft, '测试用草稿']);
       await pool.query(
         `UPDATE credit_price_items i SET price_cr = 12345
          FROM credit_price_versions v
-         WHERE i.version_id = v.id AND v.version = 2 AND i.sku = 'llm.out:*'`,
+         WHERE i.version_id = v.id AND v.version = $1 AND i.sku = 'llm.out:*'`,
+        [draft],
       );
 
-      const draft = await wallet.pricesForVersion(2);
-      expect(draft?.version).toBe(2);
-      expect(draft?.items['llm.out:*']?.priceCr).toBe(12_345);
+      try {
+        const book = await wallet.pricesForVersion(draft);
+        expect(book?.version).toBe(draft);
+        expect(book?.items['llm.out:*']?.priceCr).toBe(12_345);
 
-      /* 发布版仍是 1，且它的价格没被改动 */
-      const published = await wallet.publishedPrices();
-      expect(published?.version).toBe(1);
-      expect(published?.items['llm.out:*']?.priceCr).toBe(60_000);
-
-      await pool.query(`DELETE FROM credit_price_versions WHERE version = 2`);
+        /* 发布版没被改动，也没被草稿版顶掉 */
+        expect(await publishedVersion()).toBe(published);
+        const current = await wallet.publishedPrices();
+        expect(current?.version).toBe(published);
+        expect(current?.items['llm.out:*']?.priceCr).not.toBe(12_345);
+      } finally {
+        /*
+         * 只删本用例自己造的那一版，且放在 finally 里 ——
+         * 断言失败时也要清掉，否则下一次跑会撞唯一约束。
+         */
+        await pool.query('DELETE FROM credit_price_versions WHERE version = $1', [draft]);
+      }
     });
 
     it('不存在的版本返回 null（调用方据此不计费）', async () => {
@@ -611,14 +646,21 @@ describeIntegration('CR 钱包（集成，需 PostgreSQL）', () => {
   });
 
   describe('价目表', () => {
-    it('读到迁移 0013 种下的版本 1', async () => {
+    it('读到当前发布的那一版，且九个种子项一个不少', async () => {
+      /*
+       * 不硬编码版本号。原先这条写的是「读到迁移 0013 种下的版本 1」，
+       * 而 0014 发布了版本 2（开发期定价）—— 于是它在任何迁到 0014
+       * 的库上恒红。而它真正要守的不是「哪一版被发布」（那是迁移的职责），
+       * 而是「仓储能把发布版完整读回来」。
+       */
+      const { rows } = await pool.query<{ version: number }>(
+        "SELECT version FROM credit_price_versions WHERE status = 'PUBLISHED'",
+      );
       const book = await wallet.publishedPrices();
-      expect(book?.version).toBe(1);
-      expect(book?.items['llm.out:*']).toMatchObject({
-        unit: 'PER_MILLION_TOKENS',
-        priceCr: 60_000,
-      });
-      /* 九个种子项一个不少 */
+
+      expect(book?.version).toBe(rows[0]!.version);
+      expect(book?.items['llm.out:*']?.unit).toBe('PER_MILLION_TOKENS');
+      /* 九个种子项一个不少 —— 这一条跟着迁移走，不跟着版本号走 */
       expect(Object.keys(book?.items ?? {})).toHaveLength(9);
     });
   });

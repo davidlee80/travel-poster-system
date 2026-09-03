@@ -398,3 +398,62 @@ groups:
           summary: '超过 20% 的计费请求因余额不足被拒'
           description: '按 event 拆开看是生成还是导出。若集中在生成，用 POST /credits/quote 对几个典型天数报一次价，与 CREDIT_SIGNUP_GRANT_CR 比 —— 大概率是价目表或赠送额需要重定，而不是用户真的都花完了。'
           runbook: 'docs/运维手册.md#余额不足占比升高'
+
+      # 10. 过期预留被回收（F1）
+      #
+      # 回收器本身是兜底：正常路径上预留由 settle / releaseFailed 搬回，
+      # 走到过期回收说明**那些任务一个都没经过正常结算** ——
+      # Worker 被 OOM / SIGKILL、结算自己抛异常、或者 API 入队失败后
+      # 没有任何消费者。回收本身把钱退了，因此用户不会投诉，
+      # 而丢掉的任务已经花了模型的钱。
+      #
+      # 为何不用 absent()：该指标只在 CREDIT_BILLING_ENABLED 开启时存在
+      # （回收器受同一个开关门控），而默认部署是关的 —— absent()
+      # 会在每个未开计费的环境里持续误报，然后被静音，连带把这条一起静音。
+      # 「回收器根本没在跑」的检查放在运维手册里做人工核对。
+      - alert: TravelCreditHoldExpiredHigh
+        expr: sum(increase(travel_credit_hold_expired_total{outcome="expired"}[1h])) > 5
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: '一小时内有超过 5 笔 CR 预留靠过期才被回收'
+          description: '这些任务没经过正常结算。先看 generation-worker 是不是在被 OOMKill（kubectl get pod 的 restart 次数），再在日志里搜 stage=billing 的「CR 结算失败」。回收已经把钱退给用户了，但那几次生成花掉的模型成本是我们承担的。'
+          runbook: 'docs/运维手册.md#过期预留被回收'
+
+      # 11. 回收器自己在报错（F1）
+      #
+      # 与上一条是两种完全不同的故障：上一条是「回收在工作，上游有问题」，
+      # 这一条是「回收本身坏了」—— 而后者的后果是预留**永久冻住**：
+      # reserve 把 CR 从 balance_cr 搬到 held_cr，没人搬回来则用户的可用
+      # 余额一直少那么多，而 credit_holds_job_uk 让那个任务连重新预留都做不到。
+      #
+      # 一轮失败不让进程退出（下个周期重试），因此除了这条曲线没有其他症状。
+      - alert: TravelCreditHoldSweepFailing
+        expr: sum(increase(travel_credit_hold_expired_total{outcome="failed"}[30m])) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: '过期预留回收连续报错'
+          description: '回收器挂着时预留不会被释放，用户的可用余额持续减少且不自愈。看 retention-worker 日志里 stage=billing 的「过期预留回收整轮失败」，多数是数据库不可用。手工核对：SELECT count(*) FROM credit_holds WHERE status = ACTIVE AND expires_at < NOW()。'
+          runbook: 'docs/运维手册.md#过期预留回收报错'
+
+      # 12. 背压准入开始拒请求
+      #
+      # 它与 TravelQueueBacklogHigh 是一对，但硬得多：深度高只是「排队变长」，
+      # 而这条非 0 意味着**真实用户拿到了 503**。积压可以容忍一阵（告警的
+      # for: 5m 就是在容忍突发），丢请求不能。
+      #
+      # 阈值取 > 0 而不是一个比例：准入阈值（缺省 40）本身已经远高于告警
+      # 阈值（8），走到拒绝说明积压已经堆到「新任务在开始之前就会撞上
+      # 600 秒」的程度 —— 那不存在「可接受的小比例」。
+      - alert: TravelQueueAdmissionRejecting
+        expr: sum by (queue) (increase(travel_queue_admission_rejected_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.queue }} 队列已在入口拒绝新请求'
+          description: '这是比 TravelQueueBacklogHigh 更硬的扩容信号：用户已经在拿 503。按 queue 标签加对应的 Worker（travel-plan-generation → generation-worker，travel-plan-export → render-worker）。扩容后要同时抬 QUEUE_ADMISSION_MAX_DEPTH 与积压告警阈值，否则新容量下仍会白白拒请求。'
+          runbook: 'docs/运维手册.md#背压准入深度过高时直接拒新任务'
