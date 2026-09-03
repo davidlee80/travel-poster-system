@@ -193,10 +193,7 @@ describe('输出样式套件（R-85 P3）', () => {
 
   it('选了套件时发出它，且不碰其他字段', () => {
     const picked = 'blueprint_v1';
-    const body = buildPlannerRequest(
-      { ...stateWith(COMPLETE), templateId: picked },
-      OPTIONS,
-    );
+    const body = buildPlannerRequest({ ...stateWith(COMPLETE), templateId: picked }, OPTIONS);
 
     expect(body.output_preferences?.template_id).toBe(picked);
     /* 模板不属于旅行画像 —— 它不得渗进 `planner_profile` */

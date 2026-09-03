@@ -181,10 +181,7 @@ export function BlueprintDaily({
                     <span className="bp-num">{item.amount_text}</span>
                   </div>
                 ))}
-                <div
-                  className="bp-row bp-row--lead bp-row--total"
-                  {...guard('budgetTotal')}
-                >
+                <div className="bp-row bp-row--lead bp-row--total" {...guard('budgetTotal')}>
                   <span className="bp-key">合计</span>
                   <span className="bp-num">{vm.budget.total_text}</span>
                 </div>

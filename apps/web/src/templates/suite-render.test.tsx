@@ -109,9 +109,7 @@ describe('套件渲染产物', () => {
 
     for (const slot of Object.keys(OVERFLOW_PRIORITY) as (keyof typeof OVERFLOW_PRIORITY)[]) {
       const name = OVERFLOW_SLOT_NAME[slot];
-      expect(html, `${templateId} 漏标守卫槽位 ${name}`).toContain(
-        `data-overflow-guard="${name}"`,
-      );
+      expect(html, `${templateId} 漏标守卫槽位 ${name}`).toContain(`data-overflow-guard="${name}"`);
     }
   });
 
@@ -148,9 +146,7 @@ describe('套件渲染产物', () => {
      */
     const Component = componentOf(templateId, 'DAILY_POSTER');
     const { viewModel } = buildDailyPoster({ plan, dayNumber: 1, templateId });
-    const html = renderToStaticMarkup(
-      <Component viewModel={viewModel} hideBelowPriority={60} />,
-    );
+    const html = renderToStaticMarkup(<Component viewModel={viewModel} hideBelowPriority={60} />);
 
     expect(html, 'foodCard(60) 应当保留').toContain(
       `data-overflow-guard="${OVERFLOW_SLOT_NAME.foodCard}"`,

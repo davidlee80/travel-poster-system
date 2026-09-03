@@ -46,11 +46,7 @@ const REQUIRED_PALETTE_TOKENS = [
  * 而那意味着 CJK 文本用系统字体渲 —— 导出的 PNG 在不同机器上不一样，
  * 而视觉基线又只在 Linux CI 上拍。
  */
-const REQUIRED_FONT_TOKENS = [
-  '--tps-title-font',
-  '--tps-body-font',
-  '--tps-numeric-font',
-] as const;
+const REQUIRED_FONT_TOKENS = ['--tps-title-font', '--tps-body-font', '--tps-numeric-font'] as const;
 
 describe('样式套件不变量', () => {
   it('每个已注册套件都有对应的目录（枚举与文件系统不能各说各话）', async () => {

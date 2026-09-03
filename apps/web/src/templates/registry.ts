@@ -57,6 +57,9 @@ export const TEMPLATE_REGISTRY: Readonly<
  * 「导出成功但样式不对」，而那种失败没有任何信号。路由拿到 null 时
  * 走 `notFound()`，让错误在第一次请求就暴露。
  */
-export function templateComponent(templateId: string, pageType: PageType): TemplateComponent | null {
+export function templateComponent(
+  templateId: string,
+  pageType: PageType,
+): TemplateComponent | null {
   return TEMPLATE_REGISTRY[templateId]?.[pageType] ?? null;
 }

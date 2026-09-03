@@ -760,7 +760,11 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     expect(outcome).toMatchObject({ outcome: 'saved' });
 
     // 落库核对：全览页 + 每日页全部是 blueprint_v1，没有一个行是默认套件
-    const rows = await pool.query<{ template_id: string; page_type: string; day_number: number | null }>(
+    const rows = await pool.query<{
+      template_id: string;
+      page_type: string;
+      day_number: number | null;
+    }>(
       `SELECT template_id, page_type, day_number
          FROM plan_presentations
         WHERE plan_id = $1

@@ -161,7 +161,10 @@ describe('模板样式目录与代码枚举一致', () => {
      */
     const bad = rows.filter((row) => row.label.length === 0 || row.label === row.optionKey);
 
-    expect(bad.map((row) => row.optionKey), '这些行缺展示名').toEqual([]);
+    expect(
+      bad.map((row) => row.optionKey),
+      '这些行缺展示名',
+    ).toEqual([]);
   });
 
   it('每一行的示例图文件真的存在', () => {
@@ -217,18 +220,14 @@ describe('模板样式目录与代码枚举一致', () => {
         if (!/\.(ts|tsx|mjs)$/.test(file)) continue;
         const source = readFileSync(file, 'utf8');
         /* 先剔注释：说明历史的注释引用旧值不违例 */
-        const code = source
-          .replaceAll(/\/\*[\s\S]*?\*\//g, '')
-          .replaceAll(/^\s*\/\/[^\n]*/gm, '');
+        const code = source.replaceAll(/\/\*[\s\S]*?\*\//g, '').replaceAll(/^\s*\/\/[^\n]*/gm, '');
         for (const retired of RETIRED_TEMPLATE_IDS) {
           /*
            * `[^]` 匹配任意字符（含换行）、`[ \t]*` 匹配空白 —— 两者都不含
            * 反斜杠，否则 `no-windows-path-separator` 规则会把正则里的
            * `\\s` 当成硬编码路径分隔符报错。
            */
-          const pattern = new RegExp(
-            `output_preferences[^]{0,400}template_id:[ \t]*'${retired}'`,
-          );
+          const pattern = new RegExp(`output_preferences[^]{0,400}template_id:[ \t]*'${retired}'`);
           if (pattern.test(code)) {
             offenders.push(`${path.relative(repoRoot, file)}: '${retired}'`);
           }

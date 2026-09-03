@@ -155,7 +155,9 @@ describe('parseSeedManifest', () => {
 
   describe('必填项', () => {
     it('缺 file 被拒', () => {
-      const { errors } = parseSeedManifest(JSON.stringify({ role: 'FOOD_IMAGE', license_type: 'CC0' }));
+      const { errors } = parseSeedManifest(
+        JSON.stringify({ role: 'FOOD_IMAGE', license_type: 'CC0' }),
+      );
       expect(errors).toHaveLength(1);
     });
 

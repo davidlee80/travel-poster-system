@@ -50,11 +50,7 @@ export function BlueprintFullPlan({ viewModel: vm }: BlueprintFullPlanProps) {
       {/* 索引表：带编号的行，而不是卡片 */}
       <nav className="bp-doc__index" aria-label="按天跳转">
         {vm.days.map((day, index) => (
-          <a
-            key={day.day_number}
-            className="bp-doc__index-row"
-            href={`#day-${day.day_number}`}
-          >
+          <a key={day.day_number} className="bp-doc__index-row" href={`#day-${day.day_number}`}>
             <span className="bp-doc__index-no">{String(index + 1).padStart(2, '0')}</span>
             <span className="bp-doc__index-day">{day.header.day_label}</span>
             <span className="bp-doc__index-theme">{day.header.title}</span>

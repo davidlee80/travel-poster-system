@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  formatMapping,
-  formatOverwriteNotice,
-  formatPool,
-  parseArgs,
-} from './model-pool-cli.js';
+import { formatMapping, formatOverwriteNotice, formatPool, parseArgs } from './model-pool-cli.js';
 
 /**
  * `pnpm model:pool` 的参数解析与输出（多模型 failover 计划的任务 5）。
@@ -87,13 +82,20 @@ describe('parseArgs', () => {
      * 而那一档的每次调用都失败 —— 已经在本机真实发生过一次。
      */
     expect(() =>
-      parseArgs(['--set-pool', 'p', '--kind', 'LLM', '--models', 'openai/gpt-5.5 google/gemini-3.5-flash']),
+      parseArgs([
+        '--set-pool',
+        'p',
+        '--kind',
+        'LLM',
+        '--models',
+        'openai/gpt-5.5 google/gemini-3.5-flash',
+      ]),
     ).toThrow(/不能含空白/);
 
     // 提示必须包含解法，否则运营看不出该怎么改
-    expect(() =>
-      parseArgs(['--set-pool', 'p', '--kind', 'LLM', '--models', 'a b']),
-    ).toThrow(/加引号/);
+    expect(() => parseArgs(['--set-pool', 'p', '--kind', 'LLM', '--models', 'a b'])).toThrow(
+      /加引号/,
+    );
   });
 
   it('模型名两侧的空格被裁掉（复制粘贴常带空格）', () => {

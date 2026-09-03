@@ -156,7 +156,10 @@ function selfTest() {
     ['后代通配', '.planner *, .planner *::before { box-sizing: border-box }'],
     ['独立命名空间类', '.planner-shell { display: grid }'],
     ['media 内的作用域选择器', '@media (width <= 767px) { .planner .rail { display: none } }'],
-    ['keyframes 的 from/to 不是选择器', '@keyframes planner-fade { from { opacity: 0 } to { opacity: 1 } }'],
+    [
+      'keyframes 的 from/to 不是选择器',
+      '@keyframes planner-fade { from { opacity: 0 } to { opacity: 1 } }',
+    ],
     ['keyframes 的百分比同理', '@keyframes planner-rise { 0% { top: 0 } 100% { top: 8px } }'],
     ['注释里的反例不算', '/* 反例：body { background: #f5f7fb } */ .planner { color: #111 }'],
   ];

@@ -61,10 +61,7 @@ describe('Planner 草稿版本迁移', () => {
   it('选中的套件存得下也读得回', () => {
     const picked = TEMPLATE_ID_VALUES[1] ?? TEMPLATE_ID_VALUES[0];
     expect(
-      saveDraft(
-        { ...INITIAL_PLANNER_STATE, templateId: picked },
-        '2026-08-28T00:00:00.000Z',
-      ),
+      saveDraft({ ...INITIAL_PLANNER_STATE, templateId: picked }, '2026-08-28T00:00:00.000Z'),
     ).toBe(true);
 
     expect(loadDraft()?.templateId).toBe(picked);

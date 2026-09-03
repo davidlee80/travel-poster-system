@@ -2,7 +2,12 @@ import { THEME_BUCKET_VALUES, type AssetRequirementItem } from '@tps/schemas';
 import { themeBucket } from '@tps/assets';
 import { describe, expect, it } from 'vitest';
 
-import { BUCKET_THEME_PHRASE, HERO_ASPECT_RATIO, HERO_MIN_WIDTH, preheatTargets } from './preheat.js';
+import {
+  BUCKET_THEME_PHRASE,
+  HERO_ASPECT_RATIO,
+  HERO_MIN_WIDTH,
+  preheatTargets,
+} from './preheat.js';
 import { cacheKeyFor } from './resolve-assets.js';
 
 /**

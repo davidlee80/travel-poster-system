@@ -11,7 +11,11 @@ import { generateAiAsset } from './generate-asset.js';
 import { ingestAsset, type IngestAssetInput } from './ingest.js';
 import { BUCKET_THEME_PHRASE, parsePreheatManifest, preheatTargets } from './preheat.js';
 import { cacheKeyFor } from './resolve-assets.js';
-import { ROLE_INGEST_DEFAULTS, parseSeedManifest, type SeedManifestEntry } from './seed-manifest.js';
+import {
+  ROLE_INGEST_DEFAULTS,
+  parseSeedManifest,
+  type SeedManifestEntry,
+} from './seed-manifest.js';
 
 /**
  * 预热两条轨道的端到端（集成，需 PostgreSQL）。
@@ -45,7 +49,9 @@ async function photo(width: number, height: number): Promise<Uint8Array> {
     state = (state * 1103515245 + 12345) % 2147483648;
     pixels[i] = state % 256;
   }
-  const png = await sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer();
+  const png = await sharp(pixels, { raw: { width, height, channels: 3 } })
+    .png()
+    .toBuffer();
   return new Uint8Array(png);
 }
 
@@ -206,7 +212,9 @@ describeIntegration('预热两条轨道端到端（集成，需 PostgreSQL）', 
       const assets = createAssetsRepository(pool);
 
       for (const target of targets) {
-        const runtimeKey = cacheKeyFor(heroRequirement(destination, BUCKET_THEME_PHRASE[target.bucket]));
+        const runtimeKey = cacheKeyFor(
+          heroRequirement(destination, BUCKET_THEME_PHRASE[target.bucket]),
+        );
         expect(runtimeKey).not.toBeNull();
 
         const hit = await assets.findByCacheKey(runtimeKey!);
