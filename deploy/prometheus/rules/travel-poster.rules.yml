@@ -457,3 +457,26 @@ groups:
           summary: '{{ $labels.queue }} 队列已在入口拒绝新请求'
           description: '这是比 TravelQueueBacklogHigh 更硬的扩容信号：用户已经在拿 503。按 queue 标签加对应的 Worker（travel-plan-generation → generation-worker，travel-plan-export → render-worker）。扩容后要同时抬 QUEUE_ADMISSION_MAX_DEPTH 与积压告警阈值，否则新容量下仍会白白拒请求。'
           runbook: 'docs/运维手册.md#背压准入深度过高时直接拒新任务'
+
+      # 13. Chromium 反复重启
+      #
+      # R-84 的自愈（BrowserHolder 发现断开则串行重启）把一个刺眼的故障
+      # 变成了一次重试：以前 Chromium 崩溃以「后续每一个导出都失败」的形式
+      # 表现，现在只是三个在途导出失败 + 下一个任务重启后正常。
+      #
+      # 自愈是对的，而它的副作用是**崩溃变得不可见** —— 这个指标是它唯一的
+      # 信号，而在此之前没有人盯它（运维手册那一节开头写的就是「没有告警，
+      # 靠看指标」）。不看它就不会知道渲染进程正在反复 OOM。
+      #
+      # 阈值按运维手册的分档定：一小时 1～2 次是「偶发（某个特大页面），
+      # 不用动」，因此 > 3 才是第一个需要人管的档位。定得再低会把自愈本来
+      # 已经接住的偶发变成噪声，而噪声告警最终会被静音。
+      - alert: TravelRenderBrowserRestartHigh
+        expr: sum(increase(travel_render_browser_restart_total[1h])) > 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Chromium 一小时内重启超过 3 次'
+          description: '先看 /dev/shm（启动日志的 devShm 与重启 warn 的 dev_shm）：低于 256MB 会自动降级到磁盘并拖慢渲染，调到 512MB 比降并发划得来。重启后立即又崩说明启动就 OOM，要提容器内存上限。注意重启计数不含首次启动与关停，因此部署不会把它抬高。'
+          runbook: 'docs/运维手册.md#chromium-反复重启'
