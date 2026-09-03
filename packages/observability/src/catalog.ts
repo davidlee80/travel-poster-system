@@ -323,6 +323,14 @@ export const METRICS_CATALOG: readonly CatalogEntry[] = [
     source: 'supplementary',
     note: '背压的**先行**指标。T1 SLA 告警也能发现积压，但它是滞后的 —— 直方图只在任务完成时落样本，队列积压到 200 条时那 200 个受苦的用户还一个都没进过直方图。取 waiting 而不含 active：active 正常就该等于副本数 × concurrency。由 API 上报（它持有两个队列的生产者句柄），多副本下每个实例报的是同一个全局值，因此告警必须用 max by (queue) 而不是 sum',
   },
+  {
+    name: 'travel_queue_admission_rejected_total',
+    kind: 'counter',
+    labels: ['queue'],
+    owner: 'api',
+    source: 'supplementary',
+    note: '背压准入拒掉的请求数。它与 travel_queue_depth 是一对：深度告诉你积压有多严重，这条告诉你已经开始丢请求了。非 0 意味着真实用户拿到了 503，因此它是比积压告警**更硬**的扩容信号 —— 积压可以容忍一阵，丢请求不能。无 user_type 维度：判定在身份解析之前（过载时不该为了打标签而去建匿名用户行）',
+  },
 
   // ── 保留期（retention-worker）─────────────────────────────
   {

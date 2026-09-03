@@ -144,15 +144,48 @@ export const AUTH_ERRORS = {
 /**
  * api 独有的系统域。
  *
- * `SYS_INTERNAL_ERROR` 在 `DOMAIN_ERRORS` 里（JOB 域），这里只补
- * `SYS_DEPENDENCY_UNAVAILABLE` —— 它只由 `/readyz` 产生，
- * 属于运维探针而不是业务错误。
+ * `SYS_INTERNAL_ERROR` 在 `DOMAIN_ERRORS` 里（JOB 域），这里只补三个
+ * api 自己产生的码。
  */
 export const SYS_ERRORS = {
   SYS_DEPENDENCY_UNAVAILABLE: {
     httpStatus: 503,
     retryable: true,
     message: '服务暂时不可用，请稍后重试。',
+  },
+  /**
+   * 队列积压到无法再接新任务（背压准入）。
+   *
+   * ## 为何不复用 `SYS_DEPENDENCY_UNAVAILABLE`
+   *
+   * 两者都是 503，但处置手法相反：前者是「依赖挂了」（查 Redis / 数据库），
+   * 后者是「我们健康，只是活排不过来」（加 Worker 副本）。
+   * 共用一个码的表现是值班按运维手册去查一个没坏的依赖。
+   *
+   * `retryable: true` 且带 `Retry-After`：积压会自己消下去，
+   * 与余额不足（不可重试）不同。
+   */
+  SYS_QUEUE_SATURATED: {
+    httpStatus: 503,
+    retryable: true,
+    message: '当前排队人数过多，请稍后再试。',
+  },
+  /**
+   * 传输层的每-IP 限流（`@fastify/rate-limit`）。
+   *
+   * ## 与 `AUTH_RATE_LIMITED` 的分工
+   *
+   * `AUTH_RATE_LIMITED` 是**业务**限流：21.4 的每分钟 1／3 次生成，
+   * 它在身份解析**之后**判定，因此未认证的洪水根本走不到那一层。
+   * 这一条在那之前，按 IP 计数，不看身份。
+   *
+   * 分开两个码是为了让「单一源在打我们」与「用户点得太快」在日志与
+   * 告警上可分辨 —— 前者要看源 IP、可能要在网关封，后者什么都不用做。
+   */
+  SYS_RATE_LIMITED: {
+    httpStatus: 429,
+    retryable: true,
+    message: '请求过于频繁，请稍后再试。',
   },
 } as const satisfies Record<string, ErrorDefinition>;
 

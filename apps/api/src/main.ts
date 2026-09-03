@@ -40,7 +40,11 @@ import {
 } from './identity/phone-verification.js';
 import { RedisSessionStore } from './identity/redis-session-store.js';
 import { CreditsService } from './credits/service.js';
-import { startQueueDepthSampler } from './queue-depth.js';
+import {
+  startQueueDepthSampler,
+  createQueueDepthTracker,
+  loadQueueAdmissionMaxDepth,
+} from './queue-depth.js';
 import { buildServer } from './server.js';
 
 const SERVICE_NAME = 'tps-api';
@@ -200,6 +204,17 @@ async function main(): Promise<void> {
   const rawInternalKey = optionalString('INTERNAL_API_KEY', '');
   const internalApiKey = rawInternalKey.length === 0 ? undefined : rawInternalKey;
 
+  /*
+   * 背压准入的共享追踪器。
+   *
+   * 必须在 `buildServer` **之前**造好：路由在装配时就要拿到它，
+   * 而采样器要到下面才启。两边拿的是**同一个**对象 —— 各造一个的
+   * 表现是采样器写 A、路由读 B，于是准入永远看到 null（fail open），
+   * 而那个失效完全静默：指标正常、告警正常，只是从不拒绝。
+   */
+  const queueBacklog = createQueueDepthTracker();
+  const admissionMaxDepth = loadQueueAdmissionMaxDepth();
+
   const app = buildServer({
     config,
     logger,
@@ -222,6 +237,8 @@ async function main(): Promise<void> {
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
       now: () => new Date(),
       plannerConfig,
+      backlog: queueBacklog,
+      admissionMaxDepth,
       ...(credits === undefined ? {} : { credits }),
     },
     plannerConfig: { config: plannerConfig },
@@ -252,6 +269,8 @@ async function main(): Promise<void> {
       storage: new S3ExportStorage(loadExportsStorageConfig()),
       featureFlags,
       secureCookies: optionalBool('COOKIE_SECURE', config.nodeEnv === 'production'),
+      backlog: queueBacklog,
+      admissionMaxDepth,
       ...(credits === undefined ? {} : { credits }),
     },
     /*
@@ -298,6 +317,7 @@ async function main(): Promise<void> {
     plan: queue,
     export: exportQueue,
     logger,
+    tracker: queueBacklog,
   });
   shutdown.register('queue-depth-sampler', () => {
     stopQueueDepthSampler();

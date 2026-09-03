@@ -1,4 +1,4 @@
-import { InMemoryPlanQueue } from '@tps/queue';
+import { InMemoryPlanQueue, PLAN_QUEUE_NAME } from '@tps/queue';
 import { makeValidRequest } from '@tps/planning';
 import {
   FORBIDDEN_PROJECTION_KEYS,
@@ -36,6 +36,7 @@ import { CreditsService } from '../credits/service.js';
 import { FakeUsersRepository } from '../identity/fake-users-repository.js';
 import { InMemorySessionStore } from '../identity/session-store.js';
 import { IdentityService } from '../identity/service.js';
+import { createQueueDepthTracker, type QueueBacklog } from '../queue-depth.js';
 import { buildServer } from '../server.js';
 
 /**
@@ -351,6 +352,9 @@ function build(
   featureFlags?: FeatureFlags,
   /** 装配 CR 计费。缺省不装 —— 既有用例测的是幂等编排，与钱无关 */
   billing: 'off' | 'on' = 'off',
+  /** 背压准入。缺省不装，与引入它之前的行为一致 */
+  backlog?: QueueBacklog,
+  admissionMaxDepth = 40,
 ): Harness {
   const users = new FakeUsersRepository(now);
   const sessions = new InMemorySessionStore();
@@ -403,6 +407,7 @@ function build(
       secureCookies: false,
       // N-01 需要「今天」；请求 fixture 的出发日期是 2026-04-10
       now,
+      ...(backlog === undefined ? {} : { backlog, admissionMaxDepth }),
       ...(credits === undefined ? {} : { credits }),
     },
   });
@@ -1698,5 +1703,84 @@ describe('CR 闸门（C-3）', () => {
 
     expect(response.statusCode).toBe(201);
     expect(h().wallet.entries()).toHaveLength(0);
+  });
+});
+
+/**
+ * 背压准入（队列积压到饱和时拒新任务）。
+ *
+ * 引入之前 `travel_queue_depth` 只是一条 gauge：文档说它是「唯一能在用户
+ * 受影响前介入的窗口」，而代码里没有任何地方读它 —— 介入靠人看告警。
+ */
+describe('背压准入（生成端点）', () => {
+  /** 深度超阈的夹具。阈值取 40，因此 41 刚好越线 */
+  function saturated(depth = 41): void {
+    const backlog = createQueueDepthTracker();
+    backlog.record(PLAN_QUEUE_NAME, depth);
+    harness = build(new InMemoryIdempotencyLock(), undefined, 'off', backlog, 40);
+  }
+
+  async function generate(cookie: string) {
+    return h().app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
+      payload: body(),
+    });
+  }
+
+  it('积压超阈时返回 503 SYS_QUEUE_SATURATED 与 Retry-After', async () => {
+    const cookie = await anonymousCookie();
+    saturated();
+
+    const response = await generate(cookie);
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json<{ error: { code: string } }>().error.code).toBe('SYS_QUEUE_SATURATED');
+    /* 带 Retry-After 才能让客户端退避；不带的话它会立即重试 */
+    expect(Number(response.headers['retry-after'])).toBeGreaterThanOrEqual(15);
+  });
+
+  it('拒绝时不建任务、不入队', async () => {
+    const cookie = await anonymousCookie();
+    saturated();
+
+    await generate(cookie);
+
+    expect(h().repository.byKey.size).toBe(0);
+    expect(h().queue.enqueued).toHaveLength(0);
+  });
+
+  it('判定在身份解析之前：访客被拒时不现场建号', async () => {
+    /*
+     * 13.0 第 3.a 条让生成端点为访客现场建号。把准入放在身份之后的表现
+     * 是：过载时每一个被拒的访客都先留下一行 `users` 与一个会话 ——
+     * 而那正是背压要省下的数据库写入。这条是那个顺序的唯一守卫。
+     */
+    saturated();
+    const before = h().users.count();
+
+    /* 不带 Cookie —— 正常情况下这会现场建一个匿名用户 */
+    const response = await h().app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      payload: body(),
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(h().users.count()).toBe(before);
+  });
+
+  it('深度回到阈值以内后恢复放行', async () => {
+    const cookie = await anonymousCookie();
+    saturated(40);
+
+    expect((await generate(cookie)).statusCode).toBe(201);
+  });
+
+  it('未装配准入时行为不变（默认夹具）', async () => {
+    /* 既有部署不传 backlog 时不该因为这个功能而行为变化 */
+    const cookie = await anonymousCookie();
+    expect((await generate(cookie)).statusCode).toBe(201);
   });
 });

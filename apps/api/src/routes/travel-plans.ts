@@ -1,4 +1,4 @@
-import { captureTraceContext, type PlanQueue } from '@tps/queue';
+import { captureTraceContext, PLAN_QUEUE_NAME, type PlanQueue } from '@tps/queue';
 import { prepareTravelRequest } from '@tps/planning';
 import {
   IDEMPOTENCY_LOCK_TTL_SECONDS,
@@ -33,6 +33,12 @@ import {
   type ErrorCode,
 } from '../errors/codes.js';
 import { ALL_FEATURES_ON, featureGateTotal } from '../feature-gate.js';
+import {
+  decideAdmission,
+  loadQueueAdmissionMaxDepth,
+  queueAdmissionRejectedTotal,
+  type QueueBacklog,
+} from '../queue-depth.js';
 import { recordCreditGate } from '../credits/metrics.js';
 import type { CreditsService, JobCreditCheck } from '../credits/service.js';
 import { resolveIdentity, type IdentityContextDeps } from './identity-context.js';
@@ -137,6 +143,15 @@ export interface TravelPlanRoutesDeps extends IdentityContextDeps {
    * 也让本文件的既有测试不必全部装配钱包：它们测的是幂等编排，与钱无关。
    */
   readonly credits?: CreditsService;
+  /**
+   * 背压准入（队列积压到饱和时拒新任务）。
+   *
+   * 可缺省：未提供时不做准入判定，与引入它之前的行为一致。
+   * 单测默认不装它 —— 否则每个用例都要造一个追踪器，而它们测的是幂等与配额。
+   */
+  readonly backlog?: QueueBacklog;
+  /** 准入阈值。缺省取 `QUEUE_ADMISSION_MAX_DEPTH` */
+  readonly admissionMaxDepth?: number;
 }
 
 function fail(
@@ -214,6 +229,41 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
    * 重试会命中幂等但已经被扣了一次额度 —— 21.4 明确「幂等命中不计入配额」。
    */
   app.post('/api/v1/travel-plans/generate', async (request, reply) => {
+    /*
+     * ── 背压准入 ──
+     *
+     * 在**身份解析之前**，比灰度开关还早。两个理由：
+     *
+     * 1. 这一层不需要身份 —— 队列深度是全局的，不按用户分桶；
+     * 2. 更要紧的是 13.0 第 3.a 条：生成端点会为访客**现场建号**。
+     *    放在身份之后的表现是：过载时每一个被拒的访客都先留下一行
+     *    `users` 与一个会话 —— 而那正是背压要省下的数据库写入。
+     *
+     * 代价是拒绝指标没有 `user_type` 维度。可以接受：过载时要的结论是
+     * 「该加多少副本」，而那与被拒的人是否注册无关。
+     */
+    if (deps.backlog !== undefined) {
+      const admission = decideAdmission(
+        deps.backlog,
+        PLAN_QUEUE_NAME,
+        deps.admissionMaxDepth ?? loadQueueAdmissionMaxDepth(),
+      );
+      if (!admission.admit) {
+        queueAdmissionRejectedTotal.inc({ queue: PLAN_QUEUE_NAME });
+        request.log.warn(
+          {
+            stage: 'QUEUED',
+            error_code: 'SYS_QUEUE_SATURATED',
+            queue_depth: admission.depth,
+          },
+          '队列积压达到准入上限，拒绝新生成请求',
+        );
+        return fail(request, reply, 'SYS_QUEUE_SATURATED', {
+          retryAfterSeconds: admission.retryAfterSeconds,
+        });
+      }
+    }
+
     // 13.0 第 3.a 条：生成端点永不因为缺少身份而返回 401，它会为访客现场建号
     const resolved = await resolveIdentity(deps, request, reply, {
       allowAnonymousCreation: true,

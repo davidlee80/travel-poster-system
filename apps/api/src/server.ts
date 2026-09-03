@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
+import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { metricsContentType, metricsText } from '@tps/observability';
-import type { GracefulShutdown, Logger, ServiceConfig } from '@tps/shared';
+import { optionalInt, type GracefulShutdown, type Logger, type ServiceConfig } from '@tps/shared';
+import { buildErrorBody } from './errors/codes.js';
 import { registerAuthRoutes, type AuthRoutesDeps } from './routes/auth.js';
 import {
   registerInternalAssetRoutes,
@@ -69,6 +71,48 @@ export interface ServerDeps {
    * 这三个端点每次调用都会 500，而注册它们等于对外承诺它们可用。
    */
   readonly credits?: CreditRoutesDeps;
+  /**
+   * 传输层每-IP 限流。缺省取 `RATE_LIMIT_*` 环境变量（见 `loadRateLimitConfig`）。
+   *
+   * `max: 0` 关闭限流 —— 给需要发大量请求的用例一个出口，
+   * 而不是让它们去猜阈值够不够大。
+   */
+  readonly rateLimit?: RateLimitConfig;
+}
+
+export interface RateLimitConfig {
+  /** 窗口内允许的请求数。`0` = 不注册限流 */
+  readonly max: number;
+  readonly timeWindowMs: number;
+}
+
+/**
+ * 限流默认值：每 IP 每分钟 300 次。
+ *
+ * ## 为何比业务配额高两个数量级
+ *
+ * 21.4 的生成配额是每分钟 1～3 次，而这一层**不是拿来替代它的**。
+ * 一个正常使用的会话除了生成还要轮询任务状态（每 1～2 秒一次，
+ * 持续到一分钟）、读展示数据、拉历史列表 —— 把阈值定得接近业务配额
+ * 会把轮询打成 429，而那是生成体验的主路径。
+ *
+ * 300/分钟 ≈ 5 rps，远高于任何真实使用者，但足以让单一源的洪水
+ * 在压垮数据库之前就被挤在入口 —— 而那正是它存在的全部理由。
+ *
+ * ## 它是每副本的，不是全局的
+ *
+ * 用内存计数而不是 Redis：后者让阈值全局统一，但也把一条 Redis 往返
+ * 加进了**每一个**请求，包括洪水里的那些 —— 于是限流器自己成了
+ * 放大器。代价是实际上限为 `max × 副本数`，这在防洪水的量级上无关紧要。
+ */
+export const RATE_LIMIT_MAX = 300;
+export const RATE_LIMIT_WINDOW_MS = 60_000;
+
+export function loadRateLimitConfig(): RateLimitConfig {
+  return {
+    max: optionalInt('RATE_LIMIT_MAX', RATE_LIMIT_MAX),
+    timeWindowMs: optionalInt('RATE_LIMIT_WINDOW_MS', RATE_LIMIT_WINDOW_MS),
+  };
 }
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -84,6 +128,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     internalPresentations,
     plannerConfig,
     credits,
+    rateLimit: rateLimitConfig = loadRateLimitConfig(),
   } = deps;
 
   /*
@@ -150,6 +195,76 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   /*
+   * ── 传输层每-IP 限流 ──
+   *
+   * 它填的是 `QuotaGuard` 接不到的那一段：业务配额在**身份解析之后**
+   * 判定，而身份解析本身就要查 Redis 与数据库 —— 因此一个不带有效
+   * Cookie 的洪水根本走不到配额那一层，却已经把依赖打满了。
+   *
+   * 注册在 request_id 钩子**之后**：Fastify 按注册顺序跑 onRequest，
+   * 而插件加钩子发生在 `ready()`（更晚）。于是 429 响应也带
+   * `x-request-id` —— 用户报障时那个 ID 是唯一能定位到请求的线索，
+   * 而被限流拦住的请求恰好是最可能被报障的那批。
+   */
+  if (rateLimitConfig.max > 0) {
+    void app.register(rateLimit, {
+      global: true,
+      max: rateLimitConfig.max,
+      timeWindow: rateLimitConfig.timeWindowMs,
+      /*
+       * `trustProxy: true` 已经让 `request.ip` 是真实客户端 IP（经
+       * X-Forwarded-For）。显式写出这个键而不靠默认：默认也是
+       * `request.ip`，但「按什么分桶」是限流器最要紧的一个判断 ——
+       * 它退化成按网关 IP 分桶时，全站共用一个配额。
+       */
+      keyGenerator: (request) => request.ip,
+      /*
+       * 13.0 的错误信封。
+       *
+       * 插件把这个返回值 **throw** 出去（见其 index.js），因此必须是一个
+       * 带 `statusCode` 的 Error —— 返回纯对象的表现是 500。
+       *
+       * 而 Fastify 的默认错误序列化只输出 `{statusCode, code, error, message}`，
+       * 不带我们的信封。而前端（`api-client.ts` L128-134）读不到
+       * `error.code` 时会回退到 `SYS_INTERNAL_ERROR` + 「服务暂时不可用」——
+       * 把一次限流告诉用户成了服务器故障，且没有任何「慢一点」的提示。
+       *
+       * 因此把信封挂在 `tpsErrorBody` 上，由下面的错误处理器原样发出。
+       */
+      errorResponseBuilder: (request, context) => {
+        const error = new Error('rate limit exceeded') as Error & {
+          statusCode: number;
+          tpsErrorBody: unknown;
+        };
+        error.statusCode = context.statusCode;
+        error.tpsErrorBody = buildErrorBody('SYS_RATE_LIMITED', {
+          requestId: request.id,
+          traceId: 'unavailable',
+        });
+        return error;
+      },
+      /* 带上标准的 `RateLimit-*` 头，让客户端能自己退避而不是硬撞 */
+      enableDraftSpec: true,
+    });
+
+    /*
+     * 只为带了 `tpsErrorBody` 的错误接手，其余全部原样交回 Fastify。
+     *
+     * 窄到只看一个自定义属性，是为了不动全站的错误形态 ——
+     * 13.7 的业务错误都是各路由自己 `reply.send` 的，根本不走错误处理器；
+     * 而 Fastify 自己产生的 400（畸形 JSON）/404 必须保持原样，
+     * 否则会改变一批与限流无关的契约。
+     */
+    app.setErrorHandler((error, _request, reply) => {
+      const marked = error as Error & { statusCode?: number; tpsErrorBody?: unknown };
+      if (marked.tpsErrorBody !== undefined) {
+        return reply.code(marked.statusCode ?? 429).send(marked.tpsErrorBody);
+      }
+      return reply.send(error);
+    });
+  }
+
+  /*
    * 容忍 `content-type: application/json` + 空请求体。
    *
    * Fastify 默认对这种请求回 400 `FST_ERR_CTP_EMPTY_JSON_BODY`。而
@@ -198,7 +313,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
    * 存活探针：进程还在就返回 200。
    * 排空期间仍返回 200 —— 否则 K8s 会在优雅停机中途 SIGKILL 掉本实例。
    */
-  app.get('/healthz', () => ({
+  app.get('/healthz', { config: { rateLimit: false } }, () => ({
     status: 'live',
     service: config.serviceName,
   }));
@@ -207,7 +322,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
    * 就绪探针：排空中或依赖不可用时返回 503，负载均衡据此摘除实例。
    * 这是优雅停机能真正"优雅"的前提（设计稿 22.3.3）。
    */
-  app.get('/readyz', async (_request, reply) => {
+  app.get('/readyz', { config: { rateLimit: false } }, async (_request, reply) => {
     if (shutdown.isDraining) {
       return reply.code(503).send({
         status: 'draining',
@@ -228,32 +343,50 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   /** Prometheus 抓取端点（设计稿 21.3） */
-  app.get('/metrics', async (_request, reply) => {
+  app.get('/metrics', { config: { rateLimit: false } }, async (_request, reply) => {
     reply.header('content-type', metricsContentType);
     return reply.send(await metricsText());
   });
 
-  if (auth !== undefined) {
-    registerAuthRoutes(app, auth);
-  }
-  if (travelPlans !== undefined) {
-    registerTravelPlanRoutes(app, travelPlans);
-  }
-  if (exportRoutes !== undefined) {
-    registerExportRoutes(app, exportRoutes);
-  }
-  if (internalAssets !== undefined) {
-    registerInternalAssetRoutes(app, internalAssets);
-  }
-  if (internalPresentations !== undefined) {
-    registerInternalPresentationRoutes(app, internalPresentations);
-  }
-  if (plannerConfig !== undefined) {
-    registerPlannerConfigRoutes(app, plannerConfig);
-  }
-  if (credits !== undefined) {
-    registerCreditRoutes(app, credits);
-  }
+  /*
+   * 业务路由放在 `after()` 里注册。
+   *
+   * ## 不这么做限流会静默失效
+   *
+   * Fastify 在**声明路由的那一刻**就把当前作用域的 `onRequest` 钩子
+   * 绑定到该路由上，而 `app.register()` 是**延迟**的（要到 `ready()`
+   * 才加载）。因此直接写 `app.register(rateLimit); app.get(...)` 的话，
+   * 路由声明时限流插件还没加钩子 —— 于是**一个路由都不受限流**，
+   * 而插件看起来已经“注册成功”：无报错、有 `RateLimit-*` 头的路由一个也没有。
+   *
+   * `after()` 的回调在先前排队的插件加载完之后执行，这时钩子已在作用域上。
+   *
+   * 探针与 `/metrics` 留在外面：它们本就豁免（`rateLimit: false`），
+   * 而放在外面能保证即使插件加载失败，存活探针仍然可用。
+   */
+  app.after(() => {
+    if (auth !== undefined) {
+      registerAuthRoutes(app, auth);
+    }
+    if (travelPlans !== undefined) {
+      registerTravelPlanRoutes(app, travelPlans);
+    }
+    if (exportRoutes !== undefined) {
+      registerExportRoutes(app, exportRoutes);
+    }
+    if (internalAssets !== undefined) {
+      registerInternalAssetRoutes(app, internalAssets);
+    }
+    if (internalPresentations !== undefined) {
+      registerInternalPresentationRoutes(app, internalPresentations);
+    }
+    if (plannerConfig !== undefined) {
+      registerPlannerConfigRoutes(app, plannerConfig);
+    }
+    if (credits !== undefined) {
+      registerCreditRoutes(app, credits);
+    }
+  });
 
   return app;
 }

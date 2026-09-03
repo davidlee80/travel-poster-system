@@ -8,7 +8,7 @@ import {
   type PresentationsRepository,
   type TravelPlansRepository,
 } from '@tps/db';
-import { captureTraceContext, type ExportQueue } from '@tps/queue';
+import { captureTraceContext, EXPORT_QUEUE_NAME, type ExportQueue } from '@tps/queue';
 import {
   CreateExportRequestSchema,
   EXPORT_PROGRESS,
@@ -35,6 +35,12 @@ import {
   type ErrorCode,
 } from '../errors/codes.js';
 import { ALL_FEATURES_ON, featureGateTotal } from '../feature-gate.js';
+import {
+  decideAdmission,
+  loadQueueAdmissionMaxDepth,
+  queueAdmissionRejectedTotal,
+  type QueueBacklog,
+} from '../queue-depth.js';
 import { recordCreditGate } from '../credits/metrics.js';
 import type { CreditsService } from '../credits/service.js';
 import { resolveIdentity, type IdentityContextDeps } from './identity-context.js';
@@ -87,6 +93,14 @@ export interface ExportRoutesDeps extends IdentityContextDeps {
   readonly featureFlags?: FeatureFlags;
   /** CR 计费（C-3）。未提供时导出不计费，理由见 travel-plans.ts 的同名字段 */
   readonly credits?: CreditsService;
+  /**
+   * 背压准入。看的是**导出队列**的深度，与生成队列分开 ——
+   * 两个队列的消费者是不同进程（generation-worker / render-worker），
+   * 共用一个阈值会让生成积压误伤导出，而导出此时可能完全空闲。
+   */
+  readonly backlog?: QueueBacklog;
+  /** 准入阈值。缺省取 `QUEUE_ADMISSION_MAX_DEPTH` */
+  readonly admissionMaxDepth?: number;
 }
 
 function fail(
@@ -194,6 +208,28 @@ export function registerExportRoutes(app: FastifyInstance, deps: ExportRoutesDep
   app.post<{ Params: { plan_id: string } }>(
     '/api/v1/travel-plans/:plan_id/exports',
     async (request, reply) => {
+      /*
+       * 背压准入（导出队列）。放在最前面，与生成端点同一理由；
+       * 差别是导出端点不现场建号，因此这里省下的是 Chromium 而不是用户行。
+       */
+      if (deps.backlog !== undefined) {
+        const admission = decideAdmission(
+          deps.backlog,
+          EXPORT_QUEUE_NAME,
+          deps.admissionMaxDepth ?? loadQueueAdmissionMaxDepth(),
+        );
+        if (!admission.admit) {
+          queueAdmissionRejectedTotal.inc({ queue: EXPORT_QUEUE_NAME });
+          request.log.warn(
+            { error_code: 'SYS_QUEUE_SATURATED', queue_depth: admission.depth },
+            '导出队列积压达到准入上限，拒绝新导出请求',
+          );
+          return fail(request, reply, 'SYS_QUEUE_SATURATED', {
+            retryAfterSeconds: admission.retryAfterSeconds,
+          });
+        }
+      }
+
       const resolved = await resolveIdentity(deps, request, reply, {
         allowAnonymousCreation: false,
       });

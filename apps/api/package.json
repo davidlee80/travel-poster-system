@@ -24,6 +24,7 @@
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@fastify/rate-limit": "11.2.0",
     "@tps/assets": "workspace:*",
     "@tps/billing": "workspace:*",
     "@tps/db": "workspace:*",

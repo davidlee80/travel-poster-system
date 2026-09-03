@@ -1,6 +1,6 @@
-import { createGauge } from '@tps/observability';
+import { createCounter, createGauge } from '@tps/observability';
 import { EXPORT_QUEUE_NAME, PLAN_QUEUE_NAME } from '@tps/queue';
-import type { Logger } from '@tps/shared';
+import { optionalInt, type Logger } from '@tps/shared';
 
 /**
  * 队列积压的采样与上报（21.3 的补充项）。
@@ -42,6 +42,113 @@ export const queueDepth = createGauge({
   labelNames: ['queue'],
 });
 
+export const queueAdmissionRejectedTotal = createCounter({
+  name: 'travel_queue_admission_rejected_total',
+  help: '因队列积压而在入口被拒的请求数（背压准入）',
+  labelNames: ['queue'],
+});
+
+/**
+ * 背压准入的阈值。
+ *
+ * ## 它不是告警阈值，也不应该是
+ *
+ * `TravelQueueBacklogHigh` 在深度 > 8 持续 5 分钟时告警，而那是一个
+ * **叫人扩容的 warning**，不是拒绝点。把准入也定在 8 的表现是：
+ * 告警有意容忍的那五分钟瞬时突发，全部变成用户可见的 503。
+ *
+ * ## 推导：拒的是「已经注定失败的活」
+ *
+ * 16.3 的队列等待上限是 600 秒，超过就 `JOB_QUEUE_TIMEOUT`。
+ * 告警注释给的单副本吞吐是约 4～5 任务/分钟，取 4.5 算：
+ * 600 秒 × 4.5/60 ≈ **45** —— 深度过了这个数之后，新任务在开始之前
+ * 就会先撞上 600 秒。
+ *
+ * 取 40（稍低于 45）留一点余量。关键在于：超过它仍然接下来并不会让
+ * 那个任务跑成，只会额外花掉一格日配额、一笔 CR 预留和一行
+ * 用户在列表里看得见的卡住的计划。**准入控制在这里的职责不是保 SLA，
+ * 而是不收没法交付的钱、不留没人消费的垃圾行。** SLA 由告警 + 扩容管。
+ *
+ * ## 加 Worker 副本必须同步抬它
+ *
+ * 与告警阈值同一条约束（运维手册里已有）：五副本的吞吐下，
+ * 深度 40 远达不到 600 秒，这时拒绝是白白丢请求。
+ */
+export const QUEUE_ADMISSION_MAX_DEPTH = 40;
+
+export function loadQueueAdmissionMaxDepth(): number {
+  return optionalInt('QUEUE_ADMISSION_MAX_DEPTH', QUEUE_ADMISSION_MAX_DEPTH);
+}
+
+/**
+ * 读上一次采样到的深度。
+ *
+ * ## 为何读缓存而不是每请求查一次 Redis
+ *
+ * 每请求查一次看上去更准，但它把一条 Redis 往返加进了热路径 ——
+ * 而这个判定恰好只在**过载时**才会被大量执行。过载时给 Redis
+ * 再加一倍 QPS 是在放大故障，而不是抵御它。
+ *
+ * 15 秒的陈旧度在这里无关紧要：单任务要跑 20～60 秒，队列不可能在
+ * 一个采样间隔里从健康跌到饱和。
+ */
+export interface QueueBacklog {
+  /** `null` = 从未成功采样过（不可判定，调用方应当放行） */
+  depthOf(queue: string): number | null;
+}
+
+export interface QueueDepthTracker extends QueueBacklog {
+  record(queue: string, depth: number): void;
+}
+
+/**
+ * 采样值的内存快照。
+ *
+ * 做成显式对象而不是模块级可变量：后者会让测试之间互相泄漏状态，
+ * 而“上一条测试把深度置成了 99”这类失败极难定位。
+ */
+export function createQueueDepthTracker(): QueueDepthTracker {
+  const depths = new Map<string, number>();
+  return {
+    record: (queue, depth) => {
+      depths.set(queue, depth);
+    },
+    depthOf: (queue) => depths.get(queue) ?? null,
+  };
+}
+
+/** 准入判定结果。`retryAfterSeconds` 直接给 `Retry-After` */
+export type AdmissionDecision =
+  | { readonly admit: true }
+  | { readonly admit: false; readonly depth: number; readonly retryAfterSeconds: number };
+
+/**
+ * 该不该接这个新任务。
+ *
+ * **不可判定时放行（fail open）。** 与 13.8 的 Redis 幂等锁同一条取舍：
+ * Redis 不可用时宁可放过一些请求，也不能让全站无法生成计划 ——
+ * 而那正是 fail closed 的后果：采样一挂，`depthOf` 永远返回 null。
+ *
+ * `retryAfterSeconds` 按「排空到阈值以下大致要多久」给，并夹在
+ * 15～300 秒：给 1 秒会把客户端变成新的压源，给 1 小时则等同于赶客。
+ */
+export function decideAdmission(
+  backlog: QueueBacklog,
+  queue: string,
+  maxDepth: number,
+): AdmissionDecision {
+  const depth = backlog.depthOf(queue);
+  if (depth === null || depth <= maxDepth) return { admit: true };
+
+  /* 每分钟约 4.5 任务 ⇒ 每消一条约 13 秒（与阈值推导同一个吞吐假设） */
+  const drainSeconds = Math.round((depth - maxDepth) * 13);
+  return {
+    admit: false,
+    depth,
+    retryAfterSeconds: Math.min(300, Math.max(15, drainSeconds)),
+  };
+}
+
 /** 只要能问出深度就行，不关心是哪一种队列 */
 export interface DepthSource {
   depth(): Promise<number>;
@@ -51,6 +158,13 @@ export interface QueueDepthSamplerDeps {
   readonly plan: DepthSource;
   readonly export: DepthSource;
   readonly logger: Logger;
+  /**
+   * 采到的值写进这里，供准入判定读（见 `decideAdmission`）。
+   *
+   * 可缺省：只要指标不要准入的部署（或只测上报的用例）不必造一个追踪器。
+   * 缺省时 `depthOf` 永远是 null，而那条路径 fail open。
+   */
+  readonly tracker?: QueueDepthTracker;
 }
 
 /**
@@ -73,6 +187,7 @@ export async function sampleQueueDepth(deps: QueueDepthSamplerDeps): Promise<voi
     try {
       const depth = await target.source.depth();
       queueDepth.set({ queue: target.name }, depth);
+      deps.tracker?.record(target.name, depth);
     } catch (error) {
       deps.logger.warn(
         { queue: target.name, reason_code: 'QUEUE_DEPTH_SAMPLE_FAILED' },
