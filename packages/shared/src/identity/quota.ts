@@ -32,6 +32,10 @@ export interface IpQuota {
   readonly anonCreatePerDay: number;
   readonly plansPerDay: number;
   readonly loginFailuresPerHour: number;
+  /** 每 IP 每小时注册/登录尝试上限（S3 修复） */
+  readonly registerPerHour: number;
+  /** 每 IP 每日注册/登录尝试上限（S3 修复） */
+  readonly registerPerDay: number;
 }
 
 export interface QuotaConfig {
@@ -71,6 +75,8 @@ export function loadQuotaConfig(): QuotaConfig {
       anonCreatePerDay: optionalInt('QUOTA_IP_ANON_CREATE_PER_DAY', 20),
       plansPerDay: optionalInt('QUOTA_IP_PLANS_PER_DAY', 10),
       loginFailuresPerHour: optionalInt('QUOTA_IP_LOGIN_FAILURES_PER_HOUR', 10),
+      registerPerHour: optionalInt('QUOTA_IP_REGISTER_PER_HOUR', 10),
+      registerPerDay: optionalInt('QUOTA_IP_REGISTER_PER_DAY', 50),
     },
     emailLoginFailuresPerHour: optionalInt('QUOTA_EMAIL_LOGIN_FAILURES_PER_HOUR', 5),
     anonTokenTtlDays: optionalInt('ANON_TOKEN_TTL_DAYS', 30),
@@ -119,6 +125,7 @@ export function assertQuotaInvariants(config: QuotaConfig): void {
     ['QUOTA_ANON_DAILY_PLANS', config.anonymous.dailyPlans],
     ['QUOTA_REGISTERED_DAILY_PLANS', config.registered.dailyPlans],
     ['QUOTA_IP_ANON_CREATE_PER_HOUR', config.ip.anonCreatePerHour],
+    ['QUOTA_IP_REGISTER_PER_HOUR', config.ip.registerPerHour],
     ['ANON_TOKEN_TTL_DAYS', config.anonTokenTtlDays],
   ] as const) {
     if (value <= 0) {
@@ -218,6 +225,8 @@ export const QUOTA_KEYS = {
   ipPlansPerDay: (ip: string, now: Date) => `q:ip:plans:d:${dayKey(now)}:${ip}`,
   ipAnonCreatePerHour: (ip: string, now: Date) => `q:ip:anon:h:${hourKey(now)}:${ip}`,
   ipAnonCreatePerDay: (ip: string, now: Date) => `q:ip:anon:d:${dayKey(now)}:${ip}`,
+  ipRegisterPerHour: (ip: string, now: Date) => `q:ip:register:h:${hourKey(now)}:${ip}`,
+  ipRegisterPerDay: (ip: string, now: Date) => `q:ip:register:d:${dayKey(now)}:${ip}`,
   ipLoginFailuresPerHour: (ip: string, now: Date) => `q:ip:loginfail:${hourKey(now)}:${ip}`,
   emailLoginFailuresPerHour: (email: string, now: Date) =>
     `q:email:loginfail:${hourKey(now)}:${email.toLowerCase()}`,

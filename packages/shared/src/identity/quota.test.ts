@@ -23,6 +23,8 @@ function baseConfig(overrides: Partial<QuotaConfig> = {}): QuotaConfig {
       anonCreatePerDay: 20,
       plansPerDay: 10,
       loginFailuresPerHour: 10,
+      registerPerHour: 10,
+      registerPerDay: 50,
     },
     emailLoginFailuresPerHour: 5,
     anonTokenTtlDays: 30,
@@ -46,7 +48,14 @@ describe('配置不变式（21.4）', () => {
   it('IP 日上限低于匿名日配额两倍时拒绝启动', () => {
     const config = baseConfig({
       anonymous: { perMinute: 1, dailyPlans: 5, monthlyPlans: 10, exportsPerPlan: 3, aiHero: 0 },
-      ip: { anonCreatePerHour: 5, anonCreatePerDay: 20, plansPerDay: 9, loginFailuresPerHour: 10 },
+      ip: {
+        anonCreatePerHour: 5,
+        anonCreatePerDay: 20,
+        plansPerDay: 9,
+        loginFailuresPerHour: 10,
+        registerPerHour: 10,
+        registerPerDay: 50,
+      },
     });
 
     expect(() => assertQuotaInvariants(config)).toThrow(ConfigError);
@@ -55,7 +64,14 @@ describe('配置不变式（21.4）', () => {
 
   it('恰好等于两倍时通过（边界）', () => {
     const config = baseConfig({
-      ip: { anonCreatePerHour: 5, anonCreatePerDay: 20, plansPerDay: 10, loginFailuresPerHour: 10 },
+      ip: {
+        anonCreatePerHour: 5,
+        anonCreatePerDay: 20,
+        plansPerDay: 10,
+        loginFailuresPerHour: 10,
+        registerPerHour: 10,
+        registerPerDay: 50,
+      },
     });
     expect(() => assertQuotaInvariants(config)).not.toThrow();
   });
@@ -180,6 +196,8 @@ describe('生成配额消耗', () => {
           anonCreatePerDay: 20,
           plansPerDay: 999,
           loginFailuresPerHour: 10,
+      registerPerHour: 10,
+      registerPerDay: 50,
         },
       }),
     );
@@ -254,6 +272,8 @@ describe('IP 维度兜底（21.4，清 Cookie 无效的那一层）', () => {
           anonCreatePerDay: 99,
           plansPerDay: 3,
           loginFailuresPerHour: 10,
+      registerPerHour: 10,
+      registerPerDay: 50,
         },
       }),
     );
@@ -292,6 +312,8 @@ describe('IP 维度兜底（21.4，清 Cookie 无效的那一层）', () => {
           anonCreatePerDay: 99,
           plansPerDay: 1,
           loginFailuresPerHour: 10,
+      registerPerHour: 10,
+      registerPerDay: 50,
         },
       }),
     );

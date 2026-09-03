@@ -43,7 +43,7 @@ const serviceConfig: ServiceConfig = {
 const quotaConfig: QuotaConfig = {
   anonymous: { perMinute: 99, dailyPlans: 5, monthlyPlans: 10, exportsPerPlan: 3, aiHero: 0 },
   registered: { perMinute: 99, dailyPlans: 5, monthlyPlans: 20, exportsPerPlan: 10, aiHero: 2 },
-  ip: { anonCreatePerHour: 50, anonCreatePerDay: 200, plansPerDay: 100, loginFailuresPerHour: 10 },
+  ip: { anonCreatePerHour: 50, anonCreatePerDay: 200, plansPerDay: 100, loginFailuresPerHour: 10, registerPerHour: 10, registerPerDay: 50 },
   emailLoginFailuresPerHour: 5,
   anonTokenTtlDays: 30,
 };

@@ -10,7 +10,7 @@ function quotaConfig(overrides: Partial<QuotaConfig> = {}): QuotaConfig {
   return {
     anonymous: { perMinute: 99, dailyPlans: 5, monthlyPlans: 10, exportsPerPlan: 3, aiHero: 0 },
     registered: { perMinute: 99, dailyPlans: 5, monthlyPlans: 20, exportsPerPlan: 10, aiHero: 2 },
-    ip: { anonCreatePerHour: 5, anonCreatePerDay: 20, plansPerDay: 10, loginFailuresPerHour: 10 },
+    ip: { anonCreatePerHour: 5, anonCreatePerDay: 20, plansPerDay: 10, loginFailuresPerHour: 10, registerPerHour: 10, registerPerDay: 50 },
     emailLoginFailuresPerHour: 5,
     anonTokenTtlDays: 30,
     ...overrides,
@@ -677,14 +677,14 @@ describe('P7 匿名入口关闭（FEATURE_ANONYMOUS_ENABLED=false）', () => {
     }
   });
 
-  it('session 与 anon 同时有效时：按 session 解析、清除 anon、**不归并**', async () => {
+  it('session 与 anon 同时有效时：按 session 解析、清除 anon、**归并**（S1 方向 A 修订）', async () => {
     /*
-     * 归并的前提是「匿名数据要接到注册账号上」。P7 的口径是存量匿名数据
-     * 统一走 30 天保留期清理，因此归并入口一并关闭 ——
-     * 否则会出现一种半开状态：新匿名号建不了，但旧匿名号还能通过登录
-     * 把数据搬到注册账号，而那条路径此后再没有测试之外的流量走过。
+     * S1（方向 A）：P7 关闭的是「新匿名号的创建」（分支 2/3），
+     * 而不是「既存匿名数据的归属变更」（分支 4 / 注册 / 登录）。
      *
-     * 仍然清除 anon Cookie：它已经不被接受，留着只是每次白带一次。
+     * 设计修订理由：匿名用户生成的旅行计划本应可被注册账号继承；
+     * 让老用户登录后发现历史行程全没了，比「不打开匿名注册」更伤体验。
+     * 因此分支 4 不再判断 `anonymousEnabled`：仍然清 Cookie、仍然归并。
      */
     const open = makeHarness();
     const anon = await open.service.resolve({
@@ -731,7 +731,9 @@ describe('P7 匿名入口关闭（FEATURE_ANONYMOUS_ENABLED=false）', () => {
     expect(result.outcome).toBe('resolved');
     if (result.outcome === 'resolved') {
       expect(result.identity.userType).toBe('REGISTERED');
-      expect(result.pendingMerge).toBeNull();
+      /* S1 方向 A：仍然标记 pendingMerge，由调用方执行 mergeAnonymousInto */
+      expect(result.pendingMerge).not.toBeNull();
+      expect(result.pendingMerge?.anonymousUserId).toBe('user-1');
       expect(cookieValue(result.cookies, COOKIE_NAMES.anonymous)).toBeNull();
     }
   });

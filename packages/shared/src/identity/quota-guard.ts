@@ -186,6 +186,48 @@ export class QuotaGuard {
   }
 
   /**
+   * 注册/登录尝试的 IP 级限流（S3 修复）。
+   *
+   * 与 `consumeAnonCreation` 同一模式：每 IP 每小时/每日两级限制。
+   * 攻击者无法通过清 Cookie 绕过 —— 限流键只含 IP，不含用户标识。
+   *
+   * 注意：与 `recordLoginFailure` 不同，这是**尝试前**的限流，
+   * 而 `recordLoginFailure` 是**失败后**的计数。两者互补：
+   *   - 本方法：防止「每秒试 100 次」的暴力破解
+   *   - recordLoginFailure：防止「用同一账号反复试」的定向攻击
+   */
+  async consumeRegister(ip: string | null): Promise<QuotaDecision> {
+    if (ip === null) {
+      // 拿不到 IP 时放行而不是拒绝：拿不到 IP 通常是代理配置问题，
+      // 因此拒绝会让全部用户无法注册。IP 维度是防滥用的加固层而非鉴权层。
+      return { allowed: true, remaining: Number.POSITIVE_INFINITY };
+    }
+
+    const { config, store, now: nowFn } = this.deps;
+    const now = nowFn();
+
+    const hourly = await store.increment(QUOTA_KEYS.ipRegisterPerHour(ip, now), TTL.hour);
+    if (hourly > config.ip.registerPerHour) {
+      return {
+        allowed: false,
+        reason: 'IP_ANON_CREATE_RATE_LIMITED', // 复用现有错误码，避免新增
+        retryAfterSeconds: secondsUntilNextHour(now),
+      };
+    }
+
+    const daily = await store.increment(QUOTA_KEYS.ipRegisterPerDay(ip, now), TTL.day);
+    if (daily > config.ip.registerPerDay) {
+      return {
+        allowed: false,
+        reason: 'IP_ANON_CREATE_RATE_LIMITED', // 复用现有错误码，避免新增
+        retryAfterSeconds: secondsUntilNextDay(now),
+      };
+    }
+
+    return { allowed: true, remaining: Math.max(0, config.ip.registerPerHour - hourly) };
+  }
+
+  /**
    * 登录失败计数（13.9.3）。
    *
    * IP 与邮箱双维度：只按 IP 会让攻击者换 IP 撞同一账号，

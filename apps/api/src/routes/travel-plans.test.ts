@@ -58,7 +58,7 @@ const config: ServiceConfig = {
 const quotaConfig: QuotaConfig = {
   anonymous: { perMinute: 10, dailyPlans: 5, monthlyPlans: 10, exportsPerPlan: 3, aiHero: 0 },
   registered: { perMinute: 10, dailyPlans: 5, monthlyPlans: 20, exportsPerPlan: 10, aiHero: 2 },
-  ip: { anonCreatePerHour: 100, anonCreatePerDay: 200, plansPerDay: 100, loginFailuresPerHour: 10 },
+  ip: { anonCreatePerHour: 100, anonCreatePerDay: 200, plansPerDay: 100, loginFailuresPerHour: 10, registerPerHour: 10, registerPerDay: 50 },
   emailLoginFailuresPerHour: 5,
   /*
    * 少了这一项，`anonTtlSeconds()` 会算出 NaN，匿名令牌的过期时间成为
@@ -450,24 +450,63 @@ async function anonymousCookie(): Promise<string> {
   return `${COOKIE_NAMES.anonymous}=${value}`;
 }
 
+/**
+ * 取一个已注册身份的 Cookie 头（2026-09 设计修订后：匿名不能生成）。
+ *
+ * 通过 `/auth/session` 建匿名号、再 `/auth/register` 升级为注册用户。
+ * 这样得到的会话 cookie 带 `tp_session`，`user_type === 'REGISTERED'`，
+ * 能 pass 生成端点的「禁止匿名生成」拦截。
+ *
+ * 不直接构造 sessionCookie：那需要把 FakeUsersRepository 的内部状态
+ * 暴露出来，而注册路径本身（建号→升级→发会话）已经由别的用例覆盖。
+ */
+async function registeredCookie(): Promise<string> {
+  const anon = await anonymousCookie();
+  const response = await h().app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/register',
+    headers: { cookie: anon },
+    payload: {
+      email: `test-${Math.random().toString(36).slice(2, 10)}@example.com`,
+      password: 'a-sufficiently-long-passphrase-1',
+    },
+  });
+  if (response.statusCode !== 201) {
+    throw new Error(`注册失败：${response.statusCode} ${response.body}`);
+  }
+  const raw = response.headers['set-cookie'];
+  const list = Array.isArray(raw) ? raw.map(String) : typeof raw === 'string' ? [raw] : [];
+  const entry = list.find((cookie) => cookie.startsWith(`${COOKIE_NAMES.session}=`));
+  if (entry === undefined) throw new Error('注册响应没有下发 tp_session');
+  const value = entry.slice(COOKIE_NAMES.session.length + 1).split(';')[0] ?? '';
+  return `${COOKIE_NAMES.session}=${value}`;
+}
+
 const body = () => makeValidRequest();
 
 describe('13.1 POST /travel-plans/generate', () => {
-  it('无任何身份也能生成：现场建号并返回 201', async () => {
-    // 13.0 第 3.a 条：生成端点永不因为缺少身份而返回 401
+  it('无任何身份时按匿名处理：现场建号但被拦截，返回 403', async () => {
+    /*
+     * 2026-09 设计修订：13.0 第 3.a 条的「生成端点永不返回 401」
+     * 在契约层仍然成立（请求确实到达、身份确实被建立），
+     * 但产品策略要求「匿名身份禁止生成」—— 因此实际返回 403
+     * （`AUTH_ANONYMOUS_FORBIDDEN`），提示用户去注册。
+     *
+     * 这一条与「端点不返回 401」不冲突：401 是「未登录」，
+     * 403 是「已登录但身份不够」。前者由 SessionProvider 处理，
+     * 后者由前端的「注册以继续」流程处理。
+     */
     const response = await h().app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
       payload: body(),
     });
 
-    expect(response.statusCode).toBe(201);
-    expect(response.json()).toEqual({
-      request_id: 'request-1',
-      plan_id: 'plan-1',
-      job_id: 'job-1',
-      status: 'QUEUED',
-    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json<{ error: { code: string } }>().error.code).toBe(
+      'AUTH_ANONYMOUS_FORBIDDEN',
+    );
+    /* 即使被拒，身份 Cookie 仍然下发 —— 让用户注册后能继承（S1 方向 A） */
     expect(response.headers['set-cookie']).toBeDefined();
   });
 
@@ -476,9 +515,11 @@ describe('13.1 POST /travel-plans/generate', () => {
      * 载荷里带请求体会在 Redis 里留下一份 L1 个人数据副本，
      * 而它不受 15.1 的保留策略管辖 —— 用户删了账号，那份还在。
      */
+    const cookie = await registeredCookie();
     await h().app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
       payload: body(),
     });
 
@@ -489,9 +530,11 @@ describe('13.1 POST /travel-plans/generate', () => {
   });
 
   it('结构非法返回 400 REQ_SCHEMA_INVALID 且带 field', async () => {
+    const cookie = await registeredCookie();
     const response = await h().app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
       payload: { schema_version: 'travel_request_ui_v1' },
     });
 
@@ -506,9 +549,11 @@ describe('13.1 POST /travel-plans/generate', () => {
      * 3.1.2 的检查在同步路径上执行，失败直接 4xx，不入队、不调用 LLM。
      * 一次 LLM 调用几分钱，而「出发日期在过去」在入队前就能拦住。
      */
+    const cookie = await registeredCookie();
     const response = await h().app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
       payload: makeValidRequest({
         trip: {
           origin: { text: '上海', place_id: 'cn-shanghai' },
@@ -533,9 +578,11 @@ describe('13.1 POST /travel-plans/generate', () => {
   });
 
   it('错误体六个字段齐全（13.0）', async () => {
+    const cookie = await registeredCookie();
     const response = await h().app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
       payload: { bad: true },
     });
 
@@ -550,7 +597,7 @@ describe('13.1 POST /travel-plans/generate', () => {
 
 describe('13.8 幂等', () => {
   it('同一身份重复提交相同需求：第二次 409 且带既有 job_id', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const payload = body();
 
     const first = await h().app.inject({
@@ -575,7 +622,7 @@ describe('13.8 幂等', () => {
   });
 
   it('既有任务已完成时返回 200 与同一组 ID', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const payload = body();
 
     await h().app.inject({
@@ -618,7 +665,7 @@ describe('13.8 幂等', () => {
     let lockClock = Date.now();
     harness = build(new InMemoryIdempotencyLock(() => lockClock));
 
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const payload = body();
 
     const first = await h().app.inject({
@@ -653,7 +700,7 @@ describe('13.8 幂等', () => {
   });
 
   it('7 天内的同键请求仍然幂等（窗口没有放得太宽）', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const payload = body();
 
     await h().app.inject({
@@ -688,7 +735,7 @@ describe('13.8 幂等', () => {
      * 顺序写反（先扣配额再查既有）时这条会失败。真实后果是用户刷新页面
      * 重试就被扣一次额度 —— 匿名用户日配额只有 5 个，刷几次就没了。
      */
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const payload = body();
 
     for (let i = 0; i < 8; i += 1) {
@@ -721,7 +768,7 @@ describe('13.8 幂等', () => {
       acquire: () => Promise.reject(new Error('Redis 不可用')),
     });
 
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const payload = body();
 
     const first = await h().app.inject({
@@ -758,7 +805,7 @@ describe('13.8 幂等', () => {
     await harness?.app.close();
     harness = build({ acquire: () => Promise.resolve(true) });
 
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     h().repository.forceUniqueViolation = true;
 
     const response = await h().app.inject({
@@ -772,8 +819,8 @@ describe('13.8 幂等', () => {
 
   it('TP-2-29：两个匿名用户提交相同需求各自生成', async () => {
     const payload = body();
-    const cookieA = await anonymousCookie();
-    const cookieB = await anonymousCookie();
+    const cookieA = await registeredCookie();
+    const cookieB = await registeredCookie();
     expect(cookieA).not.toBe(cookieB);
 
     const a = await h().app.inject({
@@ -797,7 +844,7 @@ describe('13.8 幂等', () => {
   it('幂等键由 user_id + client_request_id + 标准化请求算出', async () => {
     // 与端点实际使用的键对齐：算法改了但端点没跟上时，
     // 幂等会静默失效（每次都算出新键，每次都创建）
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     await h().app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
@@ -813,7 +860,7 @@ describe('13.8 幂等', () => {
 
 describe('13.2 GET /generation-jobs/{job_id}', () => {
   it('返回 job_id / status / progress / message', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const created = await h().app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
@@ -845,7 +892,7 @@ describe('13.2 GET /generation-jobs/{job_id}', () => {
      * 这里把任务置成 REPAIRING_PLAN 之后的回边状态：
      * status 是 VALIDATING_PLAN（查表 48），但库里的 progress 是 54。
      */
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const created = await h().app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
@@ -866,7 +913,7 @@ describe('13.2 GET /generation-jobs/{job_id}', () => {
   });
 
   it('FAILED 的文案取自 13.7 错误码', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const created = await h().app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
@@ -894,7 +941,7 @@ describe('13.2 GET /generation-jobs/{job_id}', () => {
   });
 
   it('他人的任务返回 404 而不是 403', async () => {
-    const cookieA = await anonymousCookie();
+    const cookieA = await registeredCookie();
     const created = await h().app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
@@ -903,7 +950,7 @@ describe('13.2 GET /generation-jobs/{job_id}', () => {
     });
     const jobId = created.json<{ job_id: string }>().job_id;
 
-    const cookieB = await anonymousCookie();
+    const cookieB = await registeredCookie();
     const response = await h().app.inject({
       method: 'GET',
       url: `/api/v1/generation-jobs/${jobId}`,
@@ -934,7 +981,7 @@ describe('取消任务（R-33、16.1，TP-4-08）', () => {
   }
 
   it('非终态任务被取消，状态转 CANCELLED', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const jobId = await createJob(cookie);
 
     const response = await h().app.inject({
@@ -957,7 +1004,7 @@ describe('取消任务（R-33、16.1，TP-4-08）', () => {
      * 用户点「取消」的那一刻任务可能刚好完成。返回 409 会让前端弹一个
      * 「操作冲突」，而用户想要的结果（任务不再继续）已经达成。
      */
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const jobId = await createJob(cookie);
 
     await h().app.inject({
@@ -976,9 +1023,9 @@ describe('取消任务（R-33、16.1，TP-4-08）', () => {
   });
 
   it('他人的任务返回 404（越权取消比越权读取更严重）', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const jobId = await createJob(cookie);
-    const otherCookie = await anonymousCookie();
+    const otherCookie = await registeredCookie();
 
     const response = await h().app.inject({
       method: 'POST',
@@ -1001,7 +1048,7 @@ describe('取消任务（R-33、16.1，TP-4-08）', () => {
 
 describe('13.3 GET /travel-plans/{plan_id}', () => {
   it('返回完整 TravelPlan', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const session = await h().app.inject({
       method: 'GET',
       url: '/api/v1/auth/session',
@@ -1023,7 +1070,7 @@ describe('13.3 GET /travel-plans/{plan_id}', () => {
   });
 
   it('他人的计划返回 404 PLAN_NOT_FOUND', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     h().repository.plans.set('plan-y', { userId: 'someone-else', planJson: {} });
 
     const response = await h().app.inject({
@@ -1037,7 +1084,7 @@ describe('13.3 GET /travel-plans/{plan_id}', () => {
 
   it('不存在的计划与他人的计划返回完全相同的响应体', async () => {
     // 两者可区分就等于给了一个枚举计划 ID 的接口
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     h().repository.plans.set('plan-z', { userId: 'someone-else', planJson: {} });
 
     const foreign = await h().app.inject({
@@ -1060,7 +1107,7 @@ describe('13.3 GET /travel-plans/{plan_id}', () => {
 
 describe('13.9.5 GET /travel-plans（列表）', () => {
   async function seed(count: number): Promise<string> {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const session = await h().app.inject({
       method: 'GET',
       url: '/api/v1/auth/session',
@@ -1120,7 +1167,7 @@ describe('13.9.5 GET /travel-plans（列表）', () => {
 
   it('limit 越界返回 400 而不是静默截断', async () => {
     // 静默截断会让客户端以为「只有 50 条」，而实际还有更多
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const response = await h().app.inject({
       method: 'GET',
       url: '/api/v1/travel-plans?limit=999',
@@ -1131,7 +1178,7 @@ describe('13.9.5 GET /travel-plans（列表）', () => {
 
   it('只返回自己的计划', async () => {
     const cookieA = await seed(2);
-    const cookieB = await anonymousCookie();
+    const cookieB = await registeredCookie();
 
     const mine = await h().app.inject({
       method: 'GET',
@@ -1206,7 +1253,7 @@ describe('TP-2-30：L2 数据不出现在任何响应里', () => {
      * 用键名扫描而不是逐个字段断言：新增响应字段时这条会自动覆盖到，
      * 而逐个断言的写法永远只检查写测试那天存在的字段。
      */
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const session = await h().app.inject({
       method: 'GET',
       url: '/api/v1/auth/session',
@@ -1360,7 +1407,7 @@ describe('13.4 获取展示数据', () => {
   }
 
   it('按天取到 ViewModel，并带上 validation_status', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     h().presentations.put({
       planId: 'plan-1',
       pageType: 'DAILY_POSTER',
@@ -1391,7 +1438,7 @@ describe('13.4 获取展示数据', () => {
   });
 
   it('完整页走静态路由，不会被 :day_number 参数路由截走', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     h().presentations.put({
       planId: 'plan-1',
       pageType: 'FULL_PLAN',
@@ -1411,7 +1458,7 @@ describe('13.4 获取展示数据', () => {
   it.each([['0'], ['15'], ['abc'], ['-1'], ['1.5']])(
     '天号 %s 不合法 → 404（与「不存在」同一个码）',
     async (dayNumber) => {
-      const cookie = await anonymousCookie();
+      const cookie = await registeredCookie();
       const response = await h().app.inject({
         method: 'GET',
         url: `/api/v1/travel-plans/plan-1/presentations/${dayNumber}`,
@@ -1424,7 +1471,7 @@ describe('13.4 获取展示数据', () => {
   );
 
   it('尚未编排 → 404（正常时序，不是错误）', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const response = await h().app.inject({
       method: 'GET',
       url: '/api/v1/travel-plans/plan-1/presentations/1',
@@ -1444,7 +1491,7 @@ describe('13.4 获取展示数据', () => {
   });
 
   it('plan_version_id 不是 UUID → 400（不把垃圾字符串带进 SQL）', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const response = await h().app.inject({
       method: 'GET',
       url: '/api/v1/travel-plans/plan-1/presentations/1?plan_version_id=not-a-uuid',
@@ -1456,8 +1503,39 @@ describe('13.4 获取展示数据', () => {
 });
 
 describe('TP-5-10 灰度开关', () => {
+  /*
+   * 这些用例都用 `anonymousEnabled: false`：灰度开关的语义与匿名入口无关。
+   * 因此请求里**必须**带一个已注册用户的 tp_session —— 不带的话
+   * 「灰度放行」用例会被「禁止匿名生成」（403）拦截，看不到 503 / 201。
+   *
+   * `buildWithRegistered` 每次新建一个 harness 并在其中注册一个用户：
+   * 既保证匿名开关配置生效，又让请求带合法身份。
+   */
+  async function buildWithRegistered(
+    featureFlags: Parameters<typeof build>[1],
+  ): Promise<{ harness: Harness; cookie: string }> {
+    const harness = build(new InMemoryIdempotencyLock(), featureFlags);
+    const registerResponse = await harness.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: `rollout-${Math.random().toString(36).slice(2, 10)}@example.com`,
+        password: 'a-sufficiently-long-passphrase-1',
+      },
+    });
+    if (registerResponse.statusCode !== 201) {
+      throw new Error(`夹具注册失败：${registerResponse.statusCode} ${registerResponse.body}`);
+    }
+    const raw = registerResponse.headers['set-cookie'];
+    const list = Array.isArray(raw) ? raw.map(String) : typeof raw === 'string' ? [raw] : [];
+    const entry = list.find((cookie) => cookie.startsWith(`${COOKIE_NAMES.session}=`));
+    if (entry === undefined) throw new Error('注册响应没有 tp_session');
+    const value = entry.slice(COOKIE_NAMES.session.length + 1).split(';')[0] ?? '';
+    return { harness, cookie: `${COOKIE_NAMES.session}=${value}` };
+  }
+
   it('生成关闭时返回 503 SYS_FEATURE_DISABLED，且不入队', async () => {
-    const harness = build(new InMemoryIdempotencyLock(), {
+    const { harness, cookie } = await buildWithRegistered({
       generationEnabled: false,
       exportEnabled: true,
       generationRolloutPercent: 100,
@@ -1467,6 +1545,7 @@ describe('TP-5-10 灰度开关', () => {
     const response = await harness.app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
       payload: body(),
     });
 
@@ -1485,7 +1564,7 @@ describe('TP-5-10 灰度开关', () => {
   });
 
   it('放量 0% 时同样拦下，但原因不同（进指标，不进响应）', async () => {
-    const harness = build(new InMemoryIdempotencyLock(), {
+    const { harness, cookie } = await buildWithRegistered({
       generationEnabled: true,
       exportEnabled: true,
       generationRolloutPercent: 0,
@@ -1495,6 +1574,7 @@ describe('TP-5-10 灰度开关', () => {
     const response = await harness.app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
       payload: body(),
     });
 
@@ -1507,7 +1587,7 @@ describe('TP-5-10 灰度开关', () => {
   });
 
   it('放量 100% 时照常放行', async () => {
-    const harness = build(new InMemoryIdempotencyLock(), {
+    const { harness, cookie } = await buildWithRegistered({
       generationEnabled: true,
       exportEnabled: true,
       generationRolloutPercent: 100,
@@ -1517,6 +1597,7 @@ describe('TP-5-10 灰度开关', () => {
     const response = await harness.app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
       payload: body(),
     });
 
@@ -1525,9 +1606,26 @@ describe('TP-5-10 灰度开关', () => {
   });
 
   it('未装配开关时视为全开（不因为漏配而拒绝服务）', async () => {
-    const response = await build().app.inject({
+    const harness = build();
+    const registerResponse = await harness.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: `unset-${Math.random().toString(36).slice(2, 10)}@example.com`,
+        password: 'a-sufficiently-long-passphrase-1',
+      },
+    });
+    const raw = registerResponse.headers['set-cookie'];
+    const list = Array.isArray(raw) ? raw.map(String) : typeof raw === 'string' ? [raw] : [];
+    const entry = list.find((cookie) => cookie.startsWith(`${COOKIE_NAMES.session}=`));
+    if (entry === undefined) throw new Error('注册响应没有 tp_session');
+    const value = entry.slice(COOKIE_NAMES.session.length + 1).split(';')[0] ?? '';
+    const cookie = `${COOKIE_NAMES.session}=${value}`;
+
+    const response = await harness.app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie },
       payload: body(),
     });
     expect(response.statusCode).toBe(201);
@@ -1537,7 +1635,7 @@ describe('TP-5-10 灰度开关', () => {
 describe('13.2 的里程碑字段（21.2 措施一）', () => {
   /** 提交一个任务，返回 cookie 与 job_id */
   async function submitted(): Promise<{ cookie: string; jobId: string }> {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const created = await h().app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
@@ -1611,7 +1709,7 @@ describe('CR 闸门（C-3）', () => {
 
   /** 匿名身份的 Cookie 与它的 user_id —— 计费按 user_id 记账 */
   async function identity(): Promise<{ cookie: string; userId: string }> {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const session = await h().app.inject({
       method: 'GET',
       url: '/api/v1/auth/session',
@@ -1698,7 +1796,7 @@ describe('CR 闸门（C-3）', () => {
 
   it('未装配计费时完全不碰钱包（0013 之前的部署）', async () => {
     /* 默认夹具不装 credits：库还没迁到 0013 的部署里钱包表不存在 */
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     const response = await generate(cookie);
 
     expect(response.statusCode).toBe(201);
@@ -1730,7 +1828,7 @@ describe('背压准入（生成端点）', () => {
   }
 
   it('积压超阈时返回 503 SYS_QUEUE_SATURATED 与 Retry-After', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     saturated();
 
     const response = await generate(cookie);
@@ -1742,7 +1840,7 @@ describe('背压准入（生成端点）', () => {
   });
 
   it('拒绝时不建任务、不入队', async () => {
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     saturated();
 
     await generate(cookie);
@@ -1772,15 +1870,23 @@ describe('背压准入（生成端点）', () => {
   });
 
   it('深度回到阈值以内后恢复放行', async () => {
-    const cookie = await anonymousCookie();
+    /*
+     * 顺序：先饱和、再注册、再生成。
+     *
+     * 反过来（先注册再饱和）的话，saturated() 会**替换**全局 harness，
+     * 之前那次注册得到的 cookie 指向的 session 只存在于旧 harness 的
+     * sessions 存储里，新 harness 不认识它 —— 该请求被当成匿名身份
+     * 拦截在 403，看不到真正的「准入放行 → 201」。
+     */
     saturated(40);
+    const cookie = await registeredCookie();
 
     expect((await generate(cookie)).statusCode).toBe(201);
   });
 
   it('未装配准入时行为不变（默认夹具）', async () => {
     /* 既有部署不传 backlog 时不该因为这个功能而行为变化 */
-    const cookie = await anonymousCookie();
+    const cookie = await registeredCookie();
     expect((await generate(cookie)).statusCode).toBe(201);
   });
 });

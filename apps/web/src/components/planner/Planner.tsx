@@ -89,8 +89,17 @@ export function Planner(): React.ReactElement {
    * 只有拿到身份才允许提交（P7 之后必须是注册用户）。
    * `loading` 也算未就绪：首屏禁用比「先允许点、再发现不行」好 ——
    * 后者会让访客填完九步再被拒。
+   *
+   * 设计决策（2026-09 修订）：**匿名身份同样禁止生成**。
+   *
+   * 历史上这里只检查 `status.kind === 'ready'`，匿名用户（P7 关闭前
+   * 由 `/auth/session` 自动建号）也会被算作「已就绪」。现在额外排除
+   * `user_type === 'ANONYMOUS'`：匿名用户可以浏览问卷、看右栏的
+   * 「不会被长期保存」提示，但点不动「生成」按钮 —— 必须把流程
+   * 引导到注册。这一判断**只在生成入口做**，不影响其它页面的可读性。
    */
-  const signedIn = status.kind === 'ready';
+  const signedIn =
+    status.kind === 'ready' && status.session.user_type !== 'ANONYMOUS';
 
   /**
    * 任何 401 都意味着服务端已经不认这个会话了 —— 重新解析一次身份。
@@ -553,7 +562,13 @@ export function Planner(): React.ReactElement {
           {generateButtonLabel(snapshot.tripState, snapshot.verifyCount)}
         </button>
         {signedIn ? null : (
-          <span className="planner-actions__note">登录后才能生成 —— 右上角可以登录或注册。</span>
+          <span className="planner-actions__note">
+            {status.kind === 'ready' && status.session.user_type === 'ANONYMOUS'
+              ? /* 匿名用户：账号已存在，引导「注册以保存」而不是「登录」 */
+                '匿名身份下生成内容不会被保存 —— 注册账号后即可生成并长期保存。'
+              : /* 完全未登录：标准是「登录/注册」 */
+                '登录后才能生成 —— 右上角可以登录或注册。'}
+          </span>
         )}
         <CreditHint hint={credits.hint} />
       </>

@@ -188,26 +188,35 @@ export class IdentityService {
           /*
            * 分支 4：同时持有有效匿名令牌 → 待归并。
            *
-           * **P7：关闭时不归并，但仍然清除 `tp_anon`。**
-           * 归并的前提是「匿名数据要接到注册账号上」，而 P7 的口径是存量
-           * 匿名数据统一走 30 天保留期清理（15.1）。留着归并入口会造成一种
-           * 半开状态：新匿名号建不了，但旧匿名号还能通过登录把数据搬过来 ——
-           * 而那条路径此后再没有测试之外的流量走过，属于 P4/P5 反复记录的
-           * 「东西还在但没人到得了」那一类。
+           * **S1（方向 A）：无论 `anonymousEnabled` 与否都归并。**
            *
-           * 仍然清 Cookie：它已经不被接受，留着只是每次白带一次。
+           * 设计修订：P7 关闭的是匿名**注册/生成**入口（分支 2/3），
+           * 而不是匿名**数据归并**。原 P7 实现把「存量匿名用户登录后
+           * 历史计划被遗弃（30 天后随保留期清理）」作为副产品，
+           * 但产品口径是「匿名用户生成的旅行计划本应可被注册账号继承」，
+           * 否则用户的实际损失比「不打开匿名注册」更大 ——
+           * 老用户登录后发现自己之前的行程全没了，且没有任何提示。
+           *
+           * 因此分支 4 不再判断 `anonymousEnabled`：
+           *   - 仍然清除 `tp_anon`（它已经完成归并使命，不应继续解析）
+           *   - 仍然标记 `pendingMerge`，由调用方执行 `mergeAnonymousInto`
+           *
+           * 分支 2/3 的 P7 短路保持不变 —— 那是「关闭匿名入口」的边界，
+           * 与「既存匿名数据的继承」是两件事。
            */
           let pendingMerge: { anonymousUserId: string } | null = null;
           let clearAnon = false;
           if (input.anonCookie !== undefined) {
-            if (!this.deps.anonymousEnabled) {
+            const anon = await users.findActiveByAnonTokenHash(hashToken(input.anonCookie));
+            if (anon !== null && anon.id !== row.id) {
+              pendingMerge = { anonymousUserId: anon.id };
               clearAnon = true;
-            } else {
-              const anon = await users.findActiveByAnonTokenHash(hashToken(input.anonCookie));
-              if (anon !== null && anon.id !== row.id) {
-                pendingMerge = { anonymousUserId: anon.id };
-                clearAnon = true;
-              }
+            } else if (!this.deps.anonymousEnabled) {
+              /*
+               * P7 关闭且匿名 cookie 已失效（或就是自己）：
+               * 仍然清掉它，免得浏览器每次白带一次。
+               */
+              clearAnon = true;
             }
           }
 
@@ -325,16 +334,17 @@ export class IdentityService {
     let upgraded = false;
 
     /*
-     * P7：匿名入口关闭时不走「原地升级」分支，一律新建账号。
+     * S1（方向 A）：匿名入口关闭不再阻塞「原地升级」分支。
      *
-     * 与 `resolve()` 分支 4 的口径一致：存量匿名数据统一走 30 天保留期清理，
-     * 而不是留一条把它接到新账号上的路。半开状态（新号建不了但旧号能升级）
-     * 的问题是那条路径此后再没有真实流量走过。
+     * 设计修订：P7 关闭的是「匿名**注册**」入口，但**已存在的匿名用户**
+     * 在注册时仍应允许原地升级，让其历史计划自动继承。否则
+     * 「先匿名生成过、后注册」的用户会丢失历史。
      *
-     * `upgradeAnonymous` 本身保留 —— 开关打开即恢复（TP-1-35 第一场景）。
+     * 与 `resolve()` 分支 4 同一条口径：anonymousEnabled 关掉的是
+     * 「新匿名号的创建」，不是「既存匿名数据的归属变更」。
      */
     const anonRow =
-      input.anonCookie === undefined || !this.deps.anonymousEnabled
+      input.anonCookie === undefined
         ? null
         : await users.findActiveByAnonTokenHash(hashToken(input.anonCookie));
 
@@ -398,8 +408,12 @@ export class IdentityService {
       dailyQuota: quotaConfig.registered.dailyPlans,
       monthlyQuota: quotaConfig.registered.monthlyPlans,
     };
+    /*
+     * S1（方向 A）：与 `register()` 同一口径 —— anonymousEnabled 关掉的是
+     * 「新匿名号的创建」，不是「既存匿名用户的原地升级」。
+     */
     const anonRow =
-      input.anonCookie === undefined || !this.deps.anonymousEnabled
+      input.anonCookie === undefined
         ? null
         : await users.findActiveByAnonTokenHash(hashToken(input.anonCookie));
 
@@ -477,11 +491,12 @@ export class IdentityService {
     /*
      * 归并：该设备上先匿名用过，再登录已有账号。
      *
-     * P7：匿名入口关闭时跳过 —— 理由同 `resolve()` 分支 4 与 `register()`。
-     * `mergeAnonymousInto` 保留且仍有仓储层测试（门禁 #24/#25）。
+     * S1（方向 A）：不再按 `anonymousEnabled` 跳过。设计修订见
+     * `resolve()` 分支 4 的注释 —— 关闭的是「新匿名号的创建」，
+     * 不是「既存匿名数据的归属变更」。
      */
     let merged: { anonymousUserId: string } | null = null;
-    if (input.anonCookie !== undefined && this.deps.anonymousEnabled) {
+    if (input.anonCookie !== undefined) {
       const anonRow = await users.findActiveByAnonTokenHash(hashToken(input.anonCookie));
       if (anonRow !== null && anonRow.id !== row.id) {
         await users.mergeAnonymousInto(anonRow.id, row.id);
@@ -533,8 +548,11 @@ export class IdentityService {
   }
 
   private async finishLogin(row: UserRow, anonCookie: string | undefined): Promise<LoginResult> {
+    /*
+     * S1（方向 A）：与 `login()` 同一口径 —— 不再按 `anonymousEnabled` 跳过。
+     */
     let merged: { anonymousUserId: string } | null = null;
-    if (anonCookie !== undefined && this.deps.anonymousEnabled) {
+    if (anonCookie !== undefined) {
       const anonRow = await this.deps.users.findActiveByAnonTokenHash(hashToken(anonCookie));
       if (anonRow !== null && anonRow.id !== row.id) {
         await this.deps.users.mergeAnonymousInto(anonRow.id, row.id);

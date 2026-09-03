@@ -33,7 +33,7 @@ function quotaConfig(overrides: Partial<QuotaConfig> = {}): QuotaConfig {
   return {
     anonymous: { perMinute: 99, dailyPlans: 5, monthlyPlans: 10, exportsPerPlan: 3, aiHero: 0 },
     registered: { perMinute: 99, dailyPlans: 5, monthlyPlans: 20, exportsPerPlan: 10, aiHero: 2 },
-    ip: { anonCreatePerHour: 5, anonCreatePerDay: 20, plansPerDay: 10, loginFailuresPerHour: 10 },
+    ip: { anonCreatePerHour: 5, anonCreatePerDay: 20, plansPerDay: 10, loginFailuresPerHour: 10, registerPerHour: 10, registerPerDay: 50 },
     emailLoginFailuresPerHour: 5,
     anonTokenTtlDays: 30,
     ...overrides,

@@ -271,6 +271,29 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
     if (resolved === null) return reply;
 
     /*
+     * ── 匿名身份拦截（2026-09 设计修订）──
+     *
+     * 匿名用户可以**进入**这个端点（保持 `allowAnonymousCreation: true`
+     * 让「无身份 → 现场建号」的旧路径仍然成立，便于重新打开匿名入口），
+     * 但**不能真的生成**。在身份解析之后、灰度判定之前拦截：
+     *
+     *   - 在灰度之前：灰度指标需要看到「这是被产品策略拦的」，
+     *     而不是「这是被放量开关拦的」—— 两者的运维响应完全不同；
+     *   - 在 schema 校验之前： anonymous 用户的请求体可能是合法的，
+     *     不该为了「拒绝匿名」把合法请求也打回 400。
+     *
+     * 这与前端的 `signedIn` 判定是同一口径（Planner.tsx），
+     * 前端是体验层（按钮变灰 + 提示），这里是契约层（最后防线）。
+     */
+    if (resolved.identity.userType === 'ANONYMOUS') {
+      request.log.info(
+        { stage: 'QUEUED', reason_code: 'anonymous_forbidden' },
+        '匿名身份禁止生成（产品策略，要求注册）',
+      );
+      return fail(request, reply, 'AUTH_ANONYMOUS_FORBIDDEN');
+    }
+
+    /*
      * ── 灰度判定（TP-5-10）──
      *
      * 放在身份解析**之后**、校验之前。之后是因为放量按 user_id 分桶，

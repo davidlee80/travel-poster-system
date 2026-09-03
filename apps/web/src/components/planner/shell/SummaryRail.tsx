@@ -2,6 +2,7 @@
 
 import { PLANNER_STEPS, type PlannerStepId } from '@tps/schemas';
 
+import { useSession } from '@/components/SessionProvider';
 import {
   TRIP_STATE_LABEL,
   generateButtonLabel,
@@ -25,6 +26,15 @@ export interface SummaryRailProps {
   readonly metrics: readonly { readonly label: string; readonly value: string }[];
   readonly onGenerate: () => void;
   readonly onJumpToVerify: () => void;
+  /**
+   * 是否禁用生成按钮。
+   *
+   * 与 `generateNote` 的分工：本字段表达「技术上不能点」
+   * （生成中 / 未登录 / 余额不足），`generateNote` 表达「为什么」。
+   * 匿名用户的拦截**不在这里** —— 由 `Planner.tsx` 的 `signedIn`
+   * 在调用方就拦掉（`!signedIn` 时 `generateDisabled = true`），
+   * 因此本组件**永远看不到匿名可点的状态**。
+   */
   readonly generateDisabled: boolean;
   readonly generateNote?: React.ReactNode;
   readonly open: boolean;
@@ -45,12 +55,42 @@ export function SummaryRail({
     ([step, state]) => step !== '10' && state === 'complete',
   ).length;
 
+  /*
+   * 匿名状态提示（产品决策：匿名用户的行程不长期保存）。
+   *
+   * P7 之后默认配置下匿名入口关闭，`/auth/session` 对未注册请求返回 401，
+   * `status.kind === 'ready' && user_type === 'ANONYMOUS'` 通常不可达。
+   * 仍然渲染这段提示有两个理由：
+   *
+   *   1. 重新打开匿名入口时（运维手册「重新打开匿名入口」一节），
+   *      这条提示必须存在 —— 它是设计稿二十章「匿名用户的额外声明义务」
+   *      的落地点，缺失属于合规问题；
+   *   2. 匿名状态下用户随时可能注册，而注册前他必须知道
+   *      「当前这份计划不会长期保存」—— 这条提示放在右栏
+   *      「规划进度」卡片的顶部，与「生成」按钮在同一视野内。
+   *
+   * 注意：本组件**不在这里拦截匿名生成** —— 那一层在 `Planner.tsx`
+   * 的 `signedIn` 判定上。本提示只做告知，不做阻断。
+   */
+  const { status } = useSession();
+  const isAnonymous = status.kind === 'ready' && status.session.user_type === 'ANONYMOUS';
+
   return (
     <aside
       id="planner-summary"
       className={`planner-panel planner-right${open ? ' planner-right--open' : ''}`}
       aria-label="规划进度"
     >
+      {isAnonymous ? (
+        <div className="planner-anon-warning" role="status">
+          <span className="planner-anon-warning__badge">访客模式</span>
+          <p className="planner-anon-warning__text">
+            当前是<strong>匿名状态</strong>，生成的旅行计划
+            <strong>不会被长期保存</strong>。注册账号可长期保存并跨设备访问。
+          </p>
+        </div>
+      ) : null}
+
       <div className="planner-right__head">
         <h2 className="planner-right__title">规划进度</h2>
         <span className="planner-right__count">{snapshot.completeness}%</span>

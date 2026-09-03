@@ -1,6 +1,7 @@
 import { InMemoryPlanQueue } from '@tps/queue';
 import { makeValidRequest } from '@tps/planning';
 import {
+  COOKIE_NAMES,
   GracefulShutdown,
   InMemoryCounterStore,
   InMemoryIdempotencyLock,
@@ -55,7 +56,7 @@ const config: ServiceConfig = {
 const quotaConfig: QuotaConfig = {
   anonymous: { perMinute: 50, dailyPlans: 50, monthlyPlans: 50, exportsPerPlan: 3, aiHero: 0 },
   registered: { perMinute: 50, dailyPlans: 50, monthlyPlans: 50, exportsPerPlan: 10, aiHero: 2 },
-  ip: { anonCreatePerHour: 500, anonCreatePerDay: 500, plansPerDay: 500, loginFailuresPerHour: 10 },
+  ip: { anonCreatePerHour: 500, anonCreatePerDay: 500, plansPerDay: 500, loginFailuresPerHour: 10, registerPerHour: 10, registerPerDay: 50 },
   emailLoginFailuresPerHour: 5,
   anonTokenTtlDays: 30,
 };
@@ -174,9 +175,36 @@ async function submit(
 
   const app = build(fields);
   try {
+    /*
+     * 2026-09 设计修订：生成端点对匿名身份返回 403（`AUTH_ANONYMOUS_FORBIDDEN`）。
+     * 因此本测试的提交必须先**注册一个用户**再带其 tp_session ——
+     * 否则白名单放行的用例会被「禁止匿名生成」拦截在更前面，看不到
+     * 它本来要验的状态码（201 / 400）。
+     *
+     * 这条 register 与「被测的白名单行为」无关：它只负责把请求从匿名
+     * 升级成已注册，好让请求能穿透那层 403 进入真正的 N-08 校验。
+     */
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: `wl-${Math.random().toString(36).slice(2, 10)}@example.com`,
+        password: 'a-sufficiently-long-passphrase-1',
+      },
+    });
+    if (registerResponse.statusCode !== 201) {
+      throw new Error(`夹具注册失败：${registerResponse.statusCode} ${registerResponse.body}`);
+    }
+    const raw = registerResponse.headers['set-cookie'];
+    const list = Array.isArray(raw) ? raw.map(String) : typeof raw === 'string' ? [raw] : [];
+    const entry = list.find((cookie) => cookie.startsWith(`${COOKIE_NAMES.session}=`));
+    if (entry === undefined) throw new Error('注册响应没有 tp_session');
+    const sessionCookie = entry.slice(0, entry.indexOf(';'));
+
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie: sessionCookie },
       payload,
     });
     return { status: response.statusCode, body: response.body };

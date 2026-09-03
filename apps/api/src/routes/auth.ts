@@ -242,6 +242,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
 
   /** 13.9.2 注册（含匿名原地升级） */
   app.post('/api/v1/auth/register', async (request, reply) => {
+    // S3：注册前 IP 级限流（防批量注册）
+    const registerQuota = await quota.consumeRegister(clientIp(request));
+    if (!registerQuota.allowed) {
+      return fail(request, reply, 'AUTH_RATE_LIMITED', {
+        retryAfterSeconds: registerQuota.retryAfterSeconds,
+      });
+    }
+
     const parsed = RegisterBodySchema.safeParse(request.body);
     if (!parsed.success) {
       return fail(request, reply, 'REQ_SCHEMA_INVALID', {
@@ -315,6 +323,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
 
   /** 13.9.3 登录（副作用含 13.9.4 匿名归并） */
   app.post('/api/v1/auth/login', async (request, reply) => {
+    // S3：登录前 IP 级限流（防暴力破解）
+    const loginQuota = await quota.consumeRegister(clientIp(request));
+    if (!loginQuota.allowed) {
+      return fail(request, reply, 'AUTH_RATE_LIMITED', {
+        retryAfterSeconds: loginQuota.retryAfterSeconds,
+      });
+    }
+
     const parsed = LoginBodySchema.safeParse(request.body);
     if (!parsed.success) {
       // 登录的校验错误也用通用码，不暴露「邮箱格式」之外的信息

@@ -63,6 +63,50 @@ body {
   color: #5b4a2a;
 }
 
+/*
+ * 匿名状态提示（挂在规划进度右栏顶部，比 .anon-notice 更显眼一档）。
+ *
+ * 与 .anon-notice 的差别：那一处是页面顶部的公告条（P7 之后未注册请求
+ * 一律 401，因此它默认不渲染），这一处是规划器右栏内部的卡片。
+ * 右栏是用户点「生成」之前最后停留的位置 —— 提示放在这里而不是页面顶部，
+ * 让它出现在用户做「提交」这个动作的视野里。
+ */
+.planner-anon-warning {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: #fdece8;
+  border: 1.5px solid #f0b4a4;
+  border-left: 4px solid #c8432b;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.planner-anon-warning__badge {
+  flex: none;
+  padding: 2px 8px;
+  background: #c8432b;
+  color: #fff;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+}
+
+.planner-anon-warning__text {
+  margin: 0;
+  color: #6b2c1a;
+}
+
+.planner-anon-warning__text strong {
+  color: #a02312;
+  font-weight: 700;
+}
+
 .auth-panel {
   padding: 20px;
   background: #fff;
