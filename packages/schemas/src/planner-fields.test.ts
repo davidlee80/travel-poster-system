@@ -3,13 +3,16 @@ import { describe, expect, it } from 'vitest';
 import {
   PLANNER_CONSTRAINT_PRECEDENCE,
   PLANNER_CONSTRAINT_TYPE_VALUES,
+  PLANNER_FIELD_REQUIREMENTS,
   PLANNER_FIELDS,
   PLANNER_FIELD_COUNT,
+  PLANNER_GENERATION_REQUIRED_FIELD_IDS,
   PLANNER_RUNTIME_TYPE_META,
   PLANNER_RUNTIME_TYPE_VALUES,
   PLANNER_STEPS,
   PLANNER_STEP_IDS,
   constraintTypeOf,
+  isPlannerFieldGenerationRequired,
   plannerField,
   plannerFieldsOfStep,
   type PlannerFieldId,
@@ -140,6 +143,50 @@ describe('Planner 字段元数据（规范 21.1 硬门槛）', () => {
     for (const field of plannerFieldsOfStep('10')) {
       expect(field.level, `${field.field_id} 在第 10 步却不是方案后补充`).toBe('POST_PLAN');
     }
+  });
+
+  it('后台生成必填清单由 required + blocking 配置生成，并排除补答元字段', () => {
+    expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).toHaveLength(35);
+    expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).toContain('PV2-01-001');
+    expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).toContain('PV2-02-004');
+    expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).toContain('PV2-03-001');
+    expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).not.toContain('PV2-02-006');
+    expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).not.toContain('PV2-06-001');
+    expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).not.toContain('PV2-09-002');
+    expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).toEqual(
+      PLANNER_FIELDS.filter(isPlannerFieldGenerationRequired).map((field) => field.field_id),
+    );
+  });
+
+  it('目标字段分类覆盖全部76个字段且数量与评审文档一致', () => {
+    expect(PLANNER_FIELD_REQUIREMENTS).toHaveLength(76);
+    expect(new Set(PLANNER_FIELD_REQUIREMENTS.map((item) => item.field_id)).size).toBe(76);
+    expect(
+      Object.fromEntries(
+        ['BASE_REQUIRED', 'CONDITIONAL_REQUIRED', 'OPTIONAL', 'POST_PLAN', 'SYSTEM'].map(
+          (mode) => [
+            mode,
+            PLANNER_FIELD_REQUIREMENTS.filter((item) => item.requirement_mode === mode).length,
+          ],
+        ),
+      ),
+    ).toEqual({
+      BASE_REQUIRED: 16,
+      CONDITIONAL_REQUIRED: 19,
+      OPTIONAL: 34,
+      POST_PLAN: 6,
+      SYSTEM: 1,
+    });
+  });
+
+  it('评审后的关键分类不会退回旧口径', () => {
+    const requirement = (fieldId: PlannerFieldId) =>
+      PLANNER_FIELD_REQUIREMENTS.find((item) => item.field_id === fieldId);
+    expect(requirement('PV2-03-001')?.requirement_mode).toBe('BASE_REQUIRED');
+    expect(requirement('PV2-04-001')?.requirement_mode).toBe('BASE_REQUIRED');
+    expect(requirement('PV2-06-001')?.requirement_mode).toBe('OPTIONAL');
+    expect(requirement('PV2-06-003')?.trigger_code).toBe('ROOM_COUNT_SET');
+    expect(requirement('PV2-08-008')?.trigger_code).toBe('HIGH_RISK_ACTIVITY');
   });
 
   /**

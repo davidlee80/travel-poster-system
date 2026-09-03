@@ -1,6 +1,7 @@
 import { PLANNER_FIELDS, plannerField, type PlannerFieldId } from '@tps/schemas';
 import { describe, expect, it } from 'vitest';
 
+import { isPlannerFieldGenerationRequired } from './generation-requirement';
 import {
   ALWAYS_VISIBLE_DESPITE_TRIGGER,
   CONDITIONAL_FIELD_IDS,
@@ -48,6 +49,48 @@ const DOMESTIC_TWO_ADULTS = answer(INITIAL_PLANNER_STATE, [
 ]);
 
 describe('触发表的完整性', () => {
+  it('生成必填完全由 required + blocking 配置决定，而不是由 HARD 类型决定', () => {
+    expect(isPlannerFieldGenerationRequired(plannerField('PV2-01-001'))).toBe(true);
+    expect(isPlannerFieldGenerationRequired(plannerField('PV2-02-004'))).toBe(true);
+    expect(isPlannerFieldGenerationRequired(plannerField('PV2-03-001'))).toBe(true);
+    expect(isPlannerFieldGenerationRequired(plannerField('PV2-06-001'))).toBe(false);
+    expect(isPlannerFieldGenerationRequired(plannerField('PV2-01-005'))).toBe(false);
+    expect(isPlannerFieldGenerationRequired(plannerField('PV2-09-002'))).toBe(false);
+    expect(isPlannerFieldGenerationRequired(plannerField('PV2-10-001'))).toBe(false);
+  });
+
+  it('场景必填读取自己的触发条件，而不是复用页面显隐', () => {
+    const money = answer(DOMESTIC_TWO_ADULTS, [
+      ['PV2-03-001', { budget: { mode: 'TOTAL' } }],
+    ]);
+    expect(unresolvedBlockers(money)).toContain('PV2-03-002');
+    expect(unresolvedBlockers(money)).toContain('PV2-03-003');
+    expect(unresolvedBlockers(money)).toContain('PV2-03-006');
+
+    const unknown = answer(DOMESTIC_TWO_ADULTS, [
+      ['PV2-03-001', { budget: { mode: 'UNKNOWN' } }],
+    ]);
+    expect(unresolvedBlockers(unknown)).not.toContain('PV2-03-002');
+    expect(unresolvedBlockers(unknown)).not.toContain('PV2-03-004');
+
+    const customRooms = answer(DOMESTIC_TWO_ADULTS, [
+      ['PV2-06-002', { lodging: { rooms_count: 2 } }],
+    ]);
+    expect(unresolvedBlockers(customRooms)).toContain('PV2-06-003');
+  });
+
+  it('高风险活动要求回答保险状态，但已回答后的系统核验不阻止生成', () => {
+    const highRisk = answer(DOMESTIC_TWO_ADULTS, [
+      ['PV2-08-003', { special: { high_risk_activities: ['SCUBA_DIVING'] } }],
+    ]);
+    expect(unresolvedBlockers(highRisk)).toContain('PV2-08-008');
+
+    const answered = answer(highRisk, [
+      ['PV2-08-008', { insurance: { status: { user_reported: 'UNSURE' } } }],
+    ]);
+    expect(unresolvedBlockers(answered)).not.toContain('PV2-08-008');
+  });
+
   it('元数据里 trigger 不是「始终显示」的字段，都被显式处理过', () => {
     /*
      * 这条断言是触发表「只写有条件的那些」这个设计的唯一保护。
@@ -373,6 +416,35 @@ describe('D-06 订单链与阻塞项', () => {
     const blockers = unresolvedBlockers(DOMESTIC_TWO_ADULTS);
     expect(blockers).not.toContain('PV2-03-005');
     expect(blockers).not.toContain('PV2-07-008');
+  });
+
+  it('可选字段即使有校验提示也不阻塞，但配置为生成必填的无效字段会阻塞', () => {
+    const invalidOptional = answer(DOMESTIC_TWO_ADULTS, [
+      ['PV2-03-001', { budget: { mode: 'TOTAL' } }],
+      ['PV2-03-005', { budget: { hard_cap: { enabled: true } } }],
+    ]);
+    expect(unresolvedBlockers(invalidOptional)).toContain('PV2-03-005');
+
+    const invalidRequired = answer(DOMESTIC_TWO_ADULTS, [
+      ['PV2-01-008', { trip: { locked_order_types: ['LODGING'] } }],
+      [
+        'PV2-01-009',
+        {
+          trip: {
+            locked_orders: [
+              {
+                type: 'LODGING',
+                name: '某酒店',
+                datetime_text: '9/1 入住',
+                place_text: '',
+                changeability: 'NON_REFUNDABLE',
+              },
+            ],
+          },
+        },
+      ],
+    ]);
+    expect(unresolvedBlockers(invalidRequired)).toContain('PV2-01-009');
   });
 
   it('阻塞清单不含 PV2-09-002 —— 它的触发条件就是这份清单，会无限递归', () => {

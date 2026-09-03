@@ -96,6 +96,11 @@ export function StepPage({
         <span className="planner-page-head__badge">第 {Number(step)} 步 / 9</span>
       </header>
 
+      <div className="planner-required-legend" role="note">
+        <span className="planner-badge planner-badge--required">必填项</span>
+        <span>“当前必填”会随你的选择出现；其他问题可以跳过。</span>
+      </div>
+
       {sections.map((section) => {
         const fields = section.fields.filter(
           (fieldId) => triggered.has(fieldId) && !hidden.has(fieldId),

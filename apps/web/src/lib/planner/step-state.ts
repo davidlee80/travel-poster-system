@@ -1,4 +1,10 @@
-import { PLANNER_STEP_IDS, type PlannerFieldId, type PlannerStepId } from '@tps/schemas';
+import {
+  PLANNER_FIELD_REQUIREMENTS,
+  PLANNER_STEP_IDS,
+  type PlannerFieldId,
+  type PlannerFieldRequirement,
+  type PlannerStepId,
+} from '@tps/schemas';
 
 import { fieldState, isSatisfied, type FieldState } from './field-state';
 import { fieldsOfStep, readAnswer, type PlannerState } from './state';
@@ -46,6 +52,10 @@ export interface PlannerSnapshot {
   readonly verifyCount: number;
   /** 已触发但未满足的阻塞字段 */
   readonly blockers: readonly PlannerFieldId[];
+  /** 后台配置下发的生成必填字段；字段未触发时仍在清单中，但不会成为 blocker。 */
+  readonly generationRequiredFieldIds: readonly PlannerFieldId[];
+  /** 后台配置下发的完整字段要求，用于区分基础必填、场景必填和选填。 */
+  readonly fieldRequirements: readonly PlannerFieldRequirement[];
 }
 
 /**
@@ -57,7 +67,12 @@ export interface PlannerSnapshot {
  */
 export function buildSnapshot(
   state: PlannerState,
-  options: { readonly planGenerated?: boolean } = {},
+  options: {
+    readonly planGenerated?: boolean;
+    readonly fieldRequirements?: readonly PlannerFieldRequirement[];
+    /** 旧测试/旧调用兼容；新版调用应传 `fieldRequirements`。 */
+    readonly generationRequiredFieldIds?: readonly PlannerFieldId[];
+  } = {},
 ): PlannerSnapshot {
   const triggered = triggeredFields(state);
   const triggeredSet = new Set(triggered);
@@ -65,7 +80,18 @@ export function buildSnapshot(
   const states = new Map<PlannerFieldId, FieldState>();
   for (const fieldId of triggered) states.set(fieldId, fieldState(state, fieldId));
 
-  const blockers = unresolvedBlockers(state);
+  const fieldRequirements =
+    options.fieldRequirements ??
+    (options.generationRequiredFieldIds === undefined
+      ? PLANNER_FIELD_REQUIREMENTS
+      : requirementsFromLegacyIds(options.generationRequiredFieldIds));
+  const generationRequiredFieldIds = fieldRequirements.flatMap((requirement) =>
+    requirement.requirement_mode === 'BASE_REQUIRED' ||
+    requirement.requirement_mode === 'CONDITIONAL_REQUIRED'
+      ? [requirement.field_id]
+      : [],
+  );
+  const blockers = unresolvedBlockers(state, fieldRequirements);
   const blockerSet = new Set(blockers);
 
   const stepStates = new Map<PlannerStepId, StepState>();
@@ -98,13 +124,25 @@ export function buildSnapshot(
     tripState: computeTripState(state, {
       blockers,
       verifyCount,
-      invalidCount: [...states.values()].filter((fs) => fs === 'invalid').length,
       planGenerated: options.planGenerated ?? false,
     }),
     completeness,
     verifyCount,
     blockers,
+    generationRequiredFieldIds,
+    fieldRequirements,
   };
+}
+
+function requirementsFromLegacyIds(
+  fieldIds: readonly PlannerFieldId[],
+): readonly PlannerFieldRequirement[] {
+  const required = new Set(fieldIds);
+  return PLANNER_FIELD_REQUIREMENTS.map((requirement) =>
+    required.has(requirement.field_id)
+      ? { ...requirement, requirement_mode: 'BASE_REQUIRED', blocking_scope: 'PLAN' }
+      : { ...requirement, requirement_mode: 'OPTIONAL', blocking_scope: 'NONE' },
+  );
 }
 
 function computeStepState(
@@ -149,7 +187,6 @@ function computeTripState(
   input: {
     readonly blockers: readonly PlannerFieldId[];
     readonly verifyCount: number;
-    readonly invalidCount: number;
     readonly planGenerated: boolean;
   },
 ): TripState {
@@ -163,7 +200,7 @@ function computeTripState(
    */
   if (state.touched.length === 0) return 'draft';
 
-  if (input.blockers.length > 0 || input.invalidCount > 0) {
+  if (input.blockers.length > 0) {
     return 'blocked';
   }
 

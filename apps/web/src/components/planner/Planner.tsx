@@ -25,6 +25,7 @@ import { AuthPanel } from '../AuthPanel';
 import { useSession } from '../SessionProvider';
 import { BudgetControl } from './BudgetControl';
 import { GenerationDialog } from './GenerationDialog';
+import { usePlannerFieldRequirements } from './PlannerConfigProvider';
 import { PrepCenter } from './PrepCenter';
 import { BlockerList, ReviewPanel } from './ReviewBoard';
 import { StepPage } from './StepPage';
@@ -138,6 +139,7 @@ export function Planner(): React.ReactElement {
   const cancelled = useRef(false);
 
   const timezone = useMemo(() => browserTimezone(), []);
+  const fieldRequirements = usePlannerFieldRequirements();
 
   /*
    * 草稿恢复只在挂载时做一次。
@@ -186,8 +188,12 @@ export function Planner(): React.ReactElement {
      * 不传的话生成完成之后右栏仍然写着「可以生成初步方案」——
      * 而用户已经拿到方案了。
      */
-    () => buildSnapshot(state, { planGenerated: planId !== null }),
-    [state, planId],
+    () =>
+      buildSnapshot(state, {
+        planGenerated: planId !== null,
+        fieldRequirements,
+      }),
+    [state, planId, fieldRequirements],
   );
   const metrics = useMemo(() => buildMetrics(state), [state]);
 
@@ -233,6 +239,21 @@ export function Planner(): React.ReactElement {
       node.focus({ preventScroll: true });
     }, 0);
   }, []);
+
+  /** 下一步前只校验当前页；发现问题时留在本页并定位到第一项。 */
+  const advanceFromStep = useCallback(
+    (step: PlannerStepId, next: PlannerStepId) => {
+      const firstIssue = snapshot.blockers.find(
+        (fieldId) => PLANNER_FIELDS.find((field) => field.field_id === fieldId)?.step === step,
+      );
+      if (firstIssue !== undefined) {
+        jumpToField(step, firstIssue);
+        return;
+      }
+      goToStep(next);
+    },
+    [goToStep, jumpToField, snapshot.blockers],
+  );
 
   /** 右栏状态卡直接定位到具体问题清单，避免只跳到确认页顶部却看不到要确认什么。 */
   const jumpToReviewIssues = useCallback(() => {
@@ -453,7 +474,9 @@ export function Planner(): React.ReactElement {
               snapshot={snapshot}
               dispatch={dispatch}
               onPrev={prevStep === undefined ? null : () => goToStep(prevStep)}
-              onNext={nextStep === undefined ? null : () => goToStep(nextStep)}
+              onNext={
+                nextStep === undefined ? null : () => advanceFromStep(step, nextStep)
+              }
               nextLabel={nextMeta === undefined ? null : `下一步 · ${nextMeta.nav} →`}
               registerField={registerField}
               {...(step === '02'

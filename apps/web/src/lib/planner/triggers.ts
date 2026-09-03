@@ -1,12 +1,15 @@
 import {
   PLANNER_FIELDS,
+  PLANNER_FIELD_REQUIREMENTS,
   plannerField,
   type PlannerFieldId,
+  type PlannerFieldRequirement,
   type PlannerProfileInput,
   type PlannerStance,
 } from '@tps/schemas';
 
 import { hasValue, isAnswered, isOptedIn, type PlannerState } from './state';
+import { validateField } from './validation';
 
 /**
  * 条件触发引擎（规范 6 与附录 B 的 D-01～D-08）。
@@ -70,16 +73,20 @@ export interface TriggerContext {
   readonly involvesRailOrRental: boolean;
   readonly selfDriveChosen: boolean;
   readonly budgetMode: string | undefined;
+  readonly hardCapEnabled: boolean;
   readonly lodgingIncludesHotel: boolean;
+  readonly roomCountSet: boolean;
   readonly interestCount: number;
   readonly interestsIncludeShopping: boolean;
   readonly interestsIncludeNightlife: boolean;
   readonly lockedTypesChosen: boolean;
   readonly childNeedsFixedNap: boolean;
   readonly healthNeedsDeclared: boolean;
+  readonly healthNeedsYes: boolean;
   readonly allergiesDeclared: boolean;
   readonly highRiskActivities: boolean;
   readonly purposeIncludesWork: boolean;
+  readonly workConstraintEnabled: boolean;
   readonly soloTraveler: boolean;
   readonly lateArrival: boolean;
 }
@@ -167,8 +174,10 @@ export function buildTriggerContext(answers: PlannerProfileInput): TriggerContex
     involvesRailOrRental: chosen(intercity, 'transport.rail') || selfDriveChosen,
     selfDriveChosen,
     budgetMode: answers.budget?.mode,
+    hardCapEnabled: answers.budget?.hard_cap?.enabled === true,
     lodgingIncludesHotel:
       chosen(lodgingTypes, 'accommodation.hotel') || chosen(lodgingTypes, 'accommodation.resort'),
+    roomCountSet: answers.lodging?.rooms_count !== undefined,
     interestCount: interests.length,
     interestsIncludeShopping: interests.includes('interest.shopping'),
     interestsIncludeNightlife: interests.includes('interest.nightlife'),
@@ -177,9 +186,11 @@ export function buildTriggerContext(answers: PlannerProfileInput): TriggerContex
     healthNeedsDeclared:
       answers.special?.has_health_or_accessibility_needs === 'YES' ||
       answers.special?.has_health_or_accessibility_needs === 'UNSURE',
+    healthNeedsYes: answers.special?.has_health_or_accessibility_needs === 'YES',
     allergiesDeclared: answers.food?.has_allergies === 'YES',
     highRiskActivities: (answers.special?.high_risk_activities ?? []).length > 0,
     purposeIncludesWork: (answers.profile?.trip_purposes?.values ?? []).includes('BLEISURE'),
+    workConstraintEnabled: answers.special?.work_constraints?.enabled === true,
     soloTraveler: travelerCount === 1,
     lateArrival:
       sleepNeeds.includes('LATE_CHECK_IN') ||
@@ -232,6 +243,7 @@ const TRIGGERS: Partial<Record<PlannerFieldId, TriggerFn>> = {
   'PV2-05-007': (ctx) => ctx.involvesAir || ctx.involvesRailOrRental,
 
   // ── 住宿 ──
+  'PV2-06-003': (ctx) => ctx.roomCountSet,
   'PV2-06-004': (ctx) => ctx.budgetMode === 'TOTAL' || ctx.budgetMode === 'PER_PERSON',
   'PV2-06-006': (ctx) => ctx.lodgingIncludesHotel,
 
@@ -293,31 +305,86 @@ export function triggeredFields(state: PlannerState): readonly PlannerFieldId[] 
   }).map((spec) => spec.field_id);
 }
 
+/** 场景必填是否已被当前答案激活；它与字段是否展示是两个独立判断。 */
+export function isRequirementActive(
+  state: PlannerState,
+  requirement: PlannerFieldRequirement,
+): boolean {
+  if (requirement.requirement_mode === 'BASE_REQUIRED') return true;
+  if (requirement.requirement_mode !== 'CONDITIONAL_REQUIRED') return false;
+
+  const ctx = buildTriggerContext(state.answers);
+  switch (requirement.trigger_code) {
+    case 'LOCKED_ORDER_SELECTED':
+      return ctx.lockedTypesChosen;
+    case 'MINOR_PRESENT':
+      return ctx.hasMinor;
+    case 'CHILD_PRESENT':
+      return ctx.hasChild;
+    case 'BUDGET_MONEY_MODE':
+      return ctx.budgetMode === 'TOTAL' || ctx.budgetMode === 'PER_PERSON';
+    case 'BUDGET_TIER_MODE':
+      return ctx.budgetMode === 'TIER';
+    case 'HARD_CAP_ENABLED':
+      return ctx.hardCapEnabled;
+    case 'FIXED_REST_ENABLED':
+      return ctx.childNeedsFixedNap || isOptedIn(state, 'PV2-04-006');
+    case 'SELF_DRIVE_SELECTED':
+      return ctx.selfDriveChosen;
+    case 'ROOM_COUNT_SET':
+      return ctx.roomCountSet;
+    case 'ALLERGY_YES':
+      return ctx.allergiesDeclared;
+    case 'HEALTH_YES':
+      return ctx.healthNeedsYes;
+    case 'INTERNATIONAL_OR_HEALTH':
+      return ctx.isInternational || ctx.healthNeedsYes;
+    case 'INTERNATIONAL':
+      return ctx.isInternational;
+    case 'HIGH_RISK_ACTIVITY':
+      return ctx.highRiskActivities;
+    case 'WORK_CONSTRAINT_ENABLED':
+      return ctx.purposeIncludesWork || ctx.workConstraintEnabled;
+    case undefined:
+      return false;
+  }
+  return false;
+}
+
 /**
  * 已触发但仍未满足的阻塞字段。
  *
- * 「阻塞」= 必填字段的 `blocking` 为 `ALWAYS`，或为 `CONDITIONAL` 且已触发。
+ * 「阻塞」使用后台配置接口下发的生成必填字段清单；页面上的「必填项」标记
+ * 读取同一份清单，避免显示与生成逻辑分叉。
  * 只看已触发的字段（规范 6：未触发字段不占完成度、不作为缺失项）。
  * `OPTIONAL + CONDITIONAL` 表示「用户填写后作为硬约束校验」，并不表示空值也要阻塞；
  * 这类字段的半成品由 validation 负责拦截。
  *
- * **跳过 PV2-09-002**：它自己的触发条件就是「存在未完成的阻塞项」，
- * 算进来会无限递归。它是一个元字段 —— 承载的是「在第 9 步就地补答」这个动作，
- * 而不是一份独立的用户答案。
+ * PV2-09-002 不在后台下发清单中：它自己的触发条件就是「存在未完成的阻塞项」，
+ * 是承载第 9 步就地补答的元字段，而不是一份独立的用户答案。
  */
-export function unresolvedBlockers(state: PlannerState): readonly PlannerFieldId[] {
+export function unresolvedBlockers(
+  state: PlannerState,
+  requirements: readonly PlannerFieldRequirement[] = PLANNER_FIELD_REQUIREMENTS,
+): readonly PlannerFieldId[] {
   const ctx = buildTriggerContext(state.answers);
+  const byField = new Map(requirements.map((requirement) => [requirement.field_id, requirement]));
   return PLANNER_FIELDS.filter((spec) => {
+    // This field is a presentation of this very list, not an independent
+    // answer. Evaluating its trigger here would recurse into this function.
     if (spec.field_id === 'PV2-09-002') return false;
-    if (spec.level === 'POST_PLAN') return false;
-    if (spec.blocking === 'NEVER') return false;
-    if (spec.required === 'OPTIONAL') return false;
-
     const trigger = TRIGGERS[spec.field_id];
     const triggered = trigger === undefined || trigger(ctx, state);
     if (!triggered) return false;
 
-    return !isAnswered(state, spec.field_id);
+    const answered = isAnswered(state, spec.field_id);
+    const invalid = validateField(state, spec.field_id) !== null;
+    /* 选填项可以留空，但一旦形成无效半成品，必须修正或清空。 */
+    if (answered && invalid) return true;
+
+    const requirement = byField.get(spec.field_id);
+    if (requirement === undefined || !isRequirementActive(state, requirement)) return false;
+    return !answered || invalid;
   }).map((spec) => spec.field_id);
 }
 
@@ -337,6 +404,7 @@ export const TRIGGER_REASON: Partial<Record<PlannerFieldId, string>> = {
   'PV2-05-003': '因为涉及航班，舱等与座位会影响长途舒适度和票价。',
   'PV2-05-006': '因为你选择了自驾，我们需要确认目的地是否认可你的证件组合。',
   'PV2-05-007': '因为涉及长途交通，行李件数会影响票价规则与车辆空间。',
+  'PV2-06-003': '因为你设置了房间数，需要说明每间房怎样入住。',
   'PV2-06-006': '因为你偏好酒店或度假村，星级与品牌可以缩小候选范围。',
   'PV2-07-004': '因为存在食物过敏，我们会把它当作安全硬约束逐家餐厅核实。',
   'PV2-07-007': '因为你选了三个以上兴趣，排个序能让我们在时间冲突时知道先保留什么。',

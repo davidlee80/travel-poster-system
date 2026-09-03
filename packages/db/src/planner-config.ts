@@ -10,6 +10,8 @@ export interface PublishedPlannerConfig {
   readonly version: number;
   readonly publishedAt: string;
   readonly fields: Readonly<Record<string, readonly PlannerConfigOption[]>>;
+  /** JSONB is validated at the API boundary by @tps/schemas. */
+  readonly fieldRequirements?: unknown;
 }
 
 export interface PlannerConfigRepository {
@@ -23,13 +25,15 @@ interface OptionRow {
   readonly option_key: string;
   readonly label: string;
   readonly metadata: Record<string, unknown>;
+  readonly field_requirements: unknown;
 }
 
 export function createPlannerConfigRepository(pool: Pool): PlannerConfigRepository {
   return {
     async getPublished() {
       const result = await pool.query<OptionRow>(
-        `SELECT v.version, v.published_at, o.field_key, o.option_key, o.label, o.metadata
+        `SELECT v.version, v.published_at, v.field_requirements,
+                o.field_key, o.option_key, o.label, o.metadata
          FROM planner_config_versions v
          JOIN planner_config_options o ON o.version_id = v.id
          WHERE v.status = 'PUBLISHED' AND o.enabled = TRUE
@@ -49,6 +53,7 @@ export function createPlannerConfigRepository(pool: Pool): PlannerConfigReposito
         version: first.version,
         publishedAt: first.published_at.toISOString(),
         fields,
+        fieldRequirements: first.field_requirements,
       };
     },
   };

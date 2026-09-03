@@ -7,6 +7,8 @@
  * （13.0），不带它每个请求都会被当成新访客。
  */
 
+import type { PlannerFieldId, PlannerFieldRequirement } from '@tps/schemas';
+
 export interface SessionInfo {
   readonly user_type: 'ANONYMOUS' | 'REGISTERED';
   readonly user_id: string;
@@ -210,6 +212,10 @@ export interface PlannerConfigResponse {
   readonly version: number;
   readonly published_at: string;
   readonly fields: Readonly<Record<string, readonly PlannerConfigOption[]>>;
+  /** 后台认定的生成必填字段；可选用于兼容尚未升级的旧 API 实例。 */
+  readonly generation_required_field_ids?: readonly PlannerFieldId[];
+  /** 字段分类及条件必填触发器。新版本以它为准。 */
+  readonly field_requirements?: readonly PlannerFieldRequirement[];
 }
 
 export function getPlannerConfig(): Promise<ApiResult<PlannerConfigResponse>> {

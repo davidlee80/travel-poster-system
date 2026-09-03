@@ -6,7 +6,12 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   resolve: {
-    alias: { '@': path.join(here, 'src') },
+    alias: {
+      '@': path.join(here, 'src'),
+      // Workspace packages publish compiled output. Point tests at source so a
+      // stale/locked dist directory cannot hide contract changes under test.
+      '@tps/schemas': path.join(here, '../../packages/schemas/src/index.ts'),
+    },
   },
   /*
    * JSX 用自动运行时。

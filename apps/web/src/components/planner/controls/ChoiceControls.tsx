@@ -183,7 +183,7 @@ const STANCE_TEXT: Record<PlannerStance, string> = {
 };
 
 const STANCE_VISUAL: Record<PlannerStance, { readonly icon: string; readonly aria: string }> = {
-  PREFER: { icon: '♡', aria: '优先考虑' },
+  PREFER: { icon: '♥', aria: '优先考虑' },
   REQUIRE: { icon: '★', aria: '必须满足' },
   EXCLUDE: { icon: '×', aria: '明确排除' },
 };
@@ -212,9 +212,15 @@ export function TriStateTag({
   return (
     <div id={id} {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}>
       <div className="planner-stance-guide" aria-label="多状态按钮说明">
-        <span className="planner-stance-guide__require">★ 必须满足</span>
-        <span className="planner-stance-guide__prefer">♡ 优先考虑</span>
-        <span className="planner-stance-guide__exclude">× 明确排除</span>
+        <span className="planner-stance-guide__require" aria-label="必须满足" title="必须满足">
+          ★
+        </span>
+        <span className="planner-stance-guide__prefer" aria-label="优先考虑" title="优先考虑">
+          ♥
+        </span>
+        <span className="planner-stance-guide__exclude" aria-label="明确排除" title="明确排除">
+          ×
+        </span>
         <small>连续点击可切换状态，再点一次可取消。</small>
       </div>
       <div className="planner-tags" role="group">

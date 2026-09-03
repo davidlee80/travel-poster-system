@@ -489,7 +489,7 @@ export const PLANNER_FIELDS = [
     summary_group: 'SKELETON',
     sensitivity: 'MEDIUM',
     data_type: 'array<object>',
-    question: '每位旅行者的年龄段与同行关系',
+    question: '各年龄段有几位旅行人员？',
     control: 'Traveler Card Repeater',
     trigger: '同行人数>0',
     validation: '每位旅行者至少年龄段+关系；儿童建议填写具体年龄',
@@ -971,7 +971,7 @@ export const PLANNER_FIELDS = [
     data_type: 'array<object>',
     question: '床型与房间关系要求',
     control: '多选+Repeater',
-    trigger: '始终显示',
+    trigger: '已设置房间数',
     validation: '房间配置必须能够容纳全部旅行者；连通房标记为需供应商确认',
   },
   {
@@ -1620,6 +1620,294 @@ export type PlannerFieldId = (typeof PLANNER_FIELDS)[number]['field_id'];
 
 /** 76 个 API Key 的联合。契约绑定用它 */
 export type PlannerApiKey = (typeof PLANNER_FIELDS)[number]['api_key'];
+
+/**
+ * 首次攻略的用户回答要求。
+ *
+ * 这与字段表原始的 `required` / `blocking` 分开：那两列是 V2.1 的历史输入，
+ * 本表是《旅行规划必填项与条件交互设计》评审后的可执行产品决策。
+ */
+export const PLANNER_REQUIREMENT_MODE_VALUES = [
+  'BASE_REQUIRED',
+  'CONDITIONAL_REQUIRED',
+  'OPTIONAL',
+  'POST_PLAN',
+  'SYSTEM',
+] as const;
+export type PlannerRequirementMode = (typeof PLANNER_REQUIREMENT_MODE_VALUES)[number];
+
+export const PLANNER_REQUIREMENT_TRIGGER_VALUES = [
+  'LOCKED_ORDER_SELECTED',
+  'MINOR_PRESENT',
+  'CHILD_PRESENT',
+  'BUDGET_MONEY_MODE',
+  'BUDGET_TIER_MODE',
+  'HARD_CAP_ENABLED',
+  'FIXED_REST_ENABLED',
+  'SELF_DRIVE_SELECTED',
+  'ROOM_COUNT_SET',
+  'ALLERGY_YES',
+  'HEALTH_YES',
+  'INTERNATIONAL_OR_HEALTH',
+  'INTERNATIONAL',
+  'HIGH_RISK_ACTIVITY',
+  'WORK_CONSTRAINT_ENABLED',
+] as const;
+export type PlannerRequirementTrigger = (typeof PLANNER_REQUIREMENT_TRIGGER_VALUES)[number];
+
+export const PLANNER_BLOCKING_SCOPE_VALUES = ['PLAN', 'BRANCH', 'NONE'] as const;
+export type PlannerBlockingScope = (typeof PLANNER_BLOCKING_SCOPE_VALUES)[number];
+
+export const PLANNER_REQUIREMENT_REASON_VALUES = [
+  'ROUTE_SKELETON',
+  'TRAVELER_SAFETY',
+  'BUDGET_MEANING',
+  'LOCKED_ORDER',
+  'LEGAL_FEASIBILITY',
+  'CUSTOM_CONFIGURATION',
+  'HEALTH_SAFETY',
+  'CONSENT',
+] as const;
+export type PlannerRequirementReason = (typeof PLANNER_REQUIREMENT_REASON_VALUES)[number];
+
+export interface PlannerFieldRequirement {
+  readonly field_id: PlannerFieldId;
+  readonly requirement_mode: PlannerRequirementMode;
+  readonly blocking_scope: PlannerBlockingScope;
+  readonly reason_code?: PlannerRequirementReason;
+  readonly trigger_code?: PlannerRequirementTrigger;
+  readonly allow_clear: boolean;
+  readonly allow_change_source: boolean;
+}
+
+const BASE_REQUIRED_FIELD_IDS = new Set<PlannerFieldId>([
+  'PV2-01-001',
+  'PV2-01-002',
+  'PV2-01-003',
+  'PV2-01-004',
+  'PV2-01-008',
+  'PV2-02-001',
+  'PV2-02-002',
+  'PV2-02-004',
+  'PV2-03-001',
+  'PV2-04-001',
+  'PV2-07-002',
+  'PV2-07-003',
+  'PV2-08-001',
+  'PV2-08-003',
+  'PV2-09-001',
+  'PV2-09-005',
+]);
+
+const CONDITIONAL_REQUIREMENTS = new Map<
+  PlannerFieldId,
+  {
+    readonly trigger_code: PlannerRequirementTrigger;
+    readonly blocking_scope: Exclude<PlannerBlockingScope, 'NONE'>;
+    readonly reason_code: PlannerRequirementReason;
+  }
+>([
+  [
+    'PV2-01-009',
+    { trigger_code: 'LOCKED_ORDER_SELECTED', blocking_scope: 'BRANCH', reason_code: 'LOCKED_ORDER' },
+  ],
+  [
+    'PV2-02-003',
+    { trigger_code: 'MINOR_PRESENT', blocking_scope: 'PLAN', reason_code: 'LEGAL_FEASIBILITY' },
+  ],
+  [
+    'PV2-02-005',
+    { trigger_code: 'CHILD_PRESENT', blocking_scope: 'PLAN', reason_code: 'TRAVELER_SAFETY' },
+  ],
+  [
+    'PV2-03-002',
+    { trigger_code: 'BUDGET_MONEY_MODE', blocking_scope: 'BRANCH', reason_code: 'BUDGET_MEANING' },
+  ],
+  [
+    'PV2-03-003',
+    { trigger_code: 'BUDGET_MONEY_MODE', blocking_scope: 'BRANCH', reason_code: 'BUDGET_MEANING' },
+  ],
+  [
+    'PV2-03-004',
+    { trigger_code: 'BUDGET_TIER_MODE', blocking_scope: 'BRANCH', reason_code: 'BUDGET_MEANING' },
+  ],
+  [
+    'PV2-03-005',
+    { trigger_code: 'HARD_CAP_ENABLED', blocking_scope: 'BRANCH', reason_code: 'BUDGET_MEANING' },
+  ],
+  [
+    'PV2-03-006',
+    { trigger_code: 'BUDGET_MONEY_MODE', blocking_scope: 'BRANCH', reason_code: 'BUDGET_MEANING' },
+  ],
+  [
+    'PV2-04-006',
+    { trigger_code: 'FIXED_REST_ENABLED', blocking_scope: 'BRANCH', reason_code: 'TRAVELER_SAFETY' },
+  ],
+  [
+    'PV2-05-006',
+    { trigger_code: 'SELF_DRIVE_SELECTED', blocking_scope: 'BRANCH', reason_code: 'LEGAL_FEASIBILITY' },
+  ],
+  [
+    'PV2-06-003',
+    { trigger_code: 'ROOM_COUNT_SET', blocking_scope: 'BRANCH', reason_code: 'CUSTOM_CONFIGURATION' },
+  ],
+  [
+    'PV2-07-004',
+    { trigger_code: 'ALLERGY_YES', blocking_scope: 'PLAN', reason_code: 'HEALTH_SAFETY' },
+  ],
+  [
+    'PV2-08-002',
+    { trigger_code: 'HEALTH_YES', blocking_scope: 'PLAN', reason_code: 'HEALTH_SAFETY' },
+  ],
+  [
+    'PV2-08-004',
+    {
+      trigger_code: 'INTERNATIONAL_OR_HEALTH',
+      blocking_scope: 'PLAN',
+      reason_code: 'LEGAL_FEASIBILITY',
+    },
+  ],
+  [
+    'PV2-08-005',
+    { trigger_code: 'INTERNATIONAL', blocking_scope: 'PLAN', reason_code: 'LEGAL_FEASIBILITY' },
+  ],
+  [
+    'PV2-08-006',
+    { trigger_code: 'INTERNATIONAL', blocking_scope: 'PLAN', reason_code: 'LEGAL_FEASIBILITY' },
+  ],
+  [
+    'PV2-08-007',
+    { trigger_code: 'INTERNATIONAL', blocking_scope: 'PLAN', reason_code: 'LEGAL_FEASIBILITY' },
+  ],
+  [
+    'PV2-08-008',
+    { trigger_code: 'HIGH_RISK_ACTIVITY', blocking_scope: 'PLAN', reason_code: 'HEALTH_SAFETY' },
+  ],
+  [
+    'PV2-08-010',
+    { trigger_code: 'WORK_CONSTRAINT_ENABLED', blocking_scope: 'BRANCH', reason_code: 'CUSTOM_CONFIGURATION' },
+  ],
+]);
+
+function baseReason(fieldId: PlannerFieldId): PlannerRequirementReason {
+  if (fieldId === 'PV2-09-005') return 'CONSENT';
+  if (fieldId === 'PV2-01-008') return 'LOCKED_ORDER';
+  if (fieldId.startsWith('PV2-02') || fieldId.startsWith('PV2-07') || fieldId.startsWith('PV2-08')) {
+    return 'TRAVELER_SAFETY';
+  }
+  if (fieldId === 'PV2-03-001') return 'BUDGET_MEANING';
+  return 'ROUTE_SKELETON';
+}
+
+/**
+ * 76个字段的完整目标分类。数组顺序与 `PLANNER_FIELDS` 一致，因此配置响应、
+ * 页面与评审文档都能按同一顺序展示。
+ */
+export const PLANNER_FIELD_REQUIREMENTS: readonly PlannerFieldRequirement[] = PLANNER_FIELDS.map(
+  (field): PlannerFieldRequirement => {
+    if (field.field_id === 'PV2-09-002') {
+      return {
+        field_id: field.field_id,
+        requirement_mode: 'SYSTEM',
+        blocking_scope: 'NONE',
+        allow_clear: false,
+        allow_change_source: false,
+      };
+    }
+    if (field.level === 'POST_PLAN') {
+      return {
+        field_id: field.field_id,
+        requirement_mode: 'POST_PLAN',
+        blocking_scope: 'NONE',
+        allow_clear: true,
+        allow_change_source: false,
+      };
+    }
+    if (BASE_REQUIRED_FIELD_IDS.has(field.field_id)) {
+      return {
+        field_id: field.field_id,
+        requirement_mode: 'BASE_REQUIRED',
+        blocking_scope: 'PLAN',
+        reason_code: baseReason(field.field_id),
+        allow_clear: false,
+        allow_change_source: false,
+      };
+    }
+    const conditional = CONDITIONAL_REQUIREMENTS.get(field.field_id);
+    if (conditional !== undefined) {
+      return {
+        field_id: field.field_id,
+        requirement_mode: 'CONDITIONAL_REQUIRED',
+        blocking_scope: conditional.blocking_scope,
+        reason_code: conditional.reason_code,
+        trigger_code: conditional.trigger_code,
+        allow_clear: true,
+        allow_change_source: true,
+      };
+    }
+    return {
+      field_id: field.field_id,
+      requirement_mode: 'OPTIONAL',
+      blocking_scope: 'NONE',
+      allow_clear: true,
+      allow_change_source: false,
+    };
+  },
+);
+
+/** Runtime boundary for the published planner configuration. */
+export const PlannerFieldRequirementSchema = z.object({
+  field_id: z.custom<PlannerFieldId>(
+    (value) =>
+      typeof value === 'string' && PLANNER_FIELDS.some((field) => field.field_id === value),
+    '未知的 Planner 字段 ID',
+  ),
+  requirement_mode: z.enum(PLANNER_REQUIREMENT_MODE_VALUES),
+  blocking_scope: z.enum(PLANNER_BLOCKING_SCOPE_VALUES),
+  reason_code: z.enum(PLANNER_REQUIREMENT_REASON_VALUES).optional(),
+  trigger_code: z.enum(PLANNER_REQUIREMENT_TRIGGER_VALUES).optional(),
+  allow_clear: z.boolean(),
+  allow_change_source: z.boolean(),
+});
+
+export const PlannerFieldRequirementsSchema = z
+  .array(PlannerFieldRequirementSchema)
+  .length(PLANNER_FIELDS.length)
+  .superRefine((requirements, context) => {
+    const ids = new Set(requirements.map((requirement) => requirement.field_id));
+    if (ids.size !== PLANNER_FIELDS.length) {
+      context.addIssue({
+        code: 'custom',
+        message: '字段分类必须完整覆盖 76 个唯一 Field ID',
+      });
+    }
+  });
+
+const REQUIREMENT_BY_FIELD_ID: ReadonlyMap<PlannerFieldId, PlannerFieldRequirement> = new Map(
+  PLANNER_FIELD_REQUIREMENTS.map((requirement) => [requirement.field_id, requirement]),
+);
+
+export function plannerFieldRequirement(fieldId: PlannerFieldId): PlannerFieldRequirement {
+  const requirement = REQUIREMENT_BY_FIELD_ID.get(fieldId);
+  if (requirement === undefined) throw new Error(`未知的 Planner 必填配置：${fieldId}`);
+  return requirement;
+}
+
+/**
+ * 字段在触发后是否属于生成前必填。
+ *
+ * `runtime_type: HARD` 只表示答案进入方案后的约束强度，不代表问题本身必填；
+ * 真正的生成必填由评审后的 `PLANNER_FIELD_REQUIREMENTS` 决定。
+ * 条件必填这里只进入候选清单，是否已触发由前端/后端按 `trigger_code` 判定。
+ */
+export function isPlannerFieldGenerationRequired(field: PlannerFieldSpec): boolean {
+  const mode = plannerFieldRequirement(field.field_id as PlannerFieldId).requirement_mode;
+  return mode === 'BASE_REQUIRED' || mode === 'CONDITIONAL_REQUIRED';
+}
+
+/** 后台配置接口下发给前端的默认生成必填字段清单。 */
+export const PLANNER_GENERATION_REQUIRED_FIELD_IDS: readonly PlannerFieldId[] =
+  PLANNER_FIELDS.filter(isPlannerFieldGenerationRequired).map((field) => field.field_id);
 
 /**
  * field_id → 元数据。

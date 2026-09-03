@@ -30,6 +30,17 @@
   --danger: #e65d65;
   --danger-light: #fff0f1;
 
+  /* 旅行条件状态色：所有按钮、图例、徽标与摘要统一从这里取色。 */
+  --state-require: var(--success);
+  --state-require-light: var(--success-light);
+  --state-require-hover: #108460;
+  --state-prefer: var(--primary);
+  --state-prefer-light: var(--primary-light);
+  --state-prefer-hover: #e2efff;
+  --state-exclude: var(--danger);
+  --state-exclude-light: var(--danger-light);
+  --state-exclude-hover: #ffe4e6;
+
   /*
    * P9 新增的两个令牌。除这两个之外，本块的色值一个不改 ——
    * 用户要求保留 `preview/planner.html` 的配色，而 V2.1 规范 4 章的类型语义表
@@ -686,15 +697,15 @@
 }
 
 .planner-legend__item--hard .planner-legend__swatch {
-  background: var(--success);
+  background: var(--state-require);
 }
 
 .planner-legend__item--prefer .planner-legend__swatch {
-  background: var(--primary);
+  background: var(--state-prefer);
 }
 
 .planner-legend__item--exclude .planner-legend__swatch {
-  background: var(--danger);
+  background: var(--state-exclude);
 }
 
 .planner-legend__item--verify .planner-legend__swatch {
@@ -1089,9 +1100,24 @@
   background: #f0f2f6;
 }
 
-.planner-badge--hard {
-  color: var(--danger);
-  background: var(--danger-light);
+.planner-badge--required {
+  color: var(--state-require);
+  background: var(--state-require-light);
+}
+
+.planner-required-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: -4px 0 20px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .planner-badge--prefer,
@@ -1212,15 +1238,15 @@
 }
 
 .planner-stance-guide__require {
-  color: var(--success);
+  color: var(--state-require);
 }
 
 .planner-stance-guide__prefer {
-  color: var(--primary);
+  color: var(--state-prefer);
 }
 
 .planner-stance-guide__exclude {
-  color: var(--danger);
+  color: var(--state-exclude);
   text-decoration: line-through;
 }
 
@@ -1246,34 +1272,34 @@
 }
 
 .planner-tag--prefer {
-  border-color: var(--primary);
-  background: var(--primary-light);
-  color: var(--primary);
+  border-color: var(--state-prefer);
+  background: var(--state-prefer-light);
+  color: var(--state-prefer);
 }
 
 .planner-tag--require {
-  border-color: var(--success);
-  background: var(--success);
+  border-color: var(--state-require);
+  background: var(--state-require);
   color: #fff;
 }
 
 .planner-tag--exclude {
-  border-color: var(--danger);
-  background: var(--danger-light);
-  color: var(--danger);
+  border-color: var(--state-exclude);
+  background: var(--state-exclude-light);
+  color: var(--state-exclude);
   text-decoration: line-through;
 }
 
 .planner-tag--prefer:hover {
-  background: #e2efff;
+  background: var(--state-prefer-hover);
 }
 
 .planner-tag--require:hover {
-  background: #108460;
+  background: var(--state-require-hover);
 }
 
 .planner-tag--exclude:hover {
-  background: #ffe4e6;
+  background: var(--state-exclude-hover);
 }
 
 /* ── 排序多选 ───────────────────────────────────────────────── */
@@ -1931,18 +1957,18 @@
 }
 
 .planner-chip--must {
-  background: var(--success-light);
-  color: var(--success);
+  background: var(--state-require-light);
+  color: var(--state-require);
 }
 
 .planner-chip--prefer {
-  background: var(--primary-light);
-  color: var(--primary-dark);
+  background: var(--state-prefer-light);
+  color: var(--state-prefer);
 }
 
 .planner-chip--exclude {
-  background: var(--danger-light);
-  color: var(--danger);
+  background: var(--state-exclude-light);
+  color: var(--state-exclude);
 }
 
 .planner-chip--verify {

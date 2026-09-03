@@ -188,6 +188,10 @@ describe('Step State（规范 5.2）', () => {
   it('上游回改能让已完成的步骤退回（规范 5.2 与 S10）', () => {
     const filled = answer(INITIAL_PLANNER_STATE, [
       ...SKELETON,
+      ['PV2-01-008', { trip: { locked_order_types: [] } }],
+      ['PV2-02-004', { travelers: { mobility_level: 'NORMAL' } }],
+      ['PV2-03-001', { budget: { mode: 'UNKNOWN' } }],
+      ['PV2-04-001', { pace: { level: 3 } }],
       ['PV2-06-002', { lodging: { rooms_count: 1 } }],
       [
         'PV2-06-003',
@@ -203,6 +207,14 @@ describe('Step State（规范 5.2）', () => {
 });
 
 describe('Trip State 与三个指标（规范 5.3、17.1）', () => {
+  it('快照与阻塞清单使用后台传入的必填字段', () => {
+    const snapshot = buildSnapshot(INITIAL_PLANNER_STATE, {
+      generationRequiredFieldIds: ['PV2-01-001'],
+    });
+    expect(snapshot.generationRequiredFieldIds).toEqual(['PV2-01-001']);
+    expect(snapshot.blockers).toEqual(['PV2-01-001']);
+  });
+
   it('什么都没填时是 draft，不是 blocked', () => {
     /* 一个刚打开页面的用户不该看到一份 11 项的问题清单 */
     expect(buildSnapshot(INITIAL_PLANNER_STATE).tripState).toBe('draft');
@@ -240,6 +252,10 @@ describe('Trip State 与三个指标（规范 5.3、17.1）', () => {
     const international = answer(INITIAL_PLANNER_STATE, [
       ...SKELETON,
       ['PV2-01-003', { trip: { destinations: [{ text: '东京', country: '日本' }] } }],
+      ['PV2-01-008', { trip: { locked_order_types: [] } }],
+      ['PV2-02-004', { travelers: { mobility_level: 'NORMAL' } }],
+      ['PV2-03-001', { budget: { mode: 'UNKNOWN' } }],
+      ['PV2-04-001', { pace: { level: 3 } }],
       ['PV2-06-002', { lodging: { rooms_count: 1 } }],
       [
         'PV2-06-003',

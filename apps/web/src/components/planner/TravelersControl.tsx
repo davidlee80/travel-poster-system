@@ -131,16 +131,9 @@ function profilesFromCounts(counts: Readonly<Record<AgeBand, number>>): readonly
     for (let index = 0; index < counts[band]; index += 1) {
       profiles.push({
         age_band: band,
-        relation:
-          profiles.length === 0
-            ? 'SELF'
-            : band === 'ADULT'
-              ? index === 1
-                ? 'PARTNER'
-                : 'FRIEND'
-              : band === 'SENIOR'
-                ? 'PARENT'
-                : 'CHILD',
+        // 人数控件只知道年龄段，不能把第二位成人猜成伴侣、把长者
+        // 猜成父母。首位代表用户本人，其余关系保持“其他/未细分”。
+        relation: profiles.length === 0 ? 'SELF' : 'OTHER',
       });
     }
   }

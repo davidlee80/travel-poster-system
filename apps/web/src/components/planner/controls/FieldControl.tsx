@@ -20,7 +20,7 @@ import {
 import { FIELD_STATE_LABEL } from '@/lib/planner/field-state';
 import { readAnswer, type PlannerAction, type PlannerState } from '@/lib/planner/state';
 import type { PlannerSnapshot } from '@/lib/planner/step-state';
-import { TRIGGER_REASON } from '@/lib/planner/triggers';
+import { isRequirementActive, TRIGGER_REASON } from '@/lib/planner/triggers';
 import { validateField } from '@/lib/planner/validation';
 
 import { DevBadge } from './DevBadge';
@@ -66,7 +66,14 @@ export function FieldControl({
   const fieldState = snapshot.states.get(fieldId);
   const error = validateField(state, fieldId);
   const reason = TRIGGER_REASON[fieldId];
-  const showMustBadge = spec.runtime_type === 'HARD';
+  const requirement = snapshot.fieldRequirements.find((entry) => entry.field_id === fieldId);
+  const requirementActive = requirement !== undefined && isRequirementActive(state, requirement);
+  const requirementLabel =
+    requirement?.requirement_mode === 'BASE_REQUIRED'
+      ? '必填项'
+      : requirement?.requirement_mode === 'CONDITIONAL_REQUIRED' && requirementActive
+        ? '当前必填'
+        : null;
 
   const hintId = `${fieldId}-hint`;
   const errorId = `${fieldId}-error`;
@@ -78,6 +85,7 @@ export function FieldControl({
     <div
       className={`planner-section${error === null ? '' : ' planner-field--invalid'}`}
       data-field={fieldId}
+      data-generation-required={requirementActive ? 'true' : 'false'}
       ref={(node) => registerField(fieldId, node)}
       /* tabIndex -1：摘要 chip 回跳时要能 focus() 到这里，但它不该进 Tab 序 */
       tabIndex={-1}
@@ -87,9 +95,18 @@ export function FieldControl({
           {spec.question}
         </strong>
         <span className="planner-section__meta">
-          {showMustBadge ? (
-            <span className="planner-badge planner-badge--hard">必须满足</span>
-          ) : null}
+          {requirementLabel === null ? null : (
+            <span
+              className="planner-badge planner-badge--required"
+              title={
+                requirement?.requirement_mode === 'BASE_REQUIRED'
+                  ? '生成行程所需的基础信息'
+                  : '根据你当前的选择，此项需要补充'
+              }
+            >
+              {requirementLabel}
+            </span>
+          )}
         </span>
       </div>
 

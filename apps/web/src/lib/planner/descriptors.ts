@@ -389,7 +389,10 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   },
   'PV2-02-003': one('choice', { options: MINOR_GUARDIANSHIP_VALUES }),
   'PV2-02-004': one('choice', { options: MOBILITY_LEVEL_VALUES }),
-  'PV2-02-005': one('check-other', { options: CHILD_NEED_VALUES }),
+  'PV2-02-005': one('check-other', {
+    options: CHILD_NEED_VALUES,
+    empty_label: '无特殊安排',
+  }),
   'PV2-02-006': one('check', { options: GROUPING_NEED_VALUES }),
 
   // ── 03 预算取舍 ──────────────────────────────────────────

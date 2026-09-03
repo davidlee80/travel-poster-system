@@ -2,7 +2,15 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
-import { TEMPLATE_ID_VALUES, type TemplateId } from '@tps/schemas';
+import {
+  PLANNER_FIELDS,
+  PLANNER_FIELD_REQUIREMENTS,
+  PLANNER_GENERATION_REQUIRED_FIELD_IDS,
+  TEMPLATE_ID_VALUES,
+  type PlannerFieldId,
+  type PlannerFieldRequirement,
+  type TemplateId,
+} from '@tps/schemas';
 
 import { optionLabel } from '@/lib/planner/field-spec';
 import type { OptionTarget } from '@/lib/planner/config-binding';
@@ -33,6 +41,8 @@ const TEMPLATE_FIELD_KEY = 'output.template_id';
  */
 
 const PlannerConfigContext = createContext<PlannerConfigResponse | null>(null);
+
+const KNOWN_FIELD_IDS = new Set<string>(PLANNER_FIELDS.map((field) => field.field_id));
 
 export function PlannerConfigProvider({
   children,
@@ -118,6 +128,50 @@ export function usePlannerOptionResolver(): (target: OptionTarget) => ResolvedOp
         labelOf: (value) => labels.get(value) ?? fallbackLabel(value),
       };
     };
+  }, [config]);
+}
+
+/**
+ * 后台下发的生成必填字段。
+ *
+ * 旧 API 或配置请求暂不可用时回退共享契约，保证首屏稳定；一旦拿到新版响应，
+ * 后台清单就是权威值（包括空数组），前端不再按 runtime_type 自行推断。
+ */
+export function usePlannerGenerationRequiredFieldIds(): readonly PlannerFieldId[] {
+  const config = useContext(PlannerConfigContext);
+
+  return useMemo(() => {
+    const published = config?.generation_required_field_ids;
+    if (published === undefined) return PLANNER_GENERATION_REQUIRED_FIELD_IDS;
+
+    const unique = new Set<PlannerFieldId>();
+    for (const fieldId of published) {
+      if (KNOWN_FIELD_IDS.has(fieldId) && fieldId !== 'PV2-09-002') unique.add(fieldId);
+    }
+    return [...unique];
+  }, [config]);
+}
+
+/**
+ * 后台发布的完整字段分类。缺少、重复或字段覆盖不完整时整体回退到共享契约，
+ * 避免损坏的配置只让部分问题失去必填约束。
+ */
+export function usePlannerFieldRequirements(): readonly PlannerFieldRequirement[] {
+  const config = useContext(PlannerConfigContext);
+
+  return useMemo(() => {
+    const published = config?.field_requirements;
+    if (published === undefined) return PLANNER_FIELD_REQUIREMENTS;
+
+    const byField = new Map<PlannerFieldId, PlannerFieldRequirement>();
+    for (const requirement of published) {
+      if (!KNOWN_FIELD_IDS.has(requirement.field_id) || byField.has(requirement.field_id)) {
+        return PLANNER_FIELD_REQUIREMENTS;
+      }
+      byField.set(requirement.field_id, requirement);
+    }
+    if (byField.size !== PLANNER_FIELDS.length) return PLANNER_FIELD_REQUIREMENTS;
+    return PLANNER_FIELDS.map((field) => byField.get(field.field_id)!);
   }, [config]);
 }
 

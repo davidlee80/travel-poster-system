@@ -82,7 +82,10 @@ const RICH: PlannerState = {
         { code: 'transport.self_drive', stance: 'PREFER' },
       ],
     },
-    lodging: { types: [{ code: 'accommodation.hotel', stance: 'REQUIRE' }] },
+    lodging: {
+      types: [{ code: 'accommodation.hotel', stance: 'REQUIRE' }],
+      rooms_count: 1,
+    },
     food: { has_allergies: 'YES' },
     interests: {
       tags: ['interest.shopping', 'interest.nightlife', 'interest.food'],
@@ -336,9 +339,11 @@ describe('控件真的渲染出来了', () => {
     );
     expect(html).toContain('data-stance="PREFER"');
     expect(html).toContain('aria-pressed="true"');
-    expect(html).toMatch(/planner-tag__mark[^>]*>♡<\/span><span class="planner-tag__label">/);
-    expect(html).toContain('★ 必须满足');
-    expect(html).toContain('× 明确排除');
+    expect(html).toMatch(/planner-tag__mark[^>]*>♥<\/span><span class="planner-tag__label">/);
+    expect(html).toMatch(/planner-stance-guide__require[^>]*>★<\/span>/);
+    expect(html).toMatch(/planner-stance-guide__exclude[^>]*>×<\/span>/);
+    expect(html).not.toMatch(/>★ 必须满足<\/span>/);
+    expect(html).not.toMatch(/>× 明确排除<\/span>/);
     expect(html).not.toContain('planner-tag__state');
     expect(html).toMatch(/aria-label="[^"]*当前优先考虑/);
   });
@@ -453,10 +458,13 @@ describe('可访问性的可自动化部分（附录 C）', () => {
     expect(dangling).toEqual([]);
   });
 
-  it('三态状态有可访问名称，字段头只显示“必须满足”徽标', () => {
+  it('三态状态有可访问名称，字段头按后台配置显示“必填项”徽标', () => {
     const markup = allMarkup();
     expect(markup).toMatch(/planner-tag--prefer[^>]*aria-label="[^"]*当前优先考虑/);
-    expect(markup).toContain('planner-badge planner-badge--hard">必须满足');
+    expect(markup).toContain('planner-badge planner-badge--required');
+    expect(markup).toMatch(/planner-badge--required[^>]*>必填项<\/span>/);
+    expect(markup).toMatch(/data-field="PV2-01-001"[^>]*data-generation-required="true"/);
+    expect(markup).toMatch(/data-field="PV2-02-004"[^>]*data-generation-required="true"/);
     expect(markup).not.toContain('planner-badge--fact');
   });
 

@@ -1,4 +1,8 @@
-import type { PlannerStepId } from '@tps/schemas';
+import {
+  PLANNER_FIELD_REQUIREMENTS,
+  type PlannerFieldId,
+  type PlannerStepId,
+} from '@tps/schemas';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
@@ -7,7 +11,11 @@ import { OPTION_LISTS } from '@/lib/planner/config-binding';
 import { INITIAL_PLANNER_STATE, type PlannerState } from '@/lib/planner/state';
 import { buildSnapshot } from '@/lib/planner/step-state';
 
-import { PlannerConfigProvider } from './PlannerConfigProvider';
+import {
+  PlannerConfigProvider,
+  usePlannerFieldRequirements,
+  usePlannerGenerationRequiredFieldIds,
+} from './PlannerConfigProvider';
 import { StepPage } from './StepPage';
 
 /**
@@ -40,6 +48,30 @@ function option(key: string, label: string): PlannerConfigOption {
 
 function config(fields: Record<string, readonly PlannerConfigOption[]>): PlannerConfigResponse {
   return { version: 3, published_at: '2026-08-25T00:00:00.000Z', fields };
+}
+
+function RequirementProbe(): React.ReactElement {
+  const fieldIds = usePlannerGenerationRequiredFieldIds();
+  return <output>{fieldIds.join(',')}</output>;
+}
+
+function StructuredRequirementProbe(): React.ReactElement {
+  const requirements = usePlannerFieldRequirements();
+  const lodging = requirements.find((entry) => entry.field_id === 'PV2-06-001');
+  return <output>{`${requirements.length}:${lodging?.requirement_mode ?? 'missing'}`}</output>;
+}
+
+function renderRequirements(fieldIds: readonly PlannerFieldId[]): string {
+  return renderToStaticMarkup(
+    <PlannerConfigProvider
+      value={{
+        ...config({}),
+        generation_required_field_ids: fieldIds,
+      }}
+    >
+      <RequirementProbe />
+    </PlannerConfigProvider>,
+  );
 }
 
 /** 原样把某个列表搬进配置，供「只改一处」的场景当基线 */
@@ -126,6 +158,42 @@ describe('停用一个选项，界面上就没有了', () => {
     expect(after).not.toContain('选项-SHORTLISTED');
     /* 内置文案也不该漏出来 —— 漏出来说明有一条路径绕过了解析器 */
     expect(after).not.toContain('有几个备选');
+  });
+});
+
+describe('必填项来自后台配置', () => {
+  it('使用后台清单，不按前端 runtime_type 补项', () => {
+    const html = renderRequirements(['PV2-01-001', 'PV2-09-005']);
+    expect(html).toContain('PV2-01-001,PV2-09-005');
+    expect(html).not.toContain('PV2-02-001');
+  });
+
+  it('后台明确返回空清单时保持为空', () => {
+    expect(renderRequirements([])).toBe('<output></output>');
+  });
+
+  it('结构化分类完整时采用发布版本，不完整时整体回退', () => {
+    const changed = PLANNER_FIELD_REQUIREMENTS.map((requirement) =>
+      requirement.field_id === 'PV2-06-001'
+        ? {
+            ...requirement,
+            requirement_mode: 'BASE_REQUIRED' as const,
+            blocking_scope: 'PLAN' as const,
+            allow_clear: false,
+          }
+        : requirement,
+    );
+    const renderProbe = (fieldRequirements: typeof changed) =>
+      renderToStaticMarkup(
+        <PlannerConfigProvider
+          value={{ ...config({}), field_requirements: fieldRequirements }}
+        >
+          <StructuredRequirementProbe />
+        </PlannerConfigProvider>,
+      );
+
+    expect(renderProbe(changed)).toBe('<output>76:BASE_REQUIRED</output>');
+    expect(renderProbe(changed.slice(1))).toBe('<output>76:OPTIONAL</output>');
   });
 });
 
