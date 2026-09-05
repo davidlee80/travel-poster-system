@@ -17,37 +17,42 @@
 
 ### 身份与配置
 
-| 方法与路径                   | 请求                                   | 成功响应                     | 代码                           |
-| ---------------------------- | -------------------------------------- | ---------------------------- | ------------------------------ |
-| `GET /api/v1/auth/session`   | Cookie                                 | 当前身份、账号字段、剩余配额 | `routes/auth.ts`               |
-| `POST /api/v1/auth/register` | 手机+验证码，或兼容 email+password     | 201 会话并写 Cookie          | 同上                           |
-| `POST /api/v1/auth/login`    | 手机验证码/密码，或兼容 email+password | 200 会话                     | 同上                           |
-| `POST /api/v1/auth/sms/send` | `{phone,purpose}`                      | 冷却/有效期信息              | 同上 + `phone-verification.ts` |
-| `POST /api/v1/auth/logout`   | Cookie                                 | 204，撤销当前会话            | 同上                           |
-| `POST /api/v1/auth/password` | 当前密码+新密码                        | 204，并撤销其他会话          | 同上                           |
-| `GET /api/v1/planner/config` | 无                                     | 发布版版本、字段选项         | `routes/planner-config.ts`     |
+| 方法与路径                   | 请求                                   | 成功响应                                                                | 代码                           |
+| ---------------------------- | -------------------------------------- | ----------------------------------------------------------------------- | ------------------------------ |
+| `GET /api/v1/auth/session`   | Cookie                                 | 当前身份、账号字段、剩余配额                                            | `routes/auth.ts`               |
+| `POST /api/v1/auth/register` | 手机+验证码，或兼容 email+password     | 201 会话并写 Cookie；每 IP 10/小时、50/日，超限 429 `AUTH_RATE_LIMITED` | 同上                           |
+| `POST /api/v1/auth/login`    | 手机验证码/密码，或兼容 email+password | 200 会话；与注册共享同一 IP 限流口径                                    | 同上                           |
+| `POST /api/v1/auth/sms/send` | `{phone,purpose}`                      | 冷却/有效期信息                                                         | 同上 + `phone-verification.ts` |
+| `POST /api/v1/auth/logout`   | Cookie                                 | 204，撤销当前会话                                                       | 同上                           |
+| `POST /api/v1/auth/password` | 当前密码+新密码                        | 204，并撤销其他会话                                                     | 同上                           |
+| `GET /api/v1/planner/config` | 无                                     | 发布版版本、字段选项                                                    | `routes/planner-config.ts`     |
 
 当前代码已经支持手机账号，而早期 [前端接入契约](../前端接入契约.md) 的身份表仍只列 email。接入身份时应以 `routes/auth.ts` 的 Zod Schema 和 Web `AuthPanel.tsx` 为准。手机号统一转为中国 E.164 `+86...`。
 
+匿名与注册的关系按 2026-09 修订：
+
+- `FEATURE_ANONYMOUS_ENABLED=false` 只关闭**匿名创建**（无会话访问不再现场建号），不关闭**存量匿名数据的归并**——`IdentityService.resolve` / `register` / `login` / `loginPhone` 的归并分支无论开关都执行，老匿名用户登录后历史计划不会被遗弃；
+- 匿名身份即使存在（存量 token 或重新打开入口）也**不能生成**：`POST /travel-plans/generate` 对 `userType === 'ANONYMOUS'` 一律返回 403 `AUTH_ANONYMOUS_FORBIDDEN`；前端 Planner 对匿名用户置灰生成按钮并显示「注册账号后即可生成」。
+
 ### 计划生成与读取
 
-| 方法与路径                                                    | 责任                         | 返回/注意点                                         |
-| ------------------------------------------------------------- | ---------------------------- | --------------------------------------------------- |
-| `POST /api/v1/travel-plans/generate`                          | 校验、标准化、幂等创建并入队 | 201；返回 `request_id/plan_id/job_id/status`        |
-| `GET /api/v1/generation-jobs/:job_id`                         | 轮询状态                     | `status/progress/message/warnings/error/milestones` |
-| `POST /api/v1/generation-jobs/:job_id/cancel`                 | 取消非终态任务               | 已终态按路由语义返回当前结果/冲突                   |
-| `GET /api/v1/travel-plans/:plan_id`                           | 读取当前可用计划 JSON        | `REJECTED` 不暴露；T1 后可读                        |
-| `GET /api/v1/travel-plans/:plan_id/presentations/full`        | 完整页 ViewModel             | T2 后可读；可带版本查询参数                         |
-| `GET /api/v1/travel-plans/:plan_id/presentations/:day_number` | 单日 ViewModel               | 日序号合法且属于当前用户                            |
-| `GET /api/v1/travel-plans`                                    | 当前用户计划列表             | `(created_at,id)` 复合游标分页；前端列表 UI 尚未做  |
+| 方法与路径                                                    | 责任                         | 返回/注意点                                                                                            |
+| ------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `POST /api/v1/travel-plans/generate`                          | 校验、标准化、幂等创建并入队 | 201；返回 `request_id/plan_id/job_id/status`；队列深度 ≥ 40 时 503 `SYS_QUEUE_SATURATED`；匿名身份 403 |
+| `GET /api/v1/generation-jobs/:job_id`                         | 轮询状态                     | `status/progress/message/warnings/error/milestones`                                                    |
+| `POST /api/v1/generation-jobs/:job_id/cancel`                 | 取消非终态任务               | 已终态按路由语义返回当前结果/冲突                                                                      |
+| `GET /api/v1/travel-plans/:plan_id`                           | 读取当前可用计划 JSON        | `REJECTED` 不暴露；T1 后可读                                                                           |
+| `GET /api/v1/travel-plans/:plan_id/presentations/full`        | 完整页 ViewModel             | T2 后可读；可带版本查询参数                                                                            |
+| `GET /api/v1/travel-plans/:plan_id/presentations/:day_number` | 单日 ViewModel               | 日序号合法且属于当前用户                                                                               |
+| `GET /api/v1/travel-plans`                                    | 当前用户计划列表             | `(created_at,id)` 复合游标分页；前端列表 UI 尚未做                                                     |
 
 ### 导出
 
-| 方法与路径                                   | 责任                 | 返回/注意点                             |
-| -------------------------------------------- | -------------------- | --------------------------------------- |
-| `POST /api/v1/travel-plans/:plan_id/exports` | 创建导出任务         | 201；幂等命中/并发竞态时 200 返回原任务 |
-| `GET /api/v1/travel-plans/:plan_id/exports`  | 查询计划的导出历史   | 刷新结果页后恢复进行中与已完成任务      |
-| `GET /api/v1/exports/:export_id`             | 查询结果并签下载 URL | 只按数据库归属授权；完成文件 URL 可重签 |
+| 方法与路径                                   | 责任                 | 返回/注意点                                                                                                         |
+| -------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/v1/travel-plans/:plan_id/exports` | 创建导出任务         | 201；幂等命中/并发竞态时 200 返回原任务；`FAILED` 行可同键重试（迁移 0018 部分唯一索引）；结果复用窗口 7 天（0019） |
+| `GET /api/v1/travel-plans/:plan_id/exports`  | 查询计划的导出历史   | 刷新结果页后恢复进行中与已完成任务                                                                                  |
+| `GET /api/v1/exports/:export_id`             | 查询结果并签下载 URL | 只按数据库归属授权；完成文件 URL 可重签                                                                             |
 
 导出详情的 `files[].file_name` 是后端生成的纯 ASCII 拼音文件名；预签名下载响应
 携带 `Content-Disposition: attachment`。`PNG + ALL_DAYS` 返回逐日 PNG，并附加
@@ -79,7 +84,7 @@
 
 - 用户资源的 SQL 查询必须含 `user_id`，不存在与越权均返回 404，避免枚举资源。
 - 错误体由 `apps/api/src/errors/codes.ts` 构建，领域码定义在 `packages/schemas/src/error-codes.ts`。
-- `retryable` 是服务端判定，不由前端猜测；429 会带 `Retry-After`。
+- `retryable` 是服务端判定，不由前端猜测；429（`SYS_RATE_LIMITED`/`AUTH_RATE_LIMITED`）与 503 `SYS_QUEUE_SATURATED` 都会带 `Retry-After`。
 - 请求 ID 由 Fastify 生成/透传，Trace ID 由 OTel 提供；不得把 Cookie、token、完整请求或计划写日志。
 - 生成与导出都具备应用层幂等和数据库唯一约束，客户端重试应复用同一个意图 ID。
 

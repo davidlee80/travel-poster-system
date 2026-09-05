@@ -8,21 +8,21 @@
 
 ## 当前系统快照
 
-| 维度         | 当前事实                                                                                           |
-| ------------ | -------------------------------------------------------------------------------------------------- |
-| 产品         | 自动生成可浏览旅行计划、每日信息图、PNG 长图和 PDF                                                 |
-| 技术栈       | Node.js 24、TypeScript、pnpm workspace、Turborepo                                                  |
-| Web          | Next.js 15 + React 19                                                                              |
-| API          | Fastify 5                                                                                          |
-| 异步任务     | BullMQ + Redis，生成队列与导出队列分离                                                             |
-| 数据         | PostgreSQL 17 + pgvector；S3/MinIO 对象存储                                                        |
-| 渲染         | Playwright Chromium + sharp + pdf-lib                                                              |
-| 契约         | `packages/schemas` 中的 Zod 定义是单一真相源                                                       |
-| 运行形态     | Linux x86-64/glibc 容器；Windows 可开发但不是正确性基准                                            |
-| 规模快照     | 5 个应用、13 个共享包、14 个前向迁移、约 428 个 TS/TSX 文件、151 个测试文件                        |
-| 实施状态     | V1 实施计划完成 P0–P8；P9 又完成 Planner V2.1 九步/76 字段、多城与弹性日期；其后接入可开关 CR 计费 |
-| 默认身份策略 | `FEATURE_ANONYMOUS_ENABLED=false`，生成前需要注册/登录；匿名实现保留为可回切休眠代码               |
-| 默认计费策略 | `CREDIT_BILLING_ENABLED=false`；打开后三个进程共同执行报价、预留、结算、扣费与退款                 |
+| 维度         | 当前事实                                                                                                                                                                                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 产品         | 自动生成可浏览旅行计划、每日信息图、PNG 长图和 PDF                                                                                                                                                                                                            |
+| 技术栈       | Node.js 24、TypeScript、pnpm workspace、Turborepo                                                                                                                                                                                                             |
+| Web          | Next.js 15 + React 19                                                                                                                                                                                                                                         |
+| API          | Fastify 5                                                                                                                                                                                                                                                     |
+| 异步任务     | BullMQ + Redis，生成队列与导出队列分离                                                                                                                                                                                                                        |
+| 数据         | PostgreSQL 17 + pgvector；S3/MinIO 对象存储                                                                                                                                                                                                                   |
+| 渲染         | Playwright Chromium + sharp + pdf-lib                                                                                                                                                                                                                         |
+| 契约         | `packages/schemas` 中的 Zod 定义是单一真相源                                                                                                                                                                                                                  |
+| 运行形态     | Linux x86-64/glibc 容器；Windows 可开发但不是正确性基准                                                                                                                                                                                                       |
+| 规模快照     | 5 个应用、13 个共享包、20 个前向迁移、约 479 个 TS/TSX 文件、174 个测试文件                                                                                                                                                                                   |
+| 实施状态     | V1 实施计划完成 P0–P8；P9 又完成 Planner V2.1 九步/76 字段、多城与弹性日期；其后接入可开关 CR 计费                                                                                                                                                            |
+| 默认身份策略 | `FEATURE_ANONYMOUS_ENABLED=false`，生成前需要注册/登录；匿名实现保留为可回切休眠代码。注意：即使重新打开匿名入口，生成端点仍按 2026-09 产品决策对匿名身份返回 403 `AUTH_ANONYMOUS_FORBIDDEN`（见 [02](02-端到端主链路.md) 与 [07](07-实施状态与已知边界.md)） |
+| 默认计费策略 | `CREDIT_BILLING_ENABLED=false`；打开后三个进程共同执行报价、预留、结算、扣费与退款                                                                                                                                                                            |
 
 ## 阅读顺序
 
