@@ -8,6 +8,8 @@
 
 24 个 fake 编排用例覆盖**三条链路**（素材解析、计划生成、渲染）的**延迟、故障、并发与降级**，全部不触碰真实外部服务（数据库、Redis、S3、Chromium、LLM、图源）。
 
+> **范围声明**：本文只登记这 24 个「全链路编排」用例。后端的 fake 覆盖远不止于此——身份、生成端点、导出、CR 计费、模型池、数据保留、预算闸等功能的 fake 测试在各自的专门测试文件里，见 [第四节·补充](#四补充本文范围之外的-fake-测试)。读「fake 覆盖了什么」时两处要合起来看：本文的 24 个是**链路编排**，那一节是**按功能分布的其余 fake 测试**。
+
 ## 一、素材解析层（`apps/generation-worker/src/assets/fakes/`）
 
 ### `resolve-assets.full-chain.test.ts`（6 个用例）
@@ -56,7 +58,61 @@
 | 浏览器崩溃后重启 | 崩溃后三个并发 `get()` | 只重启一次（R-84：重启串行，并发共用同一次启动） | L170-196 |
 | 不存在的任务 | `findById` 返回 null | 静默跳过（保留期清理的尾巴，不让 BullMQ 反复重试） | L198-225 |
 
-## 四、按验证维度归类
+## 四、补充：本文范围之外的 fake 测试
+
+上面三节是**链路编排**用例。后端的 fake 覆盖分布在下列专门测试里——它们同样用 fake / 内存依赖（不触真实外部服务），只是按**功能**而非按**链路**组织，因此不进本文的 24 个编排用例，但它们才是「身份、计费、导出、保留」这些功能的 fake 覆盖所在。
+
+> 用例数核实于 2026-09-05，从测试代码 `it/test` 计数读出；数字会随代码变化，冲突时以代码为准。这里只登记「这个功能的 fake 覆盖在哪个文件」，逐用例判据见各文件自身。
+
+### 身份与 API 路由（`apps/api/src/`，fake 依赖见 `fakes/`）
+
+| 功能 | 测试文件 | 用例数 |
+|------|----------|--------|
+| 身份/会话/注册/登录/登出/改密/手机验证码 | `routes/auth.test.ts` | 33 |
+| 生成提交/任务查询/**取消（CANCELLED）**/计划读取/展示/历史列表/幂等/匿名拦截/CR 预留 | `routes/travel-plans.test.ts` | 57 |
+| 导出创建/查询/**PARTIAL**/归属/预签名 | `routes/exports.test.ts` | 25 |
+| 内部素材端点（渲染 SVG） | `routes/internal-assets.test.ts` | 5 |
+| 规划器配置发布/白名单 | `routes/planner-config.test.ts` | 2 |
+
+### CR 计费（三侧钱流，见 [用户货币与计费](../../用户货币与计费.md)）
+
+| 功能 | 测试文件 | 用例数 |
+|------|----------|--------|
+| 生成侧结算/多退少补/坏账 WRITE_OFF/可重试不释放 | `apps/generation-worker/src/billing.test.ts` | 8 |
+| 导出侧失败退款（只 FAILED 退、PARTIAL 不退、幂等） | `apps/render-worker/src/billing.test.ts` | 6 |
+| CR 预留过期回收（hold-sweep） | `apps/retention-worker/src/hold-sweep.test.ts` | 8 |
+
+### 素材子系统（编排之外的功能细节，`apps/generation-worker/src/assets/`）
+
+| 功能 | 测试文件 | 用例数 |
+|------|----------|--------|
+| 素材解析路由/角色分发（编排入口的功能测试） | `resolve-assets.test.ts` | 28 |
+| 模型池/tier 选择/故障转移套用 | `model-selection.test.ts` | 14 |
+| AI 预算闸（次数/耗时/连续失败停用） | `ai-budget.test.ts` | 27 |
+| 搜索预算/单任务上限/连续失败/日预算熔断 | `search-budget.test.ts` | 18 |
+| 搜索入库流水线（五道门禁/去重/合并） | `search-ingest.test.ts` | 35 |
+| AI 生成/后处理/上传/落库 | `generate-asset.test.ts` | 6 |
+| 本地素材库评分/Top30/预算 | `resolvers/local-library.test.ts` | 9 |
+
+### render-worker 导出细节（`apps/render-worker/src/`）
+
+| 功能 | 测试文件 | 用例数 |
+|------|----------|--------|
+| 导出执行/scope→页面/**PARTIAL 判定**/上传 | `run-export.test.ts` | 10 |
+| PDF 生成/合并/缩放修正 | `pdf.test.ts`、`pdf-scale.test.ts` | 见文件 |
+| PNG ALL_DAYS 的 ZIP 打包 | `daily-png-zip.test.ts` | 见文件 |
+
+### retention-worker（数据保留/清理，`apps/retention-worker/src/`）
+
+| 功能 | 测试文件 | 用例数 |
+|------|----------|--------|
+| 匿名用户到期清理/知识转存/级联删除 | `purge.test.ts` | 13 |
+| 导出对象存储清理（按 DB 归属，禁按前缀） | `objects.test.ts` | 8 |
+| 内容查找 CLI（UUIDv7 范围） | `content-cli.test.ts` | 15 |
+
+> **为什么这些不并进上面的 24 个？** 24 个用例验证的是「一个请求穿过整条链路时，各环节的延迟/故障/降级如何联动」；上表验证的是「单个功能自身的行为分支」。前者是**编排**，后者是**单元/路由**。把它们混进一张表会让「链路里哪一环没测」和「哪个功能没测」这两个不同的问题互相遮蔽。
+
+## 五、按验证维度归类
 
 ### 时序类（延迟/超时不阻断或正确降级）
 
@@ -88,7 +144,7 @@
 - 向量化失败写 `planEmbedding: null`
 - 不存在任务静默跳过
 
-## 五、已知边界
+## 六、已知边界
 
 **fake 是默认值。** 除非显式配 `IMAGE_MODE=direct|gateway` 与真实凭据，否则整条 AI 路径不会被走到 —— 包括候选池、预算闸与故障转移。
 
@@ -96,7 +152,7 @@
 
 **接口漂移由编译期拦住**：fake 实现继承真实接口，接口加方法时 TypeScript 立刻报错。
 
-## 六、改动联动清单
+## 七、改动联动清单
 
 | 改什么 | 必须同步检查 |
 |--------|-------------|
