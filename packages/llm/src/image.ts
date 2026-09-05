@@ -1,4 +1,4 @@
-import type { AssetWarningCode } from '@tps/schemas';
+import type { AssetRole, AssetWarningCode } from '@tps/schemas';
 
 import { LlmConfigError, assertBaseUrlHasNoApiVersion } from './config.js';
 
@@ -101,6 +101,14 @@ export interface ImageRequest {
    * 占着连接与上游算力直到自己超时，而此刻已经没人在等它的结果。
    */
   readonly signal?: AbortSignal;
+  /**
+   * 槽位角色（可选，用于测试编排）。
+   *
+   * 生产代码（`ai-generator.ts` / `generate-asset.ts`）会带上它；真实实现
+   * 忽略该字段、按 `prompt` 与尺寸生成，fake 实现用它做精确的按角色编排
+   * （`FakeAiGeneratorOptions.byRole`）。
+   */
+  readonly role?: AssetRole;
 }
 
 export interface ImageResult {

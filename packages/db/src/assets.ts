@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import type { AssetRole } from '@tps/schemas';
 
 /**
  * 素材库仓储（TP-3-09、TP-3-13、TP-3-06，设计稿 10.2、19.4、十五章）。
@@ -53,6 +54,14 @@ export interface FindCandidatesQuery {
   readonly destinationName?: string | null;
   /** 10.2 第 1 步：Top 30 */
   readonly limit: number;
+  /**
+   * 槽位角色（可选，用于测试编排）。
+   *
+   * 生产代码（`local-library.ts`）会带上它；真实实现忽略该字段、按
+   * `entityName`/`destinationPlaceId`/`destinationName` 过滤，fake 实现
+   * 用它做精确的按角色编排（`FakeLocalLibraryOptions.byRole`）。
+   */
+  readonly role?: AssetRole;
 }
 
 export interface InsertAssetInput {

@@ -1,4 +1,4 @@
-import type { AspectRatio, AssetWarningCode, LicenseType } from '@tps/schemas';
+import type { AspectRatio, AssetRole, AssetWarningCode, LicenseType } from '@tps/schemas';
 
 import { LlmConfigError } from './config.js';
 
@@ -61,6 +61,13 @@ export interface LicensedSourceQuery {
   readonly minWidth: number;
   /** 候选数上限。逐个尝试直到有一个通过入库门禁 */
   readonly limit: number;
+  /**
+   * 槽位角色（可选，用于测试编排）。
+   *
+   * 生产代码（`search-ingest.ts`）会带上它；真实实现忽略该字段、按 `text`
+   * 检索，fake 实现用它做精确的按角色编排（`FakeLicensedSourceOptions.byRole`）。
+   */
+  readonly role?: AssetRole;
 }
 
 /**

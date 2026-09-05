@@ -142,6 +142,8 @@ export async function ingestSearchResult(
       aspectRatio: item.visual_constraints.aspect_ratio,
       minWidth: item.visual_constraints.min_width,
       limit: SEARCH_CANDIDATE_LIMIT,
+      // 真实实现忽略它；fake 编排按它路由（见 LicensedSourceQuery.role）
+      role: item.role,
     },
     deps.searchTimeoutMs,
   );

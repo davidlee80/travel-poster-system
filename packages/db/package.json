@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@tps/billing": "workspace:*",
+    "@tps/schemas": "workspace:*",
     "@tps/shared": "workspace:*",
     "pg": "^8.16.3"
   },

@@ -179,6 +179,8 @@ export async function resolveFromLocalLibrary(
     destinationPlaceId: requirement.destinationPlaceId,
     destinationName: requirement.destinationName,
     limit: options.candidateLimit ?? CANDIDATE_LIMIT,
+    // 真实实现忽略它；fake 编排按它路由（见 FindCandidatesQuery.role）
+    role: item.role,
   });
 
   const usable = rows.filter(isUsable);

@@ -207,6 +207,8 @@ export async function resolveByAi(
         height: size.height,
         seed,
         timeoutMs: deps.imageTimeoutMs,
+        // 真实实现忽略它；fake 编排按它路由（见 ImageRequest.role）
+        role: item.role,
       });
     } finally {
       // 失败的调用同样花了时间：超时的那 40 秒是实打实从 T2 窗口里走掉的

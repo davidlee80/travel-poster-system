@@ -126,6 +126,8 @@ export async function generateAiAsset(
     height: size.height,
     seed: seedForCacheKey(request.cache_key),
     timeoutMs: deps.imageTimeoutMs,
+    // 真实实现忽略它；fake 编排按它路由（见 ImageRequest.role）
+    role,
   });
 
   const metadata = metadataFor(request, {
