@@ -344,27 +344,35 @@ export function DateRange({ value, onChange, id, describedBy }: ControlProps): R
 
   return (
     <div
-      className="planner-range"
+      className="planner-range planner-date-range"
       id={id}
       {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}
     >
-      <input
-        className="planner-input planner-input--date"
-        type="date"
-        aria-label="出发日期"
-        value={draft.start}
-        onChange={(event) => write(event.target.value, draft.end)}
-      />
+      <label className="planner-date-range__field">
+        <span className="planner-label">出发日期</span>
+        <input
+          className="planner-input planner-input--date"
+          type="date"
+          aria-label="出发日期"
+          value={draft.start}
+          onChange={(event) => write(event.target.value, draft.end)}
+        />
+      </label>
       <span className="planner-range__sep" aria-hidden="true">
         至
       </span>
-      <input
-        className="planner-input planner-input--date"
-        type="date"
-        aria-label="返回日期"
-        value={draft.end}
-        onChange={(event) => write(draft.start, event.target.value)}
-      />
+      <label className="planner-date-range__field">
+        <span className="planner-label">
+          返回日期 <span className="planner-label__opt">（可调整）</span>
+        </span>
+        <input
+          className="planner-input planner-input--date"
+          type="date"
+          aria-label="返回日期"
+          value={draft.end}
+          onChange={(event) => write(draft.start, event.target.value)}
+        />
+      </label>
     </div>
   );
 }

@@ -40,3 +40,47 @@ Final result: **passed**
 - Docker image build and local `tps-web` recreation: passed.
 - Playwright against `http://localhost:8080`: 9 passed, 0 failed.
 - The unauthenticated session endpoint returns the expected 401 in the complete stack; no application exception was observed.
+
+---
+
+## 旅行轮廓页视觉与交互验收
+
+## 验收对象
+
+- 参考图：`D:\Doc\Travel_Idea\design\page-1.png`
+- 本地页面：`http://localhost:3002/`
+- 验收日期：2026-09-04
+- 桌面视口：1600 × 2200
+- 手机视口：390 × 844
+
+## 视觉对照
+
+已将参考图和交互填充后的实现截图放入同一张对照图检查，结果通过。
+
+- 对照图：`out/qa/outline-comparison.png`
+- 桌面实现：`out/qa/travel-outline.png`
+- 手机实现：`out/qa/travel-outline-mobile.png`
+
+通过项：
+
+- 白色圆角主卡、浅灰蓝画布、轻阴影和蓝色主标题与参考稿一致。
+- 页码、说明文字、分区标题、虚线分隔与底部主按钮形成同一视觉层级。
+- 日期使用两列布局；窄屏自动改为单列。
+- 目的地使用编号行、地点图标、国家/地区、排序操作和虚线添加入口。
+- 单选与多选沿用系统蓝色选中态，必填徽标沿用全站语义色。
+- 未添加后端契约不存在的“逐目的地抵达日期、停留天数、抵达方式”字段，避免保存假数据。
+
+## 交互验收
+
+自动化点击并断言以下路径：
+
+1. 填写出发地与国家/地区。
+2. 选择出发日期和返回日期，确认输入值正常回显。
+3. 选择目的地状态。
+4. 连续添加两个目的地并填写国家/地区。
+5. 将第二个目的地上移，确认顺序由“上海、杭州”变成“杭州、上海”。
+6. 选择日期弹性、旅行目的和三项旅行目标。
+7. 选择“暂无不可变预订”。
+8. 在 390px 宽度检查页面横向溢出，结果为 `false`。
+
+最终结果：通过。

@@ -3316,3 +3316,327 @@
     aspect-ratio: 3 / 4;
   }
 }
+
+/* ── 第 1 步：旅行轮廓（page-1 参考稿）────────────────────── */
+
+/*
+ * 第 1 步保留通用字段控件与 76 字段绑定，只重排视觉层级。目的地行不展示
+ * “停留天数 / 抵达方式”等契约中不存在的假字段；后端一旦建模，可在同一行扩展。
+ */
+.planner-step-page[data-step='01'] {
+  padding: 34px 36px 30px;
+  border-color: #dce4ef;
+  border-radius: 22px;
+  box-shadow: 0 18px 52px rgb(40 67 112 / 9%);
+}
+
+.planner-step-page[data-step='01'] .planner-page-head {
+  margin-bottom: 30px;
+}
+
+.planner-step-page[data-step='01'] .planner-page-head__eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.09em;
+}
+
+.planner-step-page[data-step='01'] .planner-page-head__title {
+  margin-top: 7px;
+  font-size: clamp(26px, 3.2vw, 34px);
+  line-height: 1.18;
+}
+
+.planner-step-page[data-step='01'] .planner-page-head__desc {
+  max-width: 680px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.planner-step-page[data-step='01'] .planner-page-head__badge {
+  padding: 8px 13px;
+  font-size: 12px;
+}
+
+.planner-step-page[data-step='01'] .planner-required-legend {
+  display: none;
+}
+
+.planner-step-page[data-step='01'] .planner-block {
+  margin-top: 30px;
+  padding-top: 28px;
+  border-top: 1px dashed #dfe5ee;
+}
+
+.planner-step-page[data-step='01'] .planner-required-legend + .planner-block {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 22px;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.planner-step-page[data-step='01'] .planner-required-legend + .planner-block > .planner-block__title,
+.planner-step-page[data-step='01'] .planner-required-legend + .planner-block > .planner-block__intro,
+.planner-step-page[data-step='01'] [data-field='PV2-01-001'],
+.planner-step-page[data-step='01'] [data-field='PV2-01-002'],
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'],
+.planner-step-page[data-step='01'] [data-field='PV2-01-004'],
+.planner-step-page[data-step='01'] [data-field='PV2-01-005'] {
+  grid-column: 1 / -1;
+}
+
+.planner-step-page[data-step='01'] .planner-block__title {
+  margin-bottom: 7px;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.planner-step-page[data-step='01'] .planner-block__intro {
+  margin-bottom: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.planner-step-page[data-step='01'] .planner-section__title {
+  font-size: 14px;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-001'] {
+  order: 1;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-004'] {
+  order: 2;
+  margin-top: 18px;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-002'] {
+  order: 3;
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px dashed #dfe5ee;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] {
+  order: 4;
+  margin-top: 18px;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-005'] {
+  order: 5;
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px dashed #dfe5ee;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-001'] .planner-place {
+  flex-wrap: nowrap;
+}
+
+.planner-place__text {
+  position: relative;
+  display: flex;
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.planner-place__icon {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  z-index: 1;
+  color: #33415c;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.planner-input--place {
+  padding-left: 44px;
+}
+
+.planner-step-page[data-step='01'] .planner-input,
+.planner-step-page[data-step='01'] .planner-select {
+  min-height: 48px;
+  border-color: #d9e2ee;
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+.planner-step-page[data-step='01'] .planner-date-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  align-items: end;
+}
+
+.planner-step-page[data-step='01'] .planner-date-range__field {
+  min-width: 0;
+}
+
+.planner-step-page[data-step='01'] .planner-date-range__field .planner-label {
+  margin-bottom: 8px;
+}
+
+.planner-step-page[data-step='01'] .planner-date-range .planner-input--date {
+  max-width: none;
+}
+
+.planner-step-page[data-step='01'] .planner-date-range .planner-range__sep {
+  display: none;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-list-row {
+  display: grid;
+  grid-template-columns: 24px 34px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin: 0;
+  padding: 17px 18px;
+  border: 1px solid #dfe6f0;
+  background: #fff;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-list-row:first-child {
+  border-radius: 15px 15px 0 0;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-list-row:last-of-type {
+  border-radius: 0 0 15px 15px;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-list-row + .planner-list-row {
+  border-top: 0;
+}
+
+.planner-list-row__handle {
+  display: grid;
+  color: #9aa7b9;
+  place-items: center;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-list-row__num {
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  color: #fff;
+  background: var(--primary);
+  font-size: 13px;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-place {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.45fr) minmax(120px, 0.75fr);
+  flex-wrap: nowrap;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-input--country {
+  max-width: none;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-rank__actions {
+  gap: 6px;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-icon-button {
+  width: auto;
+  height: 32px;
+  padding: 0 8px;
+  color: #667288;
+  font-size: 11px;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-icon-button:last-child {
+  border-color: #ffd1d4;
+  color: var(--danger);
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-add-card {
+  min-height: 58px;
+  margin-top: 14px;
+  border-color: #bdcce4;
+  background: #fff;
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-add-card__plus {
+  width: auto;
+  height: auto;
+  border: 0;
+  background: transparent;
+  font-size: 24px;
+}
+
+.planner-step-page[data-step='01'] .planner-choice {
+  min-height: 43px;
+  padding: 10px 15px;
+  border-color: #d9e2ee;
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.planner-step-page[data-step='01'] .planner-choice--on {
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.planner-step-page[data-step='01'] [data-field='PV2-01-007'],
+.planner-step-page[data-step='01'] [data-field='PV2-01-009'] {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top-color: #dfe5ee;
+}
+
+.planner-step-page[data-step='01'] .planner-actions {
+  margin-top: 30px;
+  padding-top: 22px;
+}
+
+.planner-step-page[data-step='01'] .planner-button--primary {
+  min-height: 48px;
+  padding-inline: 22px;
+  border-radius: 12px;
+  box-shadow: 0 8px 18px rgb(52 120 246 / 22%);
+}
+
+@media (width <= 820px) {
+  .planner-step-page[data-step='01'] {
+    padding: 24px;
+    border-radius: 18px;
+  }
+
+  .planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-list-row {
+    grid-template-columns: 24px 32px minmax(0, 1fr);
+  }
+
+  .planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-rank__actions {
+    grid-column: 3;
+    justify-self: end;
+  }
+}
+
+@media (width <= 600px) {
+  .planner-step-page[data-step='01'] {
+    padding: 18px 16px;
+  }
+
+  .planner-step-page[data-step='01'] .planner-date-range,
+  .planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-place {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .planner-step-page[data-step='01'] [data-field='PV2-01-001'] .planner-place {
+    flex-wrap: wrap;
+  }
+
+  .planner-step-page[data-step='01'] [data-field='PV2-01-001'] .planner-input--country {
+    max-width: none;
+  }
+
+  .planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-list-row {
+    grid-template-columns: 22px 30px minmax(0, 1fr);
+    padding: 14px 12px;
+  }
+
+  .planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-rank__actions {
+    grid-column: 2 / -1;
+  }
+}

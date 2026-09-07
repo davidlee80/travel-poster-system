@@ -2,6 +2,8 @@
 
 import { asList } from '@/lib/planner/field-io';
 
+import { Icon } from '@/components/Icon';
+
 import type { ControlProps } from './control-props';
 
 /**
@@ -57,16 +59,19 @@ function PlaceFields({
 }): React.ReactElement {
   return (
     <div className="planner-place">
-      <input
-        className="planner-input"
-        type="text"
-        id={`${idPrefix}-text`}
-        aria-label={`${label}地点`}
-        placeholder={placeholder}
-        maxLength={200}
-        value={place.text}
-        onChange={(event) => onChange(packPlace(event.target.value, place.country ?? ''))}
-      />
+      <span className="planner-place__text">
+        <Icon name="map" size={20} className="planner-place__icon" />
+        <input
+          className="planner-input planner-input--place"
+          type="text"
+          id={`${idPrefix}-text`}
+          aria-label={`${label}地点`}
+          placeholder={placeholder}
+          maxLength={200}
+          value={place.text}
+          onChange={(event) => onChange(packPlace(event.target.value, place.country ?? ''))}
+        />
+      </span>
       <input
         className="planner-input planner-input--country"
         type="text"
@@ -135,6 +140,9 @@ export function PlaceList({
       {places.map((place, index) => (
         /* key 用下标：行内容可编辑且允许重名，用值做 key 会让两行同名时互相抢占输入焦点 */
         <div className="planner-list-row planner-list-row--place" key={index}>
+          <span className="planner-list-row__handle" title="可用右侧按钮调整顺序">
+            <Icon name="route" size={18} />
+          </span>
           <span className="planner-list-row__num" aria-hidden="true">
             {index + 1}
           </span>
@@ -157,7 +165,7 @@ export function PlaceList({
               disabled={index === 0}
               onClick={() => move(index, -1)}
             >
-              ↑
+              上移
             </button>
             <button
               type="button"
@@ -166,7 +174,7 @@ export function PlaceList({
               disabled={index === places.length - 1}
               onClick={() => move(index, 1)}
             >
-              ↓
+              下移
             </button>
             <button
               type="button"
@@ -174,7 +182,7 @@ export function PlaceList({
               aria-label={`删除第 ${index + 1} 个目的地`}
               onClick={() => write(places.filter((_, i) => i !== index))}
             >
-              ✕
+              删除
             </button>
           </span>
         </div>

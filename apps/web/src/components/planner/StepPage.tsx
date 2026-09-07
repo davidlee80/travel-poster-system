@@ -76,6 +76,7 @@ export function StepPage({
   return (
     <section
       className={`planner-panel planner-step-page${active ? ' planner-step-page--active' : ''}`}
+      data-step={step}
       aria-labelledby={`planner-step-title-${step}`}
       /*
        * `aria-hidden` 与 display:none 一起用是多余的（display:none 已经把子树
