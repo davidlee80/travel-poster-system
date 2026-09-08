@@ -437,7 +437,7 @@ export function DestinationList({
               disabled={index === 0}
               onClick={() => move(index, -1)}
             >
-              上移
+              ↑
             </button>
             <button
               type="button"
@@ -446,15 +446,15 @@ export function DestinationList({
               disabled={index === destinations.length - 1}
               onClick={() => move(index, 1)}
             >
-              下移
+              ↓
             </button>
             <button
               type="button"
-              className="planner-icon-button"
+              className="planner-icon-button planner-icon-button--danger"
               aria-label={`删除第 ${index + 1} 个目的地`}
               onClick={() => write(destinations.filter((_, i) => i !== index))}
             >
-              删除
+              ✕
             </button>
           </span>
         </div>
