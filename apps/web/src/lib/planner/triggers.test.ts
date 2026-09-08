@@ -274,7 +274,7 @@ describe('S4 国际旅行（D-02 跨境链）', () => {
 
   it('国家未知时不触发跨境 —— 误触发会让国内游用户被问护照', () => {
     const unknownCountry = answer(DOMESTIC_TWO_ADULTS, [
-      ['PV2-01-003', { trip: { destinations: [{ text: '某地' }] } }],
+      ['PV2-01-003', { trip: { destinations: [{ text: '某地', country: '' }] } }],
     ]);
     expect(buildTriggerContext(unknownCountry.answers).isInternational).toBe(false);
     expect(isTriggered(unknownCountry, 'PV2-08-006')).toBe(false);

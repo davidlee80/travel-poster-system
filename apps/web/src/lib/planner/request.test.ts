@@ -160,7 +160,10 @@ describe('产出的请求体能通过契约', () => {
 
   it('单目的地时不置 allow_multiple_destinations', () => {
     const body = buildPlannerRequest(
-      stateWith({ ...COMPLETE, trip: { ...COMPLETE.trip, destinations: [{ text: '东京' }] } }),
+      stateWith({
+        ...COMPLETE,
+        trip: { ...COMPLETE.trip, destinations: [{ text: '东京', country: '日本' }] },
+      }),
       OPTIONS,
     );
     expect(body.trip.destination.allow_multiple_destinations).toBe(false);
@@ -217,7 +220,12 @@ describe('提交前的清洗与盖章', () => {
   it('剔掉空占位行', () => {
     const answers = prepareProfile(
       {
-        trip: { destinations: [{ text: '东京' }, { text: '  ' }] },
+        trip: {
+          destinations: [
+            { text: '东京', country: '日本' },
+            { text: '  ', country: '' },
+          ],
+        },
         interests: {
           must_do: [{ text: 'teamLab' }, { text: '' }],
           wish_and_exclude: { wish: ['', '奈良'], exclude: [] },

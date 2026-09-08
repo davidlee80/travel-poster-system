@@ -5,6 +5,7 @@ import { asList } from '@/lib/planner/field-io';
 import { Icon } from '@/components/Icon';
 
 import type { ControlProps } from './control-props';
+import { PlaceSelector } from './PlaceSelector';
 
 /**
  * 地点选择器与可增删地点列表。
@@ -148,33 +149,41 @@ function DestinationFields({
   destination,
   onChange,
   idPrefix,
-  placeholder,
   label,
+  part,
+  apiKey,
+  describedBy,
 }: {
   readonly destination: DestinationValue;
   readonly onChange: (next: DestinationValue | undefined) => void;
   readonly idPrefix: string;
-  readonly placeholder: string;
   readonly label: string;
+  readonly part: ControlProps['part'];
+  readonly apiKey: string;
+  readonly describedBy?: string;
 }): React.ReactElement {
   return (
     <div className="planner-destination">
-      <PlaceFields
-        place={destination}
+      <PlaceSelector
+        value={destination}
         onChange={(next) => {
-          if (next === undefined) {
+          if (next === undefined || next === null) {
             onChange(undefined);
             return;
           }
-          onChange({
-            ...destination,
-            text: next.text,
-            ...(next.country === undefined ? {} : { country: next.country }),
-          });
+          if (typeof next === 'object' && 'text' in next && 'country' in next) {
+            onChange({
+              ...destination,
+              ...(next as Partial<DestinationValue>),
+            });
+          }
         }}
-        idPrefix={idPrefix}
-        placeholder={placeholder}
-        label={label}
+        part={part}
+        apiKey={apiKey}
+        id={idPrefix}
+        options={[]}
+        labelOf={(v) => v}
+        {...(describedBy === undefined ? {} : { describedBy })}
       />
       <div className="planner-destination__extras">
         <span className="planner-destination__field">
@@ -268,28 +277,6 @@ function DestinationFields({
     </div>
   );
 }
-
-export function PlacePicker({
-  value,
-  onChange,
-  part,
-  id,
-  describedBy,
-}: ControlProps): React.ReactElement {
-  return (
-    <div id={id} {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}>
-      <PlaceFields
-        place={asPlace(value)}
-        onChange={onChange}
-        idPrefix={id}
-        placeholder={part.placeholder ?? '城市'}
-        label=""
-      />
-      <p className="planner-hint">国家用来判断是否跨境 —— 跨境时我们才会问签证与证件。</p>
-    </div>
-  );
-}
-
 /** 可增删地点列表。**数组顺序即行程顺序**，因此要能上下移动 */
 export function PlaceList({
   value,
@@ -394,6 +381,7 @@ export function DestinationList({
   value,
   onChange,
   part,
+  apiKey,
   id,
   describedBy,
 }: ControlProps): React.ReactElement {
@@ -436,8 +424,10 @@ export function DestinationList({
               write(list);
             }}
             idPrefix={`${id}-${index}`}
-            placeholder="城市"
             label={`第 ${index + 1} 个目的地的`}
+            part={part}
+            apiKey={apiKey}
+            {...(describedBy === undefined ? {} : { describedBy })}
           />
           <span className="planner-rank__actions">
             <button

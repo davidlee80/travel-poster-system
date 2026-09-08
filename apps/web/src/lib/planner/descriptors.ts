@@ -212,7 +212,6 @@ export const CONTROL_PRIMITIVES = [
   'text-list',
   'bool',
   'place',
-  'place-list',
   'destination-list',
   'object-list',
 ] as const;

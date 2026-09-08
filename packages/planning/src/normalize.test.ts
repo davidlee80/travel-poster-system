@@ -323,13 +323,19 @@ describe('P9 新增字段全部可选（陷阱 2）', () => {
         },
         planner_profile: {
           trip: {
-            destinations: [{ text: '东京' }, { text: '京都' }],
+            destinations: [
+              { text: '东京', country: '日本' },
+              { text: '京都', country: '日本' },
+            ],
             date_flexibility: 'PLUS_MINUS_3',
           },
         },
       }),
     );
-    expect(planCities(normalized)).toEqual([{ text: '东京' }, { text: '京都' }]);
+    expect(planCities(normalized)).toEqual([
+      { text: '东京', country: '日本' },
+      { text: '京都', country: '日本' },
+    ]);
     expect(isMultiCity(normalized)).toBe(true);
     expect(normalized.date_flexibility).toEqual({ days: 3, mode: 'PLUS_MINUS_3' });
     expect(planFlexibilityDays(normalized)).toBe(3);

@@ -390,7 +390,9 @@ describe('N-10 目的地数量 1～5（P9 放开）', () => {
         },
         dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 0 },
       },
-      planner_profile: { trip: { destinations: names.map((text) => ({ text })) } },
+      planner_profile: {
+        trip: { destinations: names.map((text) => ({ text, country: '日本' })) },
+      },
     });
 
   it('两到五个城市都通过', () => {
@@ -419,7 +421,14 @@ describe('N-10 目的地数量 1～5（P9 放开）', () => {
         destination: { mode: 'FIXED', text: '东京', allow_multiple_destinations: false },
         dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 0 },
       },
-      planner_profile: { trip: { destinations: [{ text: '东京' }, { text: '京都' }] } },
+      planner_profile: {
+        trip: {
+          destinations: [
+            { text: '东京', country: '日本' },
+            { text: '京都', country: '日本' },
+          ],
+        },
+      },
     });
     const n10 = check(understated).find((v) => v.rule === 'N-10');
     expect(n10?.field).toBe('trip.destination.allow_multiple_destinations');
@@ -430,7 +439,7 @@ describe('N-10 目的地数量 1～5（P9 放开）', () => {
         destination: { mode: 'FIXED', text: '东京', allow_multiple_destinations: true },
         dates: { start_date: '2026-04-10', end_date: '2026-04-14', flexibility_days: 0 },
       },
-      planner_profile: { trip: { destinations: [{ text: '东京' }] } },
+      planner_profile: { trip: { destinations: [{ text: '东京', country: '日本' }] } },
     });
     expect(rules(overstated)).toContain('N-10');
   });

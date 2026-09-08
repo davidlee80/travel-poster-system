@@ -1,0 +1,666 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2026-09-08",
+  "countries": [
+    {
+      "code": "CN",
+      "name": "中国",
+      "cities": [
+        { "id": "cn-beijing", "name": "北京", "lat": 39.9042, "lng": 116.4074 },
+        { "id": "cn-shanghai", "name": "上海", "lat": 31.2304, "lng": 121.4737 },
+        { "id": "cn-guangzhou", "name": "广州", "lat": 23.1291, "lng": 113.2644 },
+        { "id": "cn-shenzhen", "name": "深圳", "lat": 22.5431, "lng": 114.0579 },
+        { "id": "cn-hangzhou", "name": "杭州", "lat": 30.2741, "lng": 120.1551 },
+        { "id": "cn-chengdu", "name": "成都", "lat": 30.5728, "lng": 104.0668 },
+        { "id": "cn-chongqing", "name": "重庆", "lat": 29.5630, "lng": 106.5516 },
+        { "id": "cn-xian", "name": "西安", "lat": 34.3416, "lng": 108.9398 },
+        { "id": "cn-nanjing", "name": "南京", "lat": 32.0603, "lng": 118.7969 },
+        { "id": "cn-wuhan", "name": "武汉", "lat": 30.5928, "lng": 114.3055 },
+        { "id": "cn-suzhou", "name": "苏州", "lat": 31.2989, "lng": 120.5853 },
+        { "id": "cn-tianjin", "name": "天津", "lat": 39.0851, "lng": 117.1993 },
+        { "id": "cn-qingdao", "name": "青岛", "lat": 36.0671, "lng": 120.3826 },
+        { "id": "cn-dalian", "name": "大连", "lat": 38.9140, "lng": 121.6147 },
+        { "id": "cn-xiamen", "name": "厦门", "lat": 24.4798, "lng": 118.0894 },
+        { "id": "cn-kunming", "name": "昆明", "lat": 25.0389, "lng": 102.7183 },
+        { "id": "cn-sanya", "name": "三亚", "lat": 18.2528, "lng": 109.5119 },
+        { "id": "cn-lhasa", "name": "拉萨", "lat": 29.6520, "lng": 91.1721 },
+        { "id": "cn-urumqi", "name": "乌鲁木齐", "lat": 43.8256, "lng": 87.6168 },
+        { "id": "cn-harbin", "name": "哈尔滨", "lat": 45.8038, "lng": 126.5349 },
+        { "id": "cn-shenyang", "name": "沈阳", "lat": 41.8057, "lng": 123.4315 },
+        { "id": "cn-changchun", "name": "长春", "lat": 43.8171, "lng": 125.3235 },
+        { "id": "cn-jinan", "name": "济南", "lat": 36.6512, "lng": 117.1201 },
+        { "id": "cn-zhengzhou", "name": "郑州", "lat": 34.7466, "lng": 113.6254 },
+        { "id": "cn-changsha", "name": "长沙", "lat": 28.2282, "lng": 112.9388 },
+        { "id": "cn-nanchang", "name": "南昌", "lat": 28.6820, "lng": 115.8582 },
+        { "id": "cn-fuzhou", "name": "福州", "lat": 26.0745, "lng": 119.2965 },
+        { "id": "cn-hefei", "name": "合肥", "lat": 31.8206, "lng": 117.2272 },
+        { "id": "cn-shijiazhuang", "name": "石家庄", "lat": 38.0428, "lng": 114.5149 },
+        { "id": "cn-taiyuan", "name": "太原", "lat": 37.8706, "lng": 112.5489 },
+        { "id": "cn-hohhot", "name": "呼和浩特", "lat": 40.8426, "lng": 111.7492 },
+        { "id": "cn-lanzhou", "name": "兰州", "lat": 36.0611, "lng": 103.8343 },
+        { "id": "cn-xining", "name": "西宁", "lat": 36.6171, "lng": 101.7782 },
+        { "id": "cn-yinchuan", "name": "银川", "lat": 38.4872, "lng": 106.2309 },
+        { "id": "cn-guiyang", "name": "贵阳", "lat": 26.6470, "lng": 106.6302 },
+        { "id": "cn-nanning", "name": "南宁", "lat": 22.8170, "lng": 108.3669 },
+        { "id": "cn-haikou", "name": "海口", "lat": 20.0444, "lng": 110.1989 },
+        { "id": "cn-hongkong", "name": "香港", "lat": 22.3193, "lng": 114.1694 },
+        { "id": "cn-macau", "name": "澳门", "lat": 22.1987, "lng": 113.5439 },
+        { "id": "cn-taipei", "name": "台北", "lat": 25.0330, "lng": 121.5654 }
+      ]
+    },
+    {
+      "code": "JP",
+      "name": "日本",
+      "cities": [
+        { "id": "jp-tokyo", "name": "东京", "lat": 35.6762, "lng": 139.6503 },
+        { "id": "jp-osaka", "name": "大阪", "lat": 34.6937, "lng": 135.5023 },
+        { "id": "jp-kyoto", "name": "京都", "lat": 35.0116, "lng": 135.7681 },
+        { "id": "jp-sapporo", "name": "札幌", "lat": 43.0618, "lng": 141.3545 },
+        { "id": "jp-fukuoka", "name": "福冈", "lat": 33.5904, "lng": 130.4017 },
+        { "id": "jp-nagoya", "name": "名古屋", "lat": 35.1815, "lng": 136.9066 },
+        { "id": "jp-yokohama", "name": "横滨", "lat": 35.4437, "lng": 139.6380 },
+        { "id": "jp-kobe", "name": "神户", "lat": 34.6901, "lng": 135.1955 },
+        { "id": "jp-hiroshima", "name": "广岛", "lat": 34.3853, "lng": 132.4553 },
+        { "id": "jp-sendai", "name": "仙台", "lat": 38.2682, "lng": 140.8694 },
+        { "id": "jp-naha", "name": "那霸", "lat": 26.2124, "lng": 127.6809 },
+        { "id": "jp-kanazawa", "name": "金泽", "lat": 36.5613, "lng": 136.6562 },
+        { "id": "jp-takayama", "name": "高山", "lat": 36.1467, "lng": 137.2519 },
+        { "id": "jp-nara", "name": "奈良", "lat": 34.6851, "lng": 135.8048 },
+        { "id": "jp-nikko", "name": "日光", "lat": 36.7199, "lng": 139.6982 }
+      ]
+    },
+    {
+      "code": "KR",
+      "name": "韩国",
+      "cities": [
+        { "id": "kr-seoul", "name": "首尔", "lat": 37.5665, "lng": 126.9780 },
+        { "id": "kr-busan", "name": "釜山", "lat": 35.1796, "lng": 129.0756 },
+        { "id": "kr-jeju", "name": "济州岛", "lat": 33.4996, "lng": 126.5312 },
+        { "id": "kr-incheon", "name": "仁川", "lat": 37.4563, "lng": 126.7052 },
+        { "id": "kr-daegu", "name": "大邱", "lat": 35.8714, "lng": 128.6014 },
+        { "id": "kr-gwangju", "name": "光州", "lat": 35.1595, "lng": 126.8526 },
+        { "id": "kr-daejeon", "name": "大田", "lat": 36.3504, "lng": 127.3845 },
+        { "id": "kr-suwon", "name": "水原", "lat": 37.2636, "lng": 127.0286 }
+      ]
+    },
+    {
+      "code": "TH",
+      "name": "泰国",
+      "cities": [
+        { "id": "th-bangkok", "name": "曼谷", "lat": 13.7563, "lng": 100.5018 },
+        { "id": "th-chiangmai", "name": "清迈", "lat": 18.7883, "lng": 98.9853 },
+        { "id": "th-phuket", "name": "普吉岛", "lat": 7.8804, "lng": 98.3923 },
+        { "id": "th-pattaya", "name": "芭提雅", "lat": 12.9236, "lng": 100.8825 },
+        { "id": "th-krabi", "name": "甲米", "lat": 8.0863, "lng": 98.9063 },
+        { "id": "th-samui", "name": "苏梅岛", "lat": 9.5120, "lng": 100.0136 },
+        { "id": "th-huahin", "name": "华欣", "lat": 12.5685, "lng": 99.9576 },
+        { "id": "th-ayutthaya", "name": "大城", "lat": 14.3692, "lng": 100.5876 }
+      ]
+    },
+    {
+      "code": "SG",
+      "name": "新加坡",
+      "cities": [
+        { "id": "sg-singapore", "name": "新加坡", "lat": 1.3521, "lng": 103.8198 }
+      ]
+    },
+    {
+      "code": "MY",
+      "name": "马来西亚",
+      "cities": [
+        { "id": "my-kualalumpur", "name": "吉隆坡", "lat": 3.1390, "lng": 101.6869 },
+        { "id": "my-penang", "name": "槟城", "lat": 5.4164, "lng": 100.3327 },
+        { "id": "my-langkawi", "name": "兰卡威", "lat": 6.3500, "lng": 99.8000 },
+        { "id": "my-malacca", "name": "马六甲", "lat": 2.1896, "lng": 102.2501 },
+        { "id": "my-kotakinabalu", "name": "亚庇", "lat": 5.9804, "lng": 116.0735 }
+      ]
+    },
+    {
+      "code": "VN",
+      "name": "越南",
+      "cities": [
+        { "id": "vn-hanoi", "name": "河内", "lat": 21.0285, "lng": 105.8542 },
+        { "id": "vn-hochiminh", "name": "胡志明市", "lat": 10.8231, "lng": 106.6297 },
+        { "id": "vn-danang", "name": "岘港", "lat": 16.0544, "lng": 108.2022 },
+        { "id": "vn-hoian", "name": "会安", "lat": 15.8801, "lng": 108.3380 },
+        { "id": "vn-nhatrang", "name": "芽庄", "lat": 12.2388, "lng": 109.1967 },
+        { "id": "vn-halong", "name": "下龙湾", "lat": 20.9101, "lng": 107.1839 }
+      ]
+    },
+    {
+      "code": "ID",
+      "name": "印度尼西亚",
+      "cities": [
+        { "id": "id-jakarta", "name": "雅加达", "lat": -6.2088, "lng": 106.8456 },
+        { "id": "id-bali", "name": "巴厘岛", "lat": -8.3405, "lng": 115.0920 },
+        { "id": "id-yogyakarta", "name": "日惹", "lat": -7.7956, "lng": 110.3695 },
+        { "id": "id-surabaya", "name": "泗水", "lat": -7.2575, "lng": 112.7521 },
+        { "id": "id-bandung", "name": "万隆", "lat": -6.9175, "lng": 107.6191 }
+      ]
+    },
+    {
+      "code": "PH",
+      "name": "菲律宾",
+      "cities": [
+        { "id": "ph-manila", "name": "马尼拉", "lat": 14.5995, "lng": 120.9842 },
+        { "id": "ph-cebu", "name": "宿务", "lat": 10.3157, "lng": 123.8854 },
+        { "id": "ph-boracay", "name": "长滩岛", "lat": 11.9674, "lng": 121.9248 },
+        { "id": "ph-palawan", "name": "巴拉望", "lat": 9.8349, "lng": 118.7384 },
+        { "id": "ph-bohol", "name": "薄荷岛", "lat": 9.8500, "lng": 124.1435 }
+      ]
+    },
+    {
+      "code": "US",
+      "name": "美国",
+      "cities": [
+        { "id": "us-newyork", "name": "纽约", "lat": 40.7128, "lng": -74.0060 },
+        { "id": "us-losangeles", "name": "洛杉矶", "lat": 34.0522, "lng": -118.2437 },
+        { "id": "us-sanfrancisco", "name": "旧金山", "lat": 37.7749, "lng": -122.4194 },
+        { "id": "us-lasvegas", "name": "拉斯维加斯", "lat": 36.1699, "lng": -115.1398 },
+        { "id": "us-chicago", "name": "芝加哥", "lat": 41.8781, "lng": -87.6298 },
+        { "id": "us-seattle", "name": "西雅图", "lat": 47.6062, "lng": -122.3321 },
+        { "id": "us-boston", "name": "波士顿", "lat": 42.3601, "lng": -71.0589 },
+        { "id": "us-washington", "name": "华盛顿", "lat": 38.9072, "lng": -77.0369 },
+        { "id": "us-miami", "name": "迈阿密", "lat": 25.7617, "lng": -80.1918 },
+        { "id": "us-honolulu", "name": "檀香山", "lat": 21.3069, "lng": -157.8583 },
+        { "id": "us-sandiego", "name": "圣地亚哥", "lat": 32.7157, "lng": -117.1611 },
+        { "id": "us-orlando", "name": "奥兰多", "lat": 28.5383, "lng": -81.3792 },
+        { "id": "us-atlanta", "name": "亚特兰大", "lat": 33.7490, "lng": -84.3880 },
+        { "id": "us-denver", "name": "丹佛", "lat": 39.7392, "lng": -104.9903 },
+        { "id": "us-portland", "name": "波特兰", "lat": 45.5152, "lng": -122.6784 }
+      ]
+    },
+    {
+      "code": "GB",
+      "name": "英国",
+      "cities": [
+        { "id": "gb-london", "name": "伦敦", "lat": 51.5074, "lng": -0.1278 },
+        { "id": "gb-edinburgh", "name": "爱丁堡", "lat": 55.9533, "lng": -3.1883 },
+        { "id": "gb-manchester", "name": "曼彻斯特", "lat": 53.4808, "lng": -2.2426 },
+        { "id": "gb-liverpool", "name": "利物浦", "lat": 53.4084, "lng": -2.9916 },
+        { "id": "gb-oxford", "name": "牛津", "lat": 51.7520, "lng": -1.2577 },
+        { "id": "gb-cambridge", "name": "剑桥", "lat": 52.2053, "lng": 0.1218 },
+        { "id": "gb-bath", "name": "巴斯", "lat": 51.3810, "lng": -2.3590 },
+        { "id": "gb-york", "name": "约克", "lat": 53.9590, "lng": -1.0815 }
+      ]
+    },
+    {
+      "code": "FR",
+      "name": "法国",
+      "cities": [
+        { "id": "fr-paris", "name": "巴黎", "lat": 48.8566, "lng": 2.3522 },
+        { "id": "fr-nice", "name": "尼斯", "lat": 43.7102, "lng": 7.2620 },
+        { "id": "fr-lyon", "name": "里昂", "lat": 45.7640, "lng": 4.8357 },
+        { "id": "fr-marseille", "name": "马赛", "lat": 43.2965, "lng": 5.3698 },
+        { "id": "fr-bordeaux", "name": "波尔多", "lat": 44.8378, "lng": -0.5792 },
+        { "id": "fr-strasbourg", "name": "斯特拉斯堡", "lat": 48.5734, "lng": 7.7521 },
+        { "id": "fr-cannes", "name": "戛纳", "lat": 43.5528, "lng": 7.0174 },
+        { "id": "fr-avignon", "name": "阿维尼翁", "lat": 43.9493, "lng": 4.8055 }
+      ]
+    },
+    {
+      "code": "IT",
+      "name": "意大利",
+      "cities": [
+        { "id": "it-rome", "name": "罗马", "lat": 41.9028, "lng": 12.4964 },
+        { "id": "it-venice", "name": "威尼斯", "lat": 45.4408, "lng": 12.3155 },
+        { "id": "it-florence", "name": "佛罗伦萨", "lat": 43.7696, "lng": 11.2558 },
+        { "id": "it-milan", "name": "米兰", "lat": 45.4642, "lng": 9.1900 },
+        { "id": "it-naples", "name": "那不勒斯", "lat": 40.8518, "lng": 14.2681 },
+        { "id": "it-turin", "name": "都灵", "lat": 45.0703, "lng": 7.6869 },
+        { "id": "it-pisa", "name": "比萨", "lat": 43.7228, "lng": 10.4017 },
+        { "id": "it-verona", "name": "维罗纳", "lat": 45.4384, "lng": 10.9916 },
+        { "id": "it-amalfi", "name": "阿马尔菲", "lat": 40.6340, "lng": 14.6027 },
+        { "id": "it-cinque-terre", "name": "五渔村", "lat": 44.1061, "lng": 9.7281 }
+      ]
+    },
+    {
+      "code": "ES",
+      "name": "西班牙",
+      "cities": [
+        { "id": "es-madrid", "name": "马德里", "lat": 40.4168, "lng": -3.7038 },
+        { "id": "es-barcelona", "name": "巴塞罗那", "lat": 41.3851, "lng": 2.1734 },
+        { "id": "es-seville", "name": "塞维利亚", "lat": 37.3891, "lng": -5.9845 },
+        { "id": "es-granada", "name": "格拉纳达", "lat": 37.1773, "lng": -3.5986 },
+        { "id": "es-valencia", "name": "瓦伦西亚", "lat": 39.4699, "lng": -0.3763 },
+        { "id": "es-bilbao", "name": "毕尔巴鄂", "lat": 43.2630, "lng": -2.9350 },
+        { "id": "es-toledo", "name": "托莱多", "lat": 39.8628, "lng": -4.0273 },
+        { "id": "es-cordoba", "name": "科尔多瓦", "lat": 37.8882, "lng": -4.7794 }
+      ]
+    },
+    {
+      "code": "DE",
+      "name": "德国",
+      "cities": [
+        { "id": "de-berlin", "name": "柏林", "lat": 52.5200, "lng": 13.4050 },
+        { "id": "de-munich", "name": "慕尼黑", "lat": 48.1351, "lng": 11.5820 },
+        { "id": "de-frankfurt", "name": "法兰克福", "lat": 50.1109, "lng": 8.6821 },
+        { "id": "de-hamburg", "name": "汉堡", "lat": 53.5511, "lng": 9.9937 },
+        { "id": "de-cologne", "name": "科隆", "lat": 50.9375, "lng": 6.9603 },
+        { "id": "de-heidelberg", "name": "海德堡", "lat": 49.3988, "lng": 8.6724 },
+        { "id": "de-dresden", "name": "德累斯顿", "lat": 51.0504, "lng": 13.7373 },
+        { "id": "de-rothenburg", "name": "罗滕堡", "lat": 49.3769, "lng": 10.1789 }
+      ]
+    },
+    {
+      "code": "CH",
+      "name": "瑞士",
+      "cities": [
+        { "id": "ch-zurich", "name": "苏黎世", "lat": 47.3769, "lng": 8.5417 },
+        { "id": "ch-geneva", "name": "日内瓦", "lat": 46.2044, "lng": 6.1432 },
+        { "id": "ch-lucerne", "name": "卢塞恩", "lat": 47.0502, "lng": 8.3093 },
+        { "id": "ch-interlaken", "name": "因特拉肯", "lat": 46.6863, "lng": 7.8632 },
+        { "id": "ch-zermatt", "name": "采尔马特", "lat": 46.0207, "lng": 7.7491 },
+        { "id": "ch-bern", "name": "伯尔尼", "lat": 46.9480, "lng": 7.4474 },
+        { "id": "ch-basel", "name": "巴塞尔", "lat": 47.5596, "lng": 7.5886 }
+      ]
+    },
+    {
+      "code": "AT",
+      "name": "奥地利",
+      "cities": [
+        { "id": "at-vienna", "name": "维也纳", "lat": 48.2082, "lng": 16.3738 },
+        { "id": "at-salzburg", "name": "萨尔茨堡", "lat": 47.8095, "lng": 13.0550 },
+        { "id": "at-innsbruck", "name": "因斯布鲁克", "lat": 47.2692, "lng": 11.4041 },
+        { "id": "at-hallstatt", "name": "哈尔施塔特", "lat": 47.5622, "lng": 13.6493 },
+        { "id": "at-graz", "name": "格拉茨", "lat": 47.0707, "lng": 15.4395 }
+      ]
+    },
+    {
+      "code": "NL",
+      "name": "荷兰",
+      "cities": [
+        { "id": "nl-amsterdam", "name": "阿姆斯特丹", "lat": 52.3676, "lng": 4.9041 },
+        { "id": "nl-rotterdam", "name": "鹿特丹", "lat": 51.9244, "lng": 4.4777 },
+        { "id": "nl-hague", "name": "海牙", "lat": 52.0705, "lng": 4.3007 },
+        { "id": "nl-utrecht", "name": "乌得勒支", "lat": 52.0907, "lng": 5.1214 },
+        { "id": "nl-giethoorn", "name": "羊角村", "lat": 52.7419, "lng": 6.0777 }
+      ]
+    },
+    {
+      "code": "BE",
+      "name": "比利时",
+      "cities": [
+        { "id": "be-brussels", "name": "布鲁塞尔", "lat": 50.8503, "lng": 4.3517 },
+        { "id": "be-bruges", "name": "布鲁日", "lat": 51.2093, "lng": 3.2247 },
+        { "id": "be-antwerp", "name": "安特卫普", "lat": 51.2194, "lng": 4.4025 },
+        { "id": "be-ghent", "name": "根特", "lat": 51.0543, "lng": 3.7174 }
+      ]
+    },
+    {
+      "code": "CZ",
+      "name": "捷克",
+      "cities": [
+        { "id": "cz-prague", "name": "布拉格", "lat": 50.0755, "lng": 14.4378 },
+        { "id": "cz-cesky-krumlov", "name": "克鲁姆洛夫", "lat": 48.8127, "lng": 14.3175 },
+        { "id": "cz-brno", "name": "布尔诺", "lat": 49.1951, "lng": 16.6068 },
+        { "id": "cz-karlovy-vary", "name": "卡罗维发利", "lat": 50.2318, "lng": 12.8712 }
+      ]
+    },
+    {
+      "code": "HU",
+      "name": "匈牙利",
+      "cities": [
+        { "id": "hu-budapest", "name": "布达佩斯", "lat": 47.4979, "lng": 19.0402 },
+        { "id": "hu-eger", "name": "埃格尔", "lat": 47.9026, "lng": 20.3772 },
+        { "id": "hu-pecs", "name": "佩奇", "lat": 46.0727, "lng": 18.2323 }
+      ]
+    },
+    {
+      "code": "PL",
+      "name": "波兰",
+      "cities": [
+        { "id": "pl-warsaw", "name": "华沙", "lat": 52.2297, "lng": 21.0122 },
+        { "id": "pl-krakow", "name": "克拉科夫", "lat": 50.0647, "lng": 19.9450 },
+        { "id": "pl-gdansk", "name": "格但斯克", "lat": 54.3520, "lng": 18.6466 },
+        { "id": "pl-wroclaw", "name": "弗罗茨瓦夫", "lat": 51.1079, "lng": 17.0385 },
+        { "id": "pl-zakopane", "name": "扎科帕内", "lat": 49.2992, "lng": 19.9496 }
+      ]
+    },
+    {
+      "code": "GR",
+      "name": "希腊",
+      "cities": [
+        { "id": "gr-athens", "name": "雅典", "lat": 37.9838, "lng": 23.7275 },
+        { "id": "gr-santorini", "name": "圣托里尼", "lat": 36.3932, "lng": 25.4615 },
+        { "id": "gr-mykonos", "name": "米科诺斯", "lat": 37.4467, "lng": 25.3289 },
+        { "id": "gr-crete", "name": "克里特岛", "lat": 35.2401, "lng": 24.8093 },
+        { "id": "gr-rhodes", "name": "罗德岛", "lat": 36.4341, "lng": 28.2176 },
+        { "id": "gr-meteora", "name": "迈泰奥拉", "lat": 39.7217, "lng": 21.6306 }
+      ]
+    },
+    {
+      "code": "PT",
+      "name": "葡萄牙",
+      "cities": [
+        { "id": "pt-lisbon", "name": "里斯本", "lat": 38.7223, "lng": -9.1393 },
+        { "id": "pt-porto", "name": "波尔图", "lat": 41.1579, "lng": -8.6291 },
+        { "id": "pt-sintra", "name": "辛特拉", "lat": 38.8029, "lng": -9.3817 },
+        { "id": "pt-faro", "name": "法鲁", "lat": 37.0194, "lng": -7.9304 },
+        { "id": "pt-madeira", "name": "马德拉", "lat": 32.6669, "lng": -16.9241 }
+      ]
+    },
+    {
+      "code": "AU",
+      "name": "澳大利亚",
+      "cities": [
+        { "id": "au-sydney", "name": "悉尼", "lat": -33.8688, "lng": 151.2093 },
+        { "id": "au-melbourne", "name": "墨尔本", "lat": -37.8136, "lng": 144.9631 },
+        { "id": "au-brisbane", "name": "布里斯班", "lat": -27.4698, "lng": 153.0251 },
+        { "id": "au-perth", "name": "珀斯", "lat": -31.9505, "lng": 115.8605 },
+        { "id": "au-goldcoast", "name": "黄金海岸", "lat": -28.0167, "lng": 153.4000 },
+        { "id": "au-cairns", "name": "凯恩斯", "lat": -16.9203, "lng": 145.7710 },
+        { "id": "au-adelaide", "name": "阿德莱德", "lat": -34.9285, "lng": 138.6007 },
+        { "id": "au-hobart", "name": "霍巴特", "lat": -42.8821, "lng": 147.3272 },
+        { "id": "au-darwin", "name": "达尔文", "lat": -12.4634, "lng": 130.8456 },
+        { "id": "au-uluru", "name": "乌鲁鲁", "lat": -25.3444, "lng": 131.0369 }
+      ]
+    },
+    {
+      "code": "NZ",
+      "name": "新西兰",
+      "cities": [
+        { "id": "nz-auckland", "name": "奥克兰", "lat": -36.8485, "lng": 174.7633 },
+        { "id": "nz-wellington", "name": "惠灵顿", "lat": -41.2865, "lng": 174.7762 },
+        { "id": "nz-queenstown", "name": "皇后镇", "lat": -45.0312, "lng": 168.6626 },
+        { "id": "nz-christchurch", "name": "基督城", "lat": -43.5321, "lng": 172.6362 },
+        { "id": "nz-rotorua", "name": "罗托鲁瓦", "lat": -38.1368, "lng": 176.2497 },
+        { "id": "nz-milford-sound", "name": "米尔福德峡湾", "lat": -44.6719, "lng": 167.9250 },
+        { "id": "nz-franz-josef", "name": "弗朗茨约瑟夫冰川", "lat": -43.4672, "lng": 170.1842 }
+      ]
+    },
+    {
+      "code": "CA",
+      "name": "加拿大",
+      "cities": [
+        { "id": "ca-toronto", "name": "多伦多", "lat": 43.6532, "lng": -79.3832 },
+        { "id": "ca-vancouver", "name": "温哥华", "lat": 49.2827, "lng": -123.1207 },
+        { "id": "ca-montreal", "name": "蒙特利尔", "lat": 45.5017, "lng": -73.5673 },
+        { "id": "ca-quebec", "name": "魁北克城", "lat": 46.8139, "lng": -71.2080 },
+        { "id": "ca-banff", "name": "班夫", "lat": 51.1784, "lng": -115.5708 },
+        { "id": "ca-calgary", "name": "卡尔加里", "lat": 51.0447, "lng": -114.0719 },
+        { "id": "ca-ottawa", "name": "渥太华", "lat": 45.4215, "lng": -75.6972 },
+        { "id": "ca-niagara", "name": "尼亚加拉", "lat": 43.0896, "lng": -79.0849 },
+        { "id": "ca-victoria", "name": "维多利亚", "lat": 48.4284, "lng": -123.3656 },
+        { "id": "ca-whistler", "name": "惠斯勒", "lat": 50.1163, "lng": -122.9574 }
+      ]
+    },
+    {
+      "code": "AE",
+      "name": "阿联酋",
+      "cities": [
+        { "id": "ae-dubai", "name": "迪拜", "lat": 25.2048, "lng": 55.2708 },
+        { "id": "ae-abudhabi", "name": "阿布扎比", "lat": 24.4539, "lng": 54.3773 },
+        { "id": "ae-sharjah", "name": "沙迦", "lat": 25.3463, "lng": 55.4209 }
+      ]
+    },
+    {
+      "code": "TR",
+      "name": "土耳其",
+      "cities": [
+        { "id": "tr-istanbul", "name": "伊斯坦布尔", "lat": 41.0082, "lng": 28.9784 },
+        { "id": "tr-cappadocia", "name": "卡帕多奇亚", "lat": 38.6431, "lng": 34.8289 },
+        { "id": "tr-antalya", "name": "安塔利亚", "lat": 36.8841, "lng": 30.7056 },
+        { "id": "tr-pamukkale", "name": "棉花堡", "lat": 37.9205, "lng": 29.1206 },
+        { "id": "tr-izmir", "name": "伊兹密尔", "lat": 38.4237, "lng": 27.1428 },
+        { "id": "tr-bodrum", "name": "博德鲁姆", "lat": 37.0344, "lng": 27.4305 }
+      ]
+    },
+    {
+      "code": "EG",
+      "name": "埃及",
+      "cities": [
+        { "id": "eg-cairo", "name": "开罗", "lat": 30.0444, "lng": 31.2357 },
+        { "id": "eg-luxor", "name": "卢克索", "lat": 25.6872, "lng": 32.6396 },
+        { "id": "eg-aswan", "name": "阿斯旺", "lat": 24.0889, "lng": 32.8998 },
+        { "id": "eg-alexandria", "name": "亚历山大", "lat": 31.2001, "lng": 29.9187 },
+        { "id": "eg-sharm", "name": "沙姆沙伊赫", "lat": 27.9158, "lng": 34.3300 },
+        { "id": "eg-hurghada", "name": "赫尔格达", "lat": 27.2579, "lng": 33.8116 }
+      ]
+    },
+    {
+      "code": "MA",
+      "name": "摩洛哥",
+      "cities": [
+        { "id": "ma-marrakech", "name": "马拉喀什", "lat": 31.6295, "lng": -7.9811 },
+        { "id": "ma-casablanca", "name": "卡萨布兰卡", "lat": 33.5731, "lng": -7.5898 },
+        { "id": "ma-fes", "name": "非斯", "lat": 34.0181, "lng": -5.0078 },
+        { "id": "ma-chefchaouen", "name": "舍夫沙万", "lat": 35.1689, "lng": -5.2636 },
+        { "id": "ma-rabat", "name": "拉巴特", "lat": 34.0209, "lng": -6.8416 },
+        { "id": "ma-tangier", "name": "丹吉尔", "lat": 35.7595, "lng": -5.8340 }
+      ]
+    },
+    {
+      "code": "ZA",
+      "name": "南非",
+      "cities": [
+        { "id": "za-capetown", "name": "开普敦", "lat": -33.9249, "lng": 18.4241 },
+        { "id": "za-johannesburg", "name": "约翰内斯堡", "lat": -26.2041, "lng": 28.0473 },
+        { "id": "za-durban", "name": "德班", "lat": -29.8587, "lng": 31.0218 },
+        { "id": "za-kruger", "name": "克鲁格国家公园", "lat": -23.9884, "lng": 31.5547 },
+        { "id": "za-stellenbosch", "name": "斯泰伦博斯", "lat": -33.9321, "lng": 18.8602 }
+      ]
+    },
+    {
+      "code": "IS",
+      "name": "冰岛",
+      "cities": [
+        { "id": "is-reykjavik", "name": "雷克雅未克", "lat": 64.1466, "lng": -21.9426 },
+        { "id": "is-vik", "name": "维克", "lat": 63.4186, "lng": -19.0060 },
+        { "id": "is-akureyri", "name": "阿克雷里", "lat": 65.6885, "lng": -18.1262 },
+        { "id": "is-jokulsarlon", "name": "杰古沙龙冰河湖", "lat": 64.0784, "lng": -16.2306 }
+      ]
+    },
+    {
+      "code": "NO",
+      "name": "挪威",
+      "cities": [
+        { "id": "no-oslo", "name": "奥斯陆", "lat": 59.9139, "lng": 10.7522 },
+        { "id": "no-bergen", "name": "卑尔根", "lat": 60.3913, "lng": 5.3221 },
+        { "id": "no-tromso", "name": "特罗姆瑟", "lat": 69.6496, "lng": 18.9560 },
+        { "id": "no-stavanger", "name": "斯塔万格", "lat": 58.9700, "lng": 5.7331 },
+        { "id": "no-geiranger", "name": "盖朗厄尔峡湾", "lat": 62.1049, "lng": 7.2069 },
+        { "id": "no-lofoten", "name": "罗弗敦群岛", "lat": 68.1533, "lng": 13.6058 }
+      ]
+    },
+    {
+      "code": "FI",
+      "name": "芬兰",
+      "cities": [
+        { "id": "fi-helsinki", "name": "赫尔辛基", "lat": 60.1699, "lng": 24.9384 },
+        { "id": "fi-rovaniemi", "name": "罗瓦涅米", "lat": 66.5039, "lng": 25.7294 },
+        { "id": "fi-tampere", "name": "坦佩雷", "lat": 61.4978, "lng": 23.7610 },
+        { "id": "fi-turku", "name": "图尔库", "lat": 60.4518, "lng": 22.2666 }
+      ]
+    },
+    {
+      "code": "SE",
+      "name": "瑞典",
+      "cities": [
+        { "id": "se-stockholm", "name": "斯德哥尔摩", "lat": 59.3293, "lng": 18.0686 },
+        { "id": "se-gothenburg", "name": "哥德堡", "lat": 57.7089, "lng": 11.9746 },
+        { "id": "se-malmo", "name": "马尔默", "lat": 55.6050, "lng": 13.0038 },
+        { "id": "se-uppsala", "name": "乌普萨拉", "lat": 59.8586, "lng": 17.6389 },
+        { "id": "se-kiruna", "name": "基律纳", "lat": 67.8558, "lng": 20.2253 }
+      ]
+    },
+    {
+      "code": "DK",
+      "name": "丹麦",
+      "cities": [
+        { "id": "dk-copenhagen", "name": "哥本哈根", "lat": 55.6761, "lng": 12.5683 },
+        { "id": "dk-aarhus", "name": "奥胡斯", "lat": 56.1629, "lng": 10.2039 },
+        { "id": "dk-odense", "name": "欧登塞", "lat": 55.4038, "lng": 10.4024 },
+        { "id": "dk-aalborg", "name": "奥尔堡", "lat": 57.0488, "lng": 9.9217 }
+      ]
+    },
+    {
+      "code": "RU",
+      "name": "俄罗斯",
+      "cities": [
+        { "id": "ru-moscow", "name": "莫斯科", "lat": 55.7558, "lng": 37.6173 },
+        { "id": "ru-stpetersburg", "name": "圣彼得堡", "lat": 59.9343, "lng": 30.3351 },
+        { "id": "ru-kazan", "name": "喀山", "lat": 55.8304, "lng": 49.0661 },
+        { "id": "ru-sochi", "name": "索契", "lat": 43.5855, "lng": 39.7231 },
+        { "id": "ru-vladivostok", "name": "符拉迪沃斯托克", "lat": 43.1155, "lng": 131.8855 },
+        { "id": "ru-irkutsk", "name": "伊尔库茨克", "lat": 52.2870, "lng": 104.3050 },
+        { "id": "ru-yekaterinburg", "name": "叶卡捷琳堡", "lat": 56.8389, "lng": 60.6057 }
+      ]
+    },
+    {
+      "code": "IN",
+      "name": "印度",
+      "cities": [
+        { "id": "in-delhi", "name": "新德里", "lat": 28.6139, "lng": 77.2090 },
+        { "id": "in-mumbai", "name": "孟买", "lat": 19.0760, "lng": 72.8777 },
+        { "id": "in-jaipur", "name": "斋浦尔", "lat": 26.9124, "lng": 75.7873 },
+        { "id": "in-agra", "name": "阿格拉", "lat": 27.1767, "lng": 78.0081 },
+        { "id": "in-varanasi", "name": "瓦拉纳西", "lat": 25.3176, "lng": 82.9739 },
+        { "id": "in-goa", "name": "果阿", "lat": 15.2993, "lng": 74.1240 },
+        { "id": "in-kerala", "name": "喀拉拉邦", "lat": 10.8505, "lng": 76.2711 },
+        { "id": "in-udaipur", "name": "乌代浦尔", "lat": 24.5854, "lng": 73.7125 },
+        { "id": "in-amritsar", "name": "阿姆利则", "lat": 31.6340, "lng": 74.8723 },
+        { "id": "in-rishikesh", "name": "瑞诗凯诗", "lat": 30.0869, "lng": 78.2676 }
+      ]
+    },
+    {
+      "code": "NP",
+      "name": "尼泊尔",
+      "cities": [
+        { "id": "np-kathmandu", "name": "加德满都", "lat": 27.7172, "lng": 85.3240 },
+        { "id": "np-pokhara", "name": "博卡拉", "lat": 28.2096, "lng": 83.9856 },
+        { "id": "np-bhaktapur", "name": "巴克塔普尔", "lat": 27.6710, "lng": 85.4298 },
+        { "id": "np-chitwan", "name": "奇特旺", "lat": 27.5291, "lng": 84.3542 },
+        { "id": "np-lumbini", "name": "蓝毗尼", "lat": 27.4833, "lng": 83.2833 }
+      ]
+    },
+    {
+      "code": "LK",
+      "name": "斯里兰卡",
+      "cities": [
+        { "id": "lk-colombo", "name": "科伦坡", "lat": 6.9271, "lng": 79.8612 },
+        { "id": "lk-kandy", "name": "康提", "lat": 7.2906, "lng": 80.6337 },
+        { "id": "lk-galle", "name": "加勒", "lat": 6.0535, "lng": 80.2210 },
+        { "id": "lk-sigiriya", "name": "锡吉里耶", "lat": 7.9570, "lng": 80.7603 },
+        { "id": "lk-nuwara-eliya", "name": "努沃勒埃利耶", "lat": 6.9497, "lng": 80.7891 },
+        { "id": "lk-mirissa", "name": "米瑞莎", "lat": 5.9497, "lng": 80.4585 }
+      ]
+    },
+    {
+      "code": "MV",
+      "name": "马尔代夫",
+      "cities": [
+        { "id": "mv-male", "name": "马累", "lat": 4.1755, "lng": 73.5093 },
+        { "id": "mv-hulhumale", "name": "胡鲁马累", "lat": 4.2167, "lng": 73.5500 },
+        { "id": "mv-maafushi", "name": "马富士岛", "lat": 3.9333, "lng": 73.4833 }
+      ]
+    },
+    {
+      "code": "KH",
+      "name": "柬埔寨",
+      "cities": [
+        { "id": "kh-siem-reap", "name": "暹粒", "lat": 13.3633, "lng": 103.8564 },
+        { "id": "kh-phnom-penh", "name": "金边", "lat": 11.5564, "lng": 104.9282 },
+        { "id": "kh-sihanoukville", "name": "西哈努克", "lat": 10.6349, "lng": 103.5112 },
+        { "id": "kh-battambang", "name": "马德望", "lat": 13.0957, "lng": 103.2022 }
+      ]
+    },
+    {
+      "code": "LA",
+      "name": "老挝",
+      "cities": [
+        { "id": "la-luang-prabang", "name": "琅勃拉邦", "lat": 19.8856, "lng": 102.1347 },
+        { "id": "la-vientiane", "name": "万象", "lat": 17.9757, "lng": 102.6331 },
+        { "id": "la-vang-vieng", "name": "万荣", "lat": 18.9333, "lng": 102.4500 },
+        { "id": "la-pakse", "name": "巴色", "lat": 15.1167, "lng": 105.7833 }
+      ]
+    },
+    {
+      "code": "MM",
+      "name": "缅甸",
+      "cities": [
+        { "id": "mm-yangon", "name": "仰光", "lat": 16.8409, "lng": 96.1735 },
+        { "id": "mm-bagan", "name": "蒲甘", "lat": 21.1717, "lng": 94.8585 },
+        { "id": "mm-mandalay", "name": "曼德勒", "lat": 21.9588, "lng": 96.0891 },
+        { "id": "mm-inle-lake", "name": "茵莱湖", "lat": 20.5833, "lng": 96.9167 },
+        { "id": "mm-ngapali", "name": "额布里", "lat": 18.4333, "lng": 94.3000 }
+      ]
+    },
+    {
+      "code": "MX",
+      "name": "墨西哥",
+      "cities": [
+        { "id": "mx-mexico-city", "name": "墨西哥城", "lat": 19.4326, "lng": -99.1332 },
+        { "id": "mx-cancun", "name": "坎昆", "lat": 21.1619, "lng": -86.8515 },
+        { "id": "mx-playa-del-carmen", "name": "普拉亚德尔卡曼", "lat": 20.6274, "lng": -87.0799 },
+        { "id": "mx-tulum", "name": "图卢姆", "lat": 20.2110, "lng": -87.4654 },
+        { "id": "mx-oaxaca", "name": "瓦哈卡", "lat": 17.0732, "lng": -96.7266 },
+        { "id": "mx-guanajuato", "name": "瓜纳华托", "lat": 21.0180, "lng": -101.2574 },
+        { "id": "mx-san-miguel", "name": "圣米格尔德阿连德", "lat": 20.9153, "lng": -100.7431 },
+        { "id": "mx-puerto-vallarta", "name": "巴亚尔塔港", "lat": 20.6534, "lng": -105.2253 }
+      ]
+    },
+    {
+      "code": "PE",
+      "name": "秘鲁",
+      "cities": [
+        { "id": "pe-lima", "name": "利马", "lat": -12.0464, "lng": -77.0428 },
+        { "id": "pe-cusco", "name": "库斯科", "lat": -13.5319, "lng": -71.9675 },
+        { "id": "pe-machu-picchu", "name": "马丘比丘", "lat": -13.1631, "lng": -72.5450 },
+        { "id": "pe-arequipa", "name": "阿雷基帕", "lat": -16.4090, "lng": -71.5375 },
+        { "id": "pe-puno", "name": "普诺", "lat": -15.8402, "lng": -70.0219 },
+        { "id": "pe-iquitos", "name": "伊基托斯", "lat": -3.7437, "lng": -73.2516 }
+      ]
+    },
+    {
+      "code": "AR",
+      "name": "阿根廷",
+      "cities": [
+        { "id": "ar-buenos-aires", "name": "布宜诺斯艾利斯", "lat": -34.6037, "lng": -58.3816 },
+        { "id": "ar-mendoza", "name": "门多萨", "lat": -32.8895, "lng": -68.8458 },
+        { "id": "ar-bariloche", "name": "巴里洛切", "lat": -41.1335, "lng": -71.3103 },
+        { "id": "ar-el-calafate", "name": "埃尔卡拉法特", "lat": -50.3379, "lng": -72.2649 },
+        { "id": "ar-ushuaia", "name": "乌斯怀亚", "lat": -54.8019, "lng": -68.3030 },
+        { "id": "ar-salta", "name": "萨尔塔", "lat": -24.7821, "lng": -65.4232 },
+        { "id": "ar-iguazu", "name": "伊瓜苏", "lat": -25.6953, "lng": -54.4367 }
+      ]
+    },
+    {
+      "code": "CL",
+      "name": "智利",
+      "cities": [
+        { "id": "cl-santiago", "name": "圣地亚哥", "lat": -33.4489, "lng": -70.6693 },
+        { "id": "cl-valparaiso", "name": "瓦尔帕莱索", "lat": -33.0472, "lng": -71.6127 },
+        { "id": "cl-san-pedro-atacama", "name": "圣佩德罗德阿塔卡马", "lat": -22.9087, "lng": -68.1997 },
+        { "id": "cl-puerto-varas", "name": "巴拉斯港", "lat": -41.3160, "lng": -72.9853 },
+        { "id": "cl-punta-arenas", "name": "蓬塔阿雷纳斯", "lat": -53.1548, "lng": -70.9163 },
+        { "id": "cl-easter-island", "name": "复活节岛", "lat": -27.1127, "lng": -109.3497 }
+      ]
+    },
+    {
+      "code": "BR",
+      "name": "巴西",
+      "cities": [
+        { "id": "br-rio", "name": "里约热内卢", "lat": -22.9068, "lng": -43.1729 },
+        { "id": "br-sao-paulo", "name": "圣保罗", "lat": -23.5505, "lng": -46.6333 },
+        { "id": "br-salvador", "name": "萨尔瓦多", "lat": -12.9714, "lng": -38.5014 },
+        { "id": "br-iguazu-falls", "name": "伊瓜苏瀑布", "lat": -25.6953, "lng": -54.4367 },
+        { "id": "br-manaus", "name": "玛瑙斯", "lat": -3.1190, "lng": -60.0217 },
+        { "id": "br-florianopolis", "name": "弗洛里亚诺波利斯", "lat": -27.5954, "lng": -48.5480 },
+        { "id": "br-recife", "name": "累西腓", "lat": -8.0476, "lng": -34.8770 },
+        { "id": "br-lencois", "name": "伦索伊斯", "lat": -12.5600, "lng": -41.3900 }
+      ]
+    },
+    {
+      "code": "CU",
+      "name": "古巴",
+      "cities": [
+        { "id": "cu-havana", "name": "哈瓦那", "lat": 23.1136, "lng": -82.3666 },
+        { "id": "cu-trinidad", "name": "特立尼达", "lat": 21.8025, "lng": -79.9844 },
+        { "id": "cu-vinales", "name": "比尼亚莱斯", "lat": 22.6167, "lng": -83.7167 },
+        { "id": "cu-varadero", "name": "巴拉德罗", "lat": 23.1569, "lng": -81.2444 },
+        { "id": "cu-santiago", "name": "圣地亚哥", "lat": 20.0169, "lng": -75.8302 }
+      ]
+    }
+  ]
+}

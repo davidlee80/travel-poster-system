@@ -153,12 +153,22 @@ export const CHANGEABILITY_VALUES = ['CHANGEABLE', 'NON_REFUNDABLE', 'UNKNOWN'] 
 export const ChangeabilitySchema = z.enum(CHANGEABILITY_VALUES);
 export type Changeability = (typeof CHANGEABILITY_VALUES)[number];
 
-/** 一个地点。`country` 单独存是因为跨境判定读它，而从 text 里再解析一次会分叉 */
+/**
+ * 一个地点。
+ *
+ * `country` 单独存且必填，因为跨境判定读它（附录 B 的 D-02），而从 text 里
+ * 再解析一次会分叉。`place_id` 是预置城市的 ID（如 "cn-beijing"），自定义
+ * 输入时为空。`custom` 标记是否用户手动输入（true = 手动输入，false/undefined
+ * = 从列表选择）。`lat`/`lng` 用于将来的地图渲染，可选。
+ */
 export const PlannerPlaceSchema = z.object({
   text: NonEmptyStringSchema.max(200),
   place_id: NonEmptyStringSchema.max(100).optional(),
   city: z.string().max(100).optional(),
-  country: z.string().max(100).optional(),
+  country: z.string().max(100),
+  custom: z.boolean().optional(),
+  lat: z.number().optional(),
+  lng: z.number().optional(),
 });
 export type PlannerPlace = z.infer<typeof PlannerPlaceSchema>;
 
