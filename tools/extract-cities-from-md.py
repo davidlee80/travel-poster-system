@@ -381,6 +381,58 @@ def merge_cities(
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='从旅游景点 markdown 文件中提取城市信息，补充到 cities.json',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+示例:
+  # 扫描亚洲文件夹
+  python tools/extract-cities-from-md.py "E:/Doc/Prompt/亚洲"
+
+  # 扫描多个文件夹(用空格分隔)
+  python tools/extract-cities-from-md.py "E:/Doc/Prompt/亚洲" "E:/Doc/Prompt/欧洲"
+
+  # 扫描单个文件
+  python tools/extract-cities-from-md.py "E:/Doc/Prompt/亚洲/中国.md"
+        '''
+    )
+    parser.add_argument(
+        'paths',
+        nargs='+',
+        help='markdown 文件或文件夹路径(支持多个路径，用空格分隔)'
+    )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='只打印将要添加的城市，不实际修改 cities.json'
+    )
+    args = parser.parse_args()
+
+    # 收集所有 md 文件
+    md_files = []
+    for path_str in args.paths:
+        path = Path(path_str)
+        if not path.exists():
+            print(f"⚠️  路径不存在: {path}")
+            continue
+
+        if path.is_file() and path.suffix == '.md':
+            md_files.append(path)
+        elif path.is_dir():
+            md_files.extend(sorted(path.glob('*.md')))
+        else:
+            print(f"⚠️  跳过非 markdown 文件: {path}")
+
+    if not md_files:
+        print("❌ 未找到任何 markdown 文件")
+        return
+
+    # 去重(如果同一路径被传入多次)
+    md_files = sorted(set(md_files))
+    print(f"📂 找到 {len(md_files)} 个 markdown 文件")
+
     # 读取现有 cities.json
     cities_json_path = Path('apps/web/src/data/cities.json')
     with open(cities_json_path, 'r', encoding='utf-8') as f:
@@ -388,15 +440,6 @@ def main():
 
     existing_countries = data['countries']
     print(f"📖 读取现有 cities.json: {len(existing_countries)} 个国家")
-
-    # 解析所有 md 文件
-    md_dir = Path('E:/Doc/Prompt/亚洲')
-    if not md_dir.exists():
-        print(f"❌ 目录不存在: {md_dir}")
-        return
-
-    md_files = sorted(md_dir.glob('*.md'))
-    print(f"📂 找到 {len(md_files)} 个 markdown 文件")
 
     # 按国家分组提取城市
     new_cities_by_country = {}
@@ -421,6 +464,13 @@ def main():
     total_cities_before = sum(len(c['cities']) for c in existing_countries)
     total_cities_after = sum(len(c['cities']) for c in merged_countries)
     added_cities = total_cities_after - total_cities_before
+
+    if args.dry_run:
+        print(f"\n🔍 DRY-RUN 模式(不实际修改文件)")
+        print(f"  原有: {len(existing_countries)} 个国家, {total_cities_before} 个城市")
+        print(f"  预计: {len(merged_countries)} 个国家, {total_cities_after} 个城市")
+        print(f"  新增: {added_cities} 个城市")
+        return
 
     # 更新 cities.json
     data['countries'] = merged_countries
