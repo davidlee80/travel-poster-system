@@ -25,12 +25,37 @@ interface PlaceValue {
   readonly country?: string;
 }
 
+interface DestinationValue extends PlaceValue {
+  readonly arrival_date?: string;
+  readonly stay_days?: number;
+  readonly arrival_transport?: 'PLANE' | 'TRAIN' | 'CAR' | 'OTHER';
+}
+
 function asPlace(value: unknown): PlaceValue {
   if (typeof value !== 'object' || value === null) return { text: '' };
   const record = value as Record<string, unknown>;
   const text = typeof record['text'] === 'string' ? record['text'] : '';
   const country = typeof record['country'] === 'string' ? record['country'] : undefined;
   return country === undefined ? { text } : { text, country };
+}
+
+function asDestination(value: unknown): DestinationValue {
+  const place = asPlace(value);
+  if (typeof value !== 'object' || value === null) return { ...place };
+  const record = value as Record<string, unknown>;
+  const arrival_date =
+    typeof record['arrival_date'] === 'string' ? record['arrival_date'] : undefined;
+  const stay_days = typeof record['stay_days'] === 'number' ? record['stay_days'] : undefined;
+  const arrival_transport =
+    typeof record['arrival_transport'] === 'string'
+      ? (record['arrival_transport'] as DestinationValue['arrival_transport'])
+      : undefined;
+  return {
+    ...place,
+    ...(arrival_date === undefined ? {} : { arrival_date }),
+    ...(stay_days === undefined ? {} : { stay_days }),
+    ...(arrival_transport === undefined ? {} : { arrival_transport }),
+  };
 }
 
 /**
@@ -42,6 +67,32 @@ function asPlace(value: unknown): PlaceValue {
 function packPlace(text: string, country: string): PlaceValue | undefined {
   if (text.trim().length === 0) return undefined;
   return country.trim().length === 0 ? { text } : { text, country };
+}
+
+function packDestination(
+  text: string,
+  country: string,
+  arrival_date: string,
+  stay_days: string,
+  arrival_transport: string,
+): DestinationValue | undefined {
+  if (text.trim().length === 0) return undefined;
+  const base = packPlace(text, country);
+  if (base === undefined) return undefined;
+
+  const result: DestinationValue = { ...base };
+  if (arrival_date.trim().length > 0) {
+    (result as { arrival_date?: string }).arrival_date = arrival_date;
+  }
+  const days = stay_days.trim().length > 0 ? Number(stay_days) : NaN;
+  if (!Number.isNaN(days) && days >= 1) {
+    (result as { stay_days?: number }).stay_days = days;
+  }
+  if (arrival_transport.trim().length > 0) {
+    (result as { arrival_transport?: DestinationValue['arrival_transport'] }).arrival_transport =
+      arrival_transport as DestinationValue['arrival_transport'];
+  }
+  return result;
 }
 
 function PlaceFields({
@@ -82,6 +133,138 @@ function PlaceFields({
         value={place.country ?? ''}
         onChange={(event) => onChange(packPlace(place.text, event.target.value))}
       />
+    </div>
+  );
+}
+
+/**
+ * 目的地字段（含抵达日期/驻留天数/到达方式）。
+ *
+ * 设计稿 banner-1.png：目的地卡片下半部分有三个字段 ——
+ * 「抵达日期」（日期选择器）、「驻留天数」（数字步进器）、「到达方式」（下拉选择）。
+ * 这三个字段都是可选的（见契约 `DestinationSchema` 的注释）。
+ */
+function DestinationFields({
+  destination,
+  onChange,
+  idPrefix,
+  placeholder,
+  label,
+}: {
+  readonly destination: DestinationValue;
+  readonly onChange: (next: DestinationValue | undefined) => void;
+  readonly idPrefix: string;
+  readonly placeholder: string;
+  readonly label: string;
+}): React.ReactElement {
+  return (
+    <div className="planner-destination">
+      <PlaceFields
+        place={destination}
+        onChange={(next) => {
+          if (next === undefined) {
+            onChange(undefined);
+            return;
+          }
+          onChange({
+            ...destination,
+            text: next.text,
+            ...(next.country === undefined ? {} : { country: next.country }),
+          });
+        }}
+        idPrefix={idPrefix}
+        placeholder={placeholder}
+        label={label}
+      />
+      <div className="planner-destination__extras">
+        <span className="planner-destination__field">
+          <label htmlFor={`${idPrefix}-arrival-date`} className="planner-destination__label">
+            抵达日期
+          </label>
+          <input
+            className="planner-input planner-input--date"
+            type="date"
+            id={`${idPrefix}-arrival-date`}
+            aria-label={`${label}抵达日期`}
+            value={destination.arrival_date ?? ''}
+            onChange={(event) =>
+              onChange(
+                packDestination(
+                  destination.text,
+                  destination.country ?? '',
+                  event.target.value,
+                  String(destination.stay_days ?? ''),
+                  destination.arrival_transport ?? '',
+                ),
+              )
+            }
+          />
+        </span>
+        <span className="planner-destination__field">
+          <label htmlFor={`${idPrefix}-stay-days`} className="planner-destination__label">
+            驻留天数
+          </label>
+          <input
+            className="planner-input planner-input--number"
+            type="number"
+            id={`${idPrefix}-stay-days`}
+            aria-label={`${label}驻留天数`}
+            min={1}
+            placeholder="天数"
+            value={destination.stay_days ?? ''}
+            onChange={(event) =>
+              onChange(
+                packDestination(
+                  destination.text,
+                  destination.country ?? '',
+                  destination.arrival_date ?? '',
+                  event.target.value,
+                  destination.arrival_transport ?? '',
+                ),
+              )
+            }
+          />
+        </span>
+        <span className="planner-destination__field">
+          <label className="planner-destination__label">到达方式</label>
+          <div className="planner-transport-icons" role="radiogroup" aria-label={`${label}到达方式`}>
+            {(
+              [
+                { value: 'PLANE', icon: 'transport-plane', label: '飞机' },
+                { value: 'TRAIN', icon: 'transport-train', label: '高铁' },
+                { value: 'CAR', icon: 'transport-car', label: '自驾' },
+                { value: 'OTHER', icon: 'transport-other', label: '其他' },
+              ] as const
+            ).map(({ value, icon, label: transportLabel }) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={destination.arrival_transport === value}
+                className={`planner-transport-icon${
+                  destination.arrival_transport === value ? ' planner-transport-icon--active' : ''
+                }`}
+                title={transportLabel}
+                aria-label={transportLabel}
+                onClick={() =>
+                  onChange(
+                    packDestination(
+                      destination.text,
+                      destination.country ?? '',
+                      destination.arrival_date ?? '',
+                      String(destination.stay_days ?? ''),
+                      destination.arrival_transport === value ? '' : value,
+                    ),
+                  )
+                }
+              >
+                <Icon name={icon} size={24} />
+                <span className="planner-transport-icon__text">{transportLabel}</span>
+              </button>
+            ))}
+          </div>
+        </span>
+      </div>
     </div>
   );
 }
@@ -195,6 +378,105 @@ export function PlaceList({
           type="button"
           className="planner-add-card"
           onClick={() => onChange([...places, { text: '' }])}
+        >
+          <span className="planner-add-card__plus" aria-hidden="true">
+            ＋
+          </span>
+          <span>{part.add_label ?? '添加目的地 / 备选目的地'}</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** 可增删目的地列表（含抵达日期/驻留天数/到达方式）。**数组顺序即行程顺序**，因此要能上下移动 */
+export function DestinationList({
+  value,
+  onChange,
+  part,
+  id,
+  describedBy,
+}: ControlProps): React.ReactElement {
+  const destinations = asList(value).map(asDestination);
+  const max = part.max ?? 5;
+
+  const write = (next: readonly (DestinationValue | undefined)[]): void => {
+    const cleaned = next.filter((entry): entry is DestinationValue => entry !== undefined);
+    onChange(cleaned.length === 0 ? undefined : cleaned);
+  };
+
+  const move = (index: number, delta: number): void => {
+    const target = index + delta;
+    if (target < 0 || target >= destinations.length) return;
+    const next: (DestinationValue | undefined)[] = [...destinations];
+    const a = next[index];
+    const b = next[target];
+    if (a === undefined || b === undefined) return;
+    next[index] = b;
+    next[target] = a;
+    write(next);
+  };
+
+  return (
+    <div id={id} {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}>
+      {destinations.map((destination, index) => (
+        /* key 用下标：行内容可编辑且允许重名，用值做 key 会让两行同名时互相抢占输入焦点 */
+        <div className="planner-list-row planner-list-row--destination" key={index}>
+          <span className="planner-list-row__handle" title="可用右侧按钮调整顺序">
+            <Icon name="route" size={18} />
+          </span>
+          <span className="planner-list-row__num" aria-hidden="true">
+            {index + 1}
+          </span>
+          <DestinationFields
+            destination={destination}
+            onChange={(next) => {
+              const list: (DestinationValue | undefined)[] = [...destinations];
+              list[index] = next;
+              write(list);
+            }}
+            idPrefix={`${id}-${index}`}
+            placeholder="城市"
+            label={`第 ${index + 1} 个目的地的`}
+          />
+          <span className="planner-rank__actions">
+            <button
+              type="button"
+              className="planner-icon-button"
+              aria-label={`把第 ${index + 1} 个目的地上移`}
+              disabled={index === 0}
+              onClick={() => move(index, -1)}
+            >
+              上移
+            </button>
+            <button
+              type="button"
+              className="planner-icon-button"
+              aria-label={`把第 ${index + 1} 个目的地下移`}
+              disabled={index === destinations.length - 1}
+              onClick={() => move(index, 1)}
+            >
+              下移
+            </button>
+            <button
+              type="button"
+              className="planner-icon-button"
+              aria-label={`删除第 ${index + 1} 个目的地`}
+              onClick={() => write(destinations.filter((_, i) => i !== index))}
+            >
+              删除
+            </button>
+          </span>
+        </div>
+      ))}
+
+      {destinations.length >= max ? (
+        <p className="planner-hint">最多 {max} 个目的地。</p>
+      ) : (
+        <button
+          type="button"
+          className="planner-add-card"
+          onClick={() => onChange([...destinations, { text: '' }])}
         >
           <span className="planner-add-card__plus" aria-hidden="true">
             ＋

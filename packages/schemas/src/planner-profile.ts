@@ -162,6 +162,41 @@ export const PlannerPlaceSchema = z.object({
 });
 export type PlannerPlace = z.infer<typeof PlannerPlaceSchema>;
 
+/**
+ * 到达方式（用于目的地的 `arrival_transport`）。
+ *
+ * 只列跨城主干交通 —— 市内移动（地铁/打车/步行）在第 5 步问，这里只关心
+ * 「你怎么到这个城市」。`OTHER` 兜底（轮渡/大巴/骑行等）。
+ */
+export const ARRIVAL_TRANSPORT_VALUES = ['PLANE', 'TRAIN', 'CAR', 'OTHER'] as const;
+export const ArrivalTransportSchema = z.enum(ARRIVAL_TRANSPORT_VALUES);
+export type ArrivalTransport = (typeof ARRIVAL_TRANSPORT_VALUES)[number];
+
+/**
+ * 一个目的地（设计稿 banner-1.png：地点卡片含「抵达日期、驻留天数、到达方式」）。
+ *
+ * ## 为什么这三个字段是可选的
+ *
+ * 规范 8（「日期弹性」）允许用户不填具体日期，此时 `arrival_date` 无意义；
+ * 单目的地时 `stay_days` 等于总天数，也不必重复填。因此三个字段都是可选 —
+— 它们的用途是**多目的地时的行程锚点**，不是必填约束。
+ *
+ * ## 为什么不拆成独立字段
+ *
+ * 「抵达日期/驻留天数/到达方式」是**目的地的属性**，不是旅行的属性。
+ * 拆成 `trip.arrival_dates[]`、`trip.stay_days[]` 会让「第 2 个目的地的天数」
+ * 变成跨数组的索引对齐 —— 而那是 schema 无法校验的。
+ */
+export const DestinationSchema = PlannerPlaceSchema.extend({
+  /** 抵达日期（ISO 8601 日期字符串，如 "2025-07-10"） */
+  arrival_date: DateStringSchema.optional(),
+  /** 驻留天数（≥1）。多目的地时用于分配总天数 */
+  stay_days: z.number().int().min(1).optional(),
+  /** 到达方式（跨城主干交通） */
+  arrival_transport: ArrivalTransportSchema.optional(),
+});
+export type Destination = z.infer<typeof DestinationSchema>;
+
 export const LockedOrderSchema = z.object({
   type: LockedOrderTypeSchema,
   name: NonEmptyStringSchema.max(200),
@@ -179,8 +214,8 @@ export const PlannerTripSchema = z.object({
   origin: PlannerPlaceSchema.optional(),
   /** PV2-01-002 */
   destination_status: DestinationStatusSchema.optional(),
-  /** PV2-01-003。1～5 个；顺序即用户的排序（可拖拽） */
-  destinations: z.array(PlannerPlaceSchema).max(5).optional(),
+  /** PV2-01-003。1～5 个；顺序即用户的排序（可拖拽）。多目的地时可填抵达日期/天数/交通 */
+  destinations: z.array(DestinationSchema).max(5).optional(),
   /** PV2-01-004 */
   dates: z.object({ start_date: DateStringSchema, end_date: DateStringSchema }).optional(),
   /** PV2-01-005 */

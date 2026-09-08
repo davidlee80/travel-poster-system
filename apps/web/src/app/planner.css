@@ -1432,6 +1432,95 @@
   gap: 8px;
 }
 
+/* ── 目的地（含抵达日期/驻留天数/到达方式）──────────────────────
+ *
+ * 布局策略：一行放不下时才换行（设计稿要求）。
+ * - 默认 flex-wrap: wrap，所有字段尽量一行排开
+ * - 屏幕宽度不够时自动换行为两行或多行
+ * - 每个字段有 min-width 保证可读性，flex 属性控制伸缩
+ */
+
+.planner-destination {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.planner-destination__extras {
+  display: contents; /* 让子元素直接参与父级 flex 布局 */
+}
+
+.planner-destination__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 120px;
+  flex: 0 1 auto;
+}
+
+/* 地点名字段占更多空间 */
+.planner-destination__field:first-child {
+  flex: 1 1 200px;
+  min-width: 200px;
+}
+
+/* 日期与数字字段固定宽度 */
+.planner-destination__field:nth-child(2),
+.planner-destination__field:nth-child(3) {
+  flex: 0 0 auto;
+}
+
+/* 到达方式图标组允许收缩 */
+.planner-destination__field:last-child {
+  flex: 0 1 auto;
+  min-width: 200px;
+}
+
+.planner-destination__label {
+  font-size: 13px;
+  color: var(--planner-text-secondary, #666);
+  font-weight: 500;
+}
+
+.planner-transport-icons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.planner-transport-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1.5px solid var(--planner-border, #e0e0e0);
+  border-radius: 8px;
+  background: var(--planner-bg, #fff);
+  cursor: pointer;
+  transition: all 0.2s;
+  color: var(--planner-text, #333);
+  flex: 0 0 auto;
+}
+
+.planner-transport-icon:hover {
+  border-color: var(--planner-primary, #0066cc);
+  background: var(--planner-primary-light, #f0f7ff);
+}
+
+.planner-transport-icon--active {
+  border-color: var(--planner-primary, #0066cc);
+  background: var(--planner-primary-light, #f0f7ff);
+  color: var(--planner-primary, #0066cc);
+}
+
+.planner-transport-icon__text {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* ── 列表行与 Repeater ──────────────────────────────────────── */
 
 .planner-list-row {

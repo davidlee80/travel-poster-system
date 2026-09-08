@@ -9,7 +9,7 @@ import type { FieldPart } from '@/lib/planner/descriptors';
 import { asList } from '@/lib/planner/field-io';
 
 import { CheckGroup, ChoiceRow, RankSelect, TriStateTag } from './ChoiceControls';
-import { PlaceList, PlacePicker } from './PlaceControls';
+import { PlaceList, PlacePicker, DestinationList } from './PlaceControls';
 import {
   BoolSwitch,
   Counter,
@@ -83,6 +83,8 @@ export function PrimitiveControl(props: ControlProps): React.ReactElement {
       return <PlacePicker {...props} />;
     case 'place-list':
       return <PlaceList {...props} />;
+    case 'destination-list':
+      return <DestinationList {...props} />;
     case 'object-list':
       return <ObjectList {...props} />;
     default: {

@@ -38,6 +38,10 @@ const EXPECTED = {
     'transport-boat',
     'transport-bike',
     'transport-drive',
+    'transport-plane',
+    'transport-train',
+    'transport-car',
+    'transport-other',
   ],
 };
 

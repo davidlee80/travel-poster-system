@@ -213,6 +213,7 @@ export const CONTROL_PRIMITIVES = [
   'bool',
   'place',
   'place-list',
+  'destination-list',
   'object-list',
 ] as const;
 export type ControlPrimitive = (typeof CONTROL_PRIMITIVES)[number];
@@ -295,10 +296,10 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   // ── 01 旅行轮廓 ──────────────────────────────────────────
   'PV2-01-001': one('place', { placeholder: '城市、机场或车站' }),
   'PV2-01-002': one('choice', { options: PLANNER_DESTINATION_STATUS_VALUES }),
-  'PV2-01-003': one('place-list', {
+  'PV2-01-003': one('destination-list', {
     max: 5,
     add_label: '添加目的地',
-    hint: '顺序即行程顺序，可增删。多城市最多 5 个。',
+    hint: '顺序即行程顺序，可增删。多城市最多 5 个。多目的地时可填抵达日期/驻留天数/到达方式（可选）。',
   }),
   'PV2-01-004': one('date-range'),
   'PV2-01-005': one('choice', { options: DATE_FLEXIBILITY_VALUES }),
