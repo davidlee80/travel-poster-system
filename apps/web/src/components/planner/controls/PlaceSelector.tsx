@@ -328,10 +328,11 @@ export function PlaceSelector({
           <span className="planner-selected-place__text">{displayText}</span>
           <button
             type="button"
-            className="planner-button planner-button--secondary planner-button--small"
+            className="planner-icon-button"
             onClick={() => setModalOpen(true)}
+            aria-label="修改地点"
           >
-            修改
+            <Icon name="more-vertical" size={18} />
           </button>
           <button
             type="button"
