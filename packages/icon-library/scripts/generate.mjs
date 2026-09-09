@@ -29,7 +29,7 @@ const outDir = path.join(here, '..', 'src', 'generated');
 
 /** 9.1 要求的图标清单。数量与名称都是契约，不是约定。 */
 const EXPECTED = {
-  module: ['calendar', 'food', 'map', 'route', 'camera', 'ticket', 'budget', 'tips', 'flag', 'more-vertical'],
+  module: ['calendar', 'food', 'map', 'route', 'camera', 'ticket', 'budget', 'tips', 'flag', 'more-vertical', 'trash'],
   period: ['period-morning', 'period-noon', 'period-afternoon', 'period-evening', 'period-night'],
   transport: [
     'transport-walk',
