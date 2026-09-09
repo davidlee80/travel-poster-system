@@ -3718,16 +3718,20 @@
   color: var(--danger);
 }
 
-/* 删除按钮的通用样式(所有页面) */
+/* 删除按钮的通用样式(所有页面)。固定宽度,不要被 flex 拉伸 */
 .planner-icon-button--danger {
   border-color: #ffd1d4;
   color: var(--danger);
-  width: 26px;
-  height: 26px;
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px;
+  max-width: 26px;
   font-size: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 26px;
+  padding: 0;
 }
 
 .planner-icon-button--danger:hover:not(:disabled) {
