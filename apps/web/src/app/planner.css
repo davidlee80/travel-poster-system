@@ -2201,6 +2201,74 @@
   overflow: auto;
 }
 
+.planner-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e8edf3;
+}
+
+.planner-modal__close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.planner-modal__close:hover {
+  background: #f4f6f9;
+  color: var(--ink);
+}
+
+.planner-modal__body {
+  min-height: 200px;
+}
+
+.planner-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.planner-cascade-select > div {
+  margin-bottom: 12px;
+}
+
+.planner-custom-input > div {
+  margin-bottom: 12px;
+}
+
+.planner-selected-place {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid #d9e2ee;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.planner-selected-place__icon {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.planner-selected-place__text {
+  flex: 1;
+  font-size: 14px;
+  color: var(--ink);
+}
+
 .planner-modal__title {
   margin: 0 0 6px;
   font-family: var(--tps-font-serif, Georgia, serif);
