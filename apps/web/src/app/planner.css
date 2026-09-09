@@ -3655,7 +3655,7 @@
 
 .planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-list-row {
   display: grid;
-  grid-template-columns: 24px 34px minmax(0, 1fr) auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
   margin: 0;

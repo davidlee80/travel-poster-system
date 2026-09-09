@@ -235,43 +235,32 @@ function DestinationFields({
           />
         </span>
         <span className="planner-destination__field">
-          <label className="planner-destination__label">到达方式</label>
-          <div className="planner-transport-icons" role="radiogroup" aria-label={`${label}到达方式`}>
-            {(
-              [
-                { value: 'PLANE', icon: 'transport-plane', label: '飞机' },
-                { value: 'TRAIN', icon: 'transport-train', label: '高铁' },
-                { value: 'CAR', icon: 'transport-car', label: '自驾' },
-                { value: 'OTHER', icon: 'transport-other', label: '其他' },
-              ] as const
-            ).map(({ value, icon, label: transportLabel }) => (
-              <button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={destination.arrival_transport === value}
-                className={`planner-transport-icon${
-                  destination.arrival_transport === value ? ' planner-transport-icon--active' : ''
-                }`}
-                title={transportLabel}
-                aria-label={transportLabel}
-                onClick={() =>
-                  onChange(
-                    packDestination(
-                      destination.text,
-                      destination.country ?? '',
-                      destination.arrival_date ?? '',
-                      String(destination.stay_days ?? ''),
-                      destination.arrival_transport === value ? '' : value,
-                    ),
-                  )
-                }
-              >
-                <Icon name={icon} size={24} />
-                <span className="planner-transport-icon__text">{transportLabel}</span>
-              </button>
-            ))}
-          </div>
+          <label htmlFor={`${idPrefix}-arrival-transport`} className="planner-destination__label">
+            到达方式
+          </label>
+          <select
+            id={`${idPrefix}-arrival-transport`}
+            className="planner-input planner-input--select"
+            aria-label={`${label}到达方式`}
+            value={destination.arrival_transport ?? ''}
+            onChange={(event) =>
+              onChange(
+                packDestination(
+                  destination.text,
+                  destination.country ?? '',
+                  destination.arrival_date ?? '',
+                  String(destination.stay_days ?? ''),
+                  event.target.value,
+                ),
+              )
+            }
+          >
+            <option value="">请选择</option>
+            <option value="PLANE">✈️ 飞机</option>
+            <option value="TRAIN">🚄 高铁</option>
+            <option value="CAR">🚗 自驾</option>
+            <option value="OTHER">➕ 其他</option>
+          </select>
         </span>
       </div>
     </div>
