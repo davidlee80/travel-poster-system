@@ -2,6 +2,7 @@
 
 import { PLANNER_STEPS, type PlannerFieldId, type PlannerStepId } from '@tps/schemas';
 
+import { Icon } from '@/components/Icon';
 import type { PlannerAction, PlannerState } from '@/lib/planner/state';
 import type { PlannerSnapshot } from '@/lib/planner/step-state';
 
@@ -109,7 +110,12 @@ export function StepPage({
         if (fields.length === 0) return null;
         return (
           <div className="planner-block" key={section.title}>
-            <h2 className="planner-block__title">{section.title}</h2>
+            <h2 className="planner-block__title">
+              {section.icon ? (
+                <Icon name={section.icon} size={18} className="planner-block__icon" />
+              ) : null}
+              {section.title}
+            </h2>
             {section.intro === undefined ? null : (
               <p className="planner-block__intro">{section.intro}</p>
             )}

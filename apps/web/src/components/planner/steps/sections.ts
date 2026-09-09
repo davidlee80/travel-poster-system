@@ -28,6 +28,8 @@ export interface PlannerSection {
   /** 这一组为什么问。留空时不显示 —— 不是每组都需要一句解释 */
   readonly intro?: string;
   readonly fields: readonly PlannerFieldId[];
+  /** 区块图标（可选）。图标名来自 `@tps/icon-library`，如 'map' / 'calendar' / 'flag' */
+  readonly icon?: string;
 }
 
 export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
@@ -35,13 +37,25 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
     {
       title: '从哪出发，去哪里',
       intro: '请选择至少 1 个目的地；有多个备选时可以按期望顺序添加，最多 5 个。',
-      fields: ['PV2-01-001', 'PV2-01-002', 'PV2-01-003', 'PV2-01-004', 'PV2-01-005'],
+      fields: ['PV2-01-001', 'PV2-01-002'],
+      icon: 'map',
     },
-    { title: '这趟旅行为了什么', fields: ['PV2-01-006', 'PV2-01-007'] },
+    {
+      title: '目的地 / 备选目的地',
+      fields: ['PV2-01-003'],
+      icon: 'map',
+    },
+    {
+      title: '出发日期与返回日期',
+      fields: ['PV2-01-004', 'PV2-01-005'],
+      icon: 'calendar',
+    },
+    { title: '这趟旅行为了什么', fields: ['PV2-01-006', 'PV2-01-007'], icon: 'tips' },
     {
       title: '已经订好的部分',
       intro: '已购买且不可随意改动的部分会成为整份行程的锚点。',
       fields: ['PV2-01-008', 'PV2-01-009'],
+      icon: 'ticket',
     },
   ],
 

@@ -1049,6 +1049,14 @@
   font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.planner-block__icon {
+  flex-shrink: 0;
+  color: var(--primary);
 }
 
 .planner-block__intro {
