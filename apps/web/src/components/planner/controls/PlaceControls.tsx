@@ -393,26 +393,11 @@ export function DestinationList({
     onChange(cleaned.length === 0 ? undefined : cleaned);
   };
 
-  const move = (index: number, delta: number): void => {
-    const target = index + delta;
-    if (target < 0 || target >= destinations.length) return;
-    const next: (DestinationValue | undefined)[] = [...destinations];
-    const a = next[index];
-    const b = next[target];
-    if (a === undefined || b === undefined) return;
-    next[index] = b;
-    next[target] = a;
-    write(next);
-  };
-
   return (
     <div id={id} {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}>
       {destinations.map((destination, index) => (
         /* key 用下标：行内容可编辑且允许重名，用值做 key 会让两行同名时互相抢占输入焦点 */
         <div className="planner-list-row planner-list-row--destination" key={index}>
-          <span className="planner-list-row__handle" title="可用右侧按钮调整顺序">
-            <Icon name="route" size={18} />
-          </span>
           <span className="planner-list-row__num" aria-hidden="true">
             {index + 1}
           </span>
@@ -429,34 +414,14 @@ export function DestinationList({
             apiKey={apiKey}
             {...(describedBy === undefined ? {} : { describedBy })}
           />
-          <span className="planner-rank__actions">
-            <button
-              type="button"
-              className="planner-icon-button"
-              aria-label={`把第 ${index + 1} 个目的地上移`}
-              disabled={index === 0}
-              onClick={() => move(index, -1)}
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              className="planner-icon-button"
-              aria-label={`把第 ${index + 1} 个目的地下移`}
-              disabled={index === destinations.length - 1}
-              onClick={() => move(index, 1)}
-            >
-              ↓
-            </button>
-            <button
-              type="button"
-              className="planner-icon-button planner-icon-button--danger"
-              aria-label={`删除第 ${index + 1} 个目的地`}
-              onClick={() => write(destinations.filter((_, i) => i !== index))}
-            >
-              ✕
-            </button>
-          </span>
+          <button
+            type="button"
+            className="planner-icon-button planner-icon-button--danger"
+            aria-label={`删除第 ${index + 1} 个目的地`}
+            onClick={() => write(destinations.filter((_, i) => i !== index))}
+          >
+            ✕
+          </button>
         </div>
       ))}
 
