@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import Fuse from 'fuse.js';
 
 import { Icon } from '@/components/Icon';
 
@@ -82,49 +84,28 @@ const popularCities = allCities
   .sort((a, b) => b.popularity - a.popularity)
   .slice(0, 12);
 
-/** 简单的模糊匹配(子序列匹配) */
-function fuzzyMatch(text: string, query: string): boolean {
-  let i = 0;
-  for (const char of text) {
-    if (char === query[i]) i++;
-    if (i === query.length) return true;
-  }
-  return false;
-}
+/** 搜索城市(用 Fuse.js 做模糊匹配) */
+const fuse = new Fuse(allCities, {
+  keys: ['name', 'localName', 'aliases', 'iata', 'searchText'],
+  threshold: 0.3, // 模糊匹配阈值(0 = 精确匹配, 1 = 完全模糊)
+  includeScore: true,
+  minMatchCharLength: 1,
+});
 
-/** 搜索城市 */
 function searchCities(query: string): FlatCity[] {
   if (!query) return [];
 
-  const q = query.toLowerCase();
-
-  // 精确前缀匹配
-  const prefixMatches = allCities.filter((city) =>
-    city.name.toLowerCase().startsWith(q) ||
-    city.localName.toLowerCase().startsWith(q),
-  );
-
-  // 包含匹配
-  const containsMatches = allCities.filter(
-    (city) =>
-      !prefixMatches.includes(city) &&
-      (city.name.toLowerCase().includes(q) ||
-        city.localName.toLowerCase().includes(q) ||
-        city.aliases.some((alias) => alias.toLowerCase().includes(q)) ||
-        city.iata.some((code) => code.toLowerCase().includes(q))),
-  );
-
-  // 模糊匹配
-  const fuzzyMatches = allCities.filter(
-    (city) =>
-      !prefixMatches.includes(city) &&
-      !containsMatches.includes(city) &&
-      fuzzyMatch(city.searchText, q),
-  );
-
-  // 合并并按热门程度排序
-  return [...prefixMatches, ...containsMatches, ...fuzzyMatches]
-    .sort((a, b) => b.popularity - a.popularity)
+  const results = fuse.search(query);
+  return results
+    .map((result) => result.item)
+    .sort((a, b) => {
+      // 优先按 Fuse.js 的 score 排序(score 越小越好)
+      const scoreA = results.find((r) => r.item === a)?.score ?? 1;
+      const scoreB = results.find((r) => r.item === b)?.score ?? 1;
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      // 同分按热门程度排序
+      return b.popularity - a.popularity;
+    })
     .slice(0, 50);
 }
 
@@ -147,6 +128,14 @@ export function CityCombobox({
 
   // 默认推荐(热门城市)
   const suggestions = useMemo(() => (query ? results : popularCities), [query, results]);
+
+  // 虚拟滚动
+  const virtualizer = useVirtualizer({
+    count: suggestions.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => 56,
+    overscan: 5,
+  });
 
   // 键盘导航
   const handleKeyDown = (e: React.KeyboardEvent): void => {
@@ -317,35 +306,60 @@ export function CityCombobox({
               className="city-combobox__listbox"
               role="listbox"
               aria-label="城市列表"
+              style={{
+                height: '320px',
+                overflow: 'auto',
+                position: 'relative',
+              }}
             >
           {suggestions.length === 0 ? (
             <li className="city-combobox__empty">
               未找到匹配的城市。试试搜索国家名或机场代码。
             </li>
           ) : (
-            suggestions.map((city, index) => (
-              <li
-                key={city.id}
-                id={`${id}-option-${index}`}
-                role="option"
-                aria-selected={index === highlightedIndex}
-                className={`city-combobox__option${
-                  index === highlightedIndex ? ' city-combobox__option--highlighted' : ''
-                }`}
-                onClick={() => handleSelect(city)}
-                onMouseEnter={() => setHighlightedIndex(index)}
-              >
-                <div className="city-combobox__option-name">
-                  <strong>{city.name}</strong>
-                  {city.localName !== city.name && (
-                    <span className="city-combobox__option-local"> · {city.localName}</span>
-                  )}
-                </div>
-                <div className="city-combobox__option-meta">
-                  {city.country} · {city.countryCode}
-                </div>
-              </li>
-            ))
+            <div
+              style={{
+                height: `${virtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {virtualizer.getVirtualItems().map((virtualItem) => {
+                const city = suggestions[virtualItem.index];
+                if (!city) return null;
+                return (
+                  <li
+                    key={city.id}
+                    id={`${id}-option-${virtualItem.index}`}
+                    role="option"
+                    aria-selected={virtualItem.index === highlightedIndex}
+                    className={`city-combobox__option${
+                      virtualItem.index === highlightedIndex ? ' city-combobox__option--highlighted' : ''
+                    }`}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: `${virtualItem.size}px`,
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
+                    onClick={() => handleSelect(city)}
+                    onMouseEnter={() => setHighlightedIndex(virtualItem.index)}
+                  >
+                    <div className="city-combobox__option-name">
+                      <strong>{city.name}</strong>
+                      {city.localName !== city.name && (
+                        <span className="city-combobox__option-local"> · {city.localName}</span>
+                      )}
+                    </div>
+                    <div className="city-combobox__option-meta">
+                      {city.country} · {city.countryCode}
+                    </div>
+                  </li>
+                );
+              })}
+            </div>
           )}
             </ul>
           </div>

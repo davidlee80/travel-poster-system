@@ -13,11 +13,13 @@
     "fonts:copy": "node scripts/copy-fonts.mjs"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.14.11",
     "@tps/fonts": "workspace:*",
     "@tps/icon-library": "workspace:*",
     "@tps/presentation": "workspace:*",
     "@tps/schemas": "workspace:*",
     "@tps/shared": "workspace:*",
+    "fuse.js": "^7.5.0",
     "marked": "^18.0.10",
     "next": "^15.5.4",
     "react": "^19.2.0",
