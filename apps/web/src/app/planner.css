@@ -1451,7 +1451,7 @@
   display: flex;
   flex: 1;
   gap: 12px;
-  align-items: flex-end;
+  align-items: center;
   flex-wrap: nowrap;
 }
 
@@ -1489,11 +1489,13 @@
   max-width: 160px;
 }
 
+/* 字段标签不参与垂直居中(只在视觉上显示,不影响布局) */
 .planner-destination__label {
   font-size: 13px;
   color: var(--planner-text-secondary, #666);
   font-weight: 500;
   white-space: nowrap;
+  margin-bottom: 4px;
 }
 
 .planner-transport-icons {
