@@ -3742,6 +3742,23 @@
   background: var(--danger-light, #fff0f1);
 }
 
+/* 纯图标按钮(无边框,黑色,用于 ⋮ 修改按钮) */
+.planner-icon-button--plain {
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.planner-icon-button--plain:hover:not(:disabled) {
+  background: #f4f6f9;
+}
+
 /* 数字步进器(驻留天数) */
 .planner-number-stepper {
   display: flex;
@@ -3782,6 +3799,19 @@
   text-align: center;
   font-weight: 600;
   min-width: 50px;
+}
+
+/* 隐藏数字输入框的默认上下箭头(Chrome/Safari/Edge) */
+.planner-number-stepper__input::-webkit-outer-spin-button,
+.planner-number-stepper__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* 隐藏数字输入框的默认上下箭头(Firefox) */
+.planner-number-stepper__input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 .planner-number-stepper__input:focus {

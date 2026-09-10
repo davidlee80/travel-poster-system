@@ -328,7 +328,7 @@ export function PlaceSelector({
           <span className="planner-selected-place__text">{displayText}</span>
           <button
             type="button"
-            className="planner-icon-button"
+            className="planner-icon-button planner-icon-button--plain"
             onClick={() => setModalOpen(true)}
             aria-label="修改地点"
           >
