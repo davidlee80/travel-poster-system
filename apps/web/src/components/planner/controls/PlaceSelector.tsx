@@ -346,10 +346,13 @@ export function PlaceSelector({
       ) : (
         <button
           type="button"
-          className="planner-button planner-button--secondary"
+          className="planner-add-card"
           onClick={() => setModalOpen(true)}
         >
-          选择地点
+          <span className="planner-add-card__plus" aria-hidden="true">
+            ＋
+          </span>
+          <span>选择地点</span>
         </button>
       )}
 
