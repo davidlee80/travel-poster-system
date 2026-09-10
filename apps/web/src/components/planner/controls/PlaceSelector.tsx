@@ -324,7 +324,7 @@ export function PlaceSelector({
     >
       {currentValue ? (
         <div className="planner-selected-place">
-          <Icon name="map" size={20} className="planner-selected-place__icon" />
+          <Icon name="map-pin" size={20} className="planner-selected-place__icon" />
           <span className="planner-selected-place__text">{displayText}</span>
           <button
             type="button"
