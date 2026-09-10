@@ -3914,3 +3914,113 @@
     grid-column: 2 / -1;
   }
 }
+
+/* ── 城市选择器(Combobox)────────────────────────────────────── */
+
+.city-combobox {
+  position: relative;
+  width: 100%;
+}
+
+.city-combobox__input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.city-combobox__icon {
+  position: absolute;
+  left: 12px;
+  color: var(--primary);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.city-combobox__input {
+  width: 100%;
+  padding: 11px 40px 11px 40px;
+  border: 1px solid #d9e2ee;
+  border-radius: 12px;
+  background: #fff;
+  font-size: 14px;
+  outline: 0;
+  transition: border-color 0.2s;
+}
+
+.city-combobox__input:focus {
+  border-color: var(--primary);
+}
+
+.city-combobox__clear {
+  position: absolute;
+  right: 12px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.city-combobox__clear:hover {
+  background: #f4f6f9;
+  color: var(--ink);
+}
+
+.city-combobox__listbox {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid #d9e2ee;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(14 25 38 / 12%);
+  overflow-y: auto;
+  z-index: 100;
+  list-style: none;
+}
+
+.city-combobox__option {
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.city-combobox__option:hover,
+.city-combobox__option--highlighted {
+  background: var(--primary-light, #f0f7ff);
+}
+
+.city-combobox__option-name {
+  font-size: 14px;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+
+.city-combobox__option-local {
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.city-combobox__option-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.city-combobox__empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}

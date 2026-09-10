@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 
 import { Icon } from '@/components/Icon';
 
+import { CityCombobox, type CityComboboxValue } from './CityCombobox';
 import type { ControlProps } from './control-props';
 
 /**
@@ -141,32 +142,8 @@ function PlaceSelectorModal({
   readonly id: string;
 }): React.ReactElement {
   const [mode, setMode] = useState<'select' | 'custom'>('select');
-  const [selectedCountry, setSelectedCountry] = useState(value?.country ?? '');
-  const [selectedCity, setSelectedCity] = useState(value?.place_id ?? '');
   const [customText, setCustomText] = useState(value?.text ?? '');
   const [customCountry, setCustomCountry] = useState(value?.country ?? '');
-
-  const handleCountryChange = (countryCode: string): void => {
-    setSelectedCountry(countryCode);
-    setSelectedCity(''); // 重置城市选择
-  };
-
-  const handleCityChange = (city: City): void => {
-    const country = citiesData.countries.find((c) => c.code === selectedCountry);
-    if (!country) return;
-
-    onChange({
-      text: city.name,
-      place_id: city.id,
-      city: city.name,
-      country: country.code,
-      custom: false,
-      lat: city.lat,
-      lng: city.lng,
-    });
-    setSelectedCity(city.id);
-    onClose(); // 选择完成,关闭模态框
-  };
 
   const handleCustomSubmit = (): void => {
     if (customText.trim().length === 0 || customCountry.trim().length === 0) {
@@ -250,27 +227,41 @@ function PlaceSelectorModal({
             </div>
           ) : (
             <div className="planner-cascade-select">
-              <div>
-                <label htmlFor={`${id}-country`} className="planner-label">
-                  国家
-                </label>
-                <CountrySelect
-                  value={selectedCountry}
-                  onChange={handleCountryChange}
-                  id={`${id}-country`}
-                />
-              </div>
-              <div style={{ marginTop: '12px' }}>
-                <label htmlFor={`${id}-city`} className="planner-label">
-                  城市
-                </label>
-                <CitySelect
-                  countryCode={selectedCountry}
-                  value={selectedCity}
-                  onChange={handleCityChange}
-                  id={`${id}-city`}
-                />
-              </div>
+              <CityCombobox
+                value={
+                  value
+                    ? {
+                        id: value.place_id ?? '',
+                        name: value.text,
+                        country:
+                          citiesData.countries.find((c) => c.code === value.country)?.name ??
+                          value.country,
+                        countryCode: value.country,
+                        lat: value.lat ?? 0,
+                        lng: value.lng ?? 0,
+                      }
+                    : undefined
+                }
+                onChange={(city: CityComboboxValue | undefined) => {
+                  if (!city) {
+                    onChange(undefined);
+                    return;
+                  }
+                  onChange({
+                    text: city.name,
+                    place_id: city.id,
+                    city: city.name,
+                    country: city.countryCode,
+                    custom: false,
+                    lat: city.lat,
+                    lng: city.lng,
+                  });
+                  onClose();
+                }}
+                placeholder="搜索城市(支持拼音/英文/机场代码)"
+                id={`${id}-city`}
+                ariaLabel="选择城市"
+              />
               <div style={{ marginTop: '16px' }}>
                 <button
                   type="button"
