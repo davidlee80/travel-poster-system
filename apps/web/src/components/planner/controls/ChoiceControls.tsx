@@ -363,7 +363,7 @@ export function RankSelect({
                 </button>
                 <button
                   type="button"
-                  className="planner-icon-button"
+                  className="planner-icon-button planner-icon-button--danger"
                   aria-label={`移除「${labelOf(option)}」`}
                   onClick={() => write(ranked.filter((entry) => entry !== option))}
                 >

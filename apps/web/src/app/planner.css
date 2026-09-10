@@ -3747,7 +3747,7 @@
 .planner-icon-button--plain {
   border: none;
   background: transparent;
-  color: var(--ink);
+  color: #000;
   width: 32px;
   height: 32px;
   padding: 0;

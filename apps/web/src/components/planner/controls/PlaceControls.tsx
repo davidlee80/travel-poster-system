@@ -451,7 +451,7 @@ export function DestinationList({
             aria-label={`删除第 ${index + 1} 个目的地`}
             onClick={() => write(destinations.filter((_, i) => i !== index))}
           >
-            <Icon name="trash" size={16} />
+            ✕
           </button>
         </div>
       ))}
