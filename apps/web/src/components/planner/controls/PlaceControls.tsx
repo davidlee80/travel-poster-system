@@ -213,26 +213,68 @@ function DestinationFields({
           <label htmlFor={`${idPrefix}-stay-days`} className="planner-destination__label">
             驻留天数
           </label>
-          <input
-            className="planner-input planner-input--number"
-            type="number"
-            id={`${idPrefix}-stay-days`}
-            aria-label={`${label}驻留天数`}
-            min={1}
-            placeholder="天数"
-            value={destination.stay_days ?? ''}
-            onChange={(event) =>
-              onChange(
-                packDestination(
-                  destination.text,
-                  destination.country ?? '',
-                  destination.arrival_date ?? '',
-                  event.target.value,
-                  destination.arrival_transport ?? '',
-                ),
-              )
-            }
-          />
+          <div className="planner-number-stepper">
+            <button
+              type="button"
+              className="planner-number-stepper__button"
+              aria-label="减少天数"
+              onClick={() => {
+                const current = destination.stay_days ?? 1;
+                if (current > 1) {
+                  onChange(
+                    packDestination(
+                      destination.text,
+                      destination.country ?? '',
+                      destination.arrival_date ?? '',
+                      String(current - 1),
+                      destination.arrival_transport ?? '',
+                    ),
+                  );
+                }
+              }}
+              disabled={(destination.stay_days ?? 1) <= 1}
+            >
+              −
+            </button>
+            <input
+              className="planner-input planner-input--number planner-number-stepper__input"
+              type="number"
+              id={`${idPrefix}-stay-days`}
+              aria-label={`${label}驻留天数`}
+              min={1}
+              value={destination.stay_days ?? ''}
+              onChange={(event) =>
+                onChange(
+                  packDestination(
+                    destination.text,
+                    destination.country ?? '',
+                    destination.arrival_date ?? '',
+                    event.target.value,
+                    destination.arrival_transport ?? '',
+                  ),
+                )
+              }
+            />
+            <button
+              type="button"
+              className="planner-number-stepper__button"
+              aria-label="增加天数"
+              onClick={() => {
+                const current = destination.stay_days ?? 1;
+                onChange(
+                  packDestination(
+                    destination.text,
+                    destination.country ?? '',
+                    destination.arrival_date ?? '',
+                    String(current + 1),
+                    destination.arrival_transport ?? '',
+                  ),
+                );
+              }}
+            >
+              +
+            </button>
+          </div>
         </span>
         <span className="planner-destination__field">
           <label htmlFor={`${idPrefix}-arrival-transport`} className="planner-destination__label">

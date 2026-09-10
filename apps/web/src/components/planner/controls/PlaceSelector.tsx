@@ -334,14 +334,6 @@ export function PlaceSelector({
           >
             <Icon name="more-vertical" size={18} />
           </button>
-          <button
-            type="button"
-            className="planner-icon-button"
-            onClick={() => onChange(undefined)}
-            aria-label="清除选择"
-          >
-            ×
-          </button>
         </div>
       ) : (
         <button

@@ -1482,10 +1482,11 @@
   flex: 0 0 100px;
 }
 
-/* 到达方式图标组固定宽度 */
+/* 到达方式下拉框固定宽度(原来的一半) */
 .planner-destination__field:last-child {
   flex: 0 0 auto;
-  min-width: 180px;
+  min-width: 90px;
+  max-width: 120px;
 }
 
 .planner-destination__label {
@@ -3718,25 +3719,71 @@
   color: var(--danger);
 }
 
-/* 删除按钮的通用样式(所有页面)。固定宽度,不要被 flex 拉伸 */
+/* 删除按钮的通用样式(所有页面)。与输入框同高(48px),不要被 flex 拉伸 */
 .planner-icon-button--danger {
   border-color: #ffd1d4;
   color: var(--danger);
-  width: 26px !important;
-  height: 26px !important;
-  min-width: 26px;
-  max-width: 26px;
-  font-size: 14px;
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px;
+  max-width: 48px;
+  font-size: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 26px;
+  flex: 0 0 48px;
   padding: 0;
 }
 
 .planner-icon-button--danger:hover:not(:disabled) {
   border-color: var(--danger);
   background: var(--danger-light, #fff0f1);
+}
+
+/* 数字步进器(驻留天数) */
+.planner-number-stepper {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border: 1px solid #d9e2ee;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.planner-number-stepper__button {
+  width: 40px;
+  height: 48px;
+  border: none;
+  background: #f8fafc;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.planner-number-stepper__button:hover:not(:disabled) {
+  background: var(--primary-light, #f0f7ff);
+  color: var(--primary);
+}
+
+.planner-number-stepper__button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.planner-number-stepper__input {
+  flex: 1;
+  border: none !important;
+  text-align: center;
+  font-weight: 600;
+  min-width: 50px;
+}
+
+.planner-number-stepper__input:focus {
+  outline: none;
 }
 
 .planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-add-card {
