@@ -281,13 +281,43 @@ export function CityCombobox({
       </div>
 
       {open && (
-        <ul
-          ref={listRef}
-          id={`${id}-listbox`}
-          className="city-combobox__listbox"
-          role="listbox"
-          aria-label="城市列表"
-        >
+        <div className="city-combobox__overlay" onClick={() => setOpen(false)}>
+          <div
+            className="city-combobox__modal"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="选择城市"
+          >
+            <div className="city-combobox__modal-header">
+              <input
+                type="text"
+                className="city-combobox__input city-combobox__input--modal"
+                placeholder="搜索城市(支持拼音/英文/机场代码)"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setHighlightedIndex(0);
+                }}
+                onKeyDown={handleKeyDown}
+                autoFocus
+              />
+              <button
+                type="button"
+                className="city-combobox__modal-close"
+                onClick={() => setOpen(false)}
+                aria-label="关闭"
+              >
+                ×
+              </button>
+            </div>
+            <ul
+              ref={listRef}
+              id={`${id}-listbox`}
+              className="city-combobox__listbox"
+              role="listbox"
+              aria-label="城市列表"
+            >
           {suggestions.length === 0 ? (
             <li className="city-combobox__empty">
               未找到匹配的城市。试试搜索国家名或机场代码。
@@ -317,7 +347,9 @@ export function CityCombobox({
               </li>
             ))
           )}
-        </ul>
+            </ul>
+          </div>
+        </div>
       )}
     </div>
   );
