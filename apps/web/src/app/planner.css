@@ -3722,19 +3722,24 @@
   color: var(--danger);
 }
 
-/* 删除按钮的通用样式(所有页面)。与输入框同高(48px),不要被 flex 拉伸 */
-.planner-icon-button--danger {
-  border-color: #ffd1d4;
-  color: var(--danger);
+/* 目的地卡片的删除按钮:与输入框同高(48px) */
+.planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-icon-button--danger {
   width: 48px !important;
   height: 48px !important;
   min-width: 48px;
   max-width: 48px;
   font-size: 16px;
+  flex: 0 0 48px;
+}
+
+/* 删除按钮的通用样式(所有页面)。颜色统一为红色,大小跟随所在卡片 */
+.planner-icon-button--danger {
+  border-color: #ffd1d4;
+  color: var(--danger);
+  font-size: inherit;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 48px;
   padding: 0;
 }
 
