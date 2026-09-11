@@ -80,15 +80,37 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
   ],
 
   '04': [
-    { title: '整体强度', fields: ['PV2-04-001'] },
+    { title: '整体强度', fields: ['PV2-04-001'], icon: 'chart-bar' },
     {
       title: '一天怎么过',
-      fields: ['PV2-04-002', 'PV2-04-003', 'PV2-04-004', 'PV2-04-005', 'PV2-04-006'],
+      fields: ['PV2-04-002', 'PV2-04-003'],
+      icon: 'clock',
+    },
+    {
+      title: '每天可接受步行量',
+      fields: ['PV2-04-004'],
+      icon: 'walk',
+    },
+    {
+      title: '每天希望安排几个核心项目?',
+      fields: ['PV2-04-005'],
+      icon: 'star',
+    },
+    {
+      title: '每天希望留多少自由时间?',
+      fields: ['PV2-04-006'],
+      icon: 'clock',
     },
     {
       title: '换住与不能接受的方式',
       intro: '「明确不要」不会被我们主动安排，除非你之后放宽。',
-      fields: ['PV2-04-007', 'PV2-04-008'],
+      fields: ['PV2-04-007'],
+      icon: 'briefcase',
+    },
+    {
+      title: '最多愿意换几次住宿?',
+      fields: ['PV2-04-008'],
+      icon: 'luggage',
     },
   ],
 
