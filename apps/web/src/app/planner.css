@@ -3687,12 +3687,12 @@
 }
 
 .planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-list-row__num {
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   margin: 0;
   color: #fff;
   background: var(--primary);
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-place {
@@ -3724,12 +3724,12 @@
 
 /* 目的地卡片的删除按钮:与输入框同高(48px) */
 .planner-step-page[data-step='01'] [data-field='PV2-01-003'] .planner-icon-button--danger {
-  width: 48px !important;
-  height: 48px !important;
-  min-width: 48px;
-  max-width: 48px;
-  font-size: 16px;
-  flex: 0 0 48px;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px;
+  max-width: 36px;
+  font-size: 14px;
+  flex: 0 0 36px;
 }
 
 /* 删除按钮的通用样式(所有页面)。颜色统一为红色,大小跟随所在卡片 */

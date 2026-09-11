@@ -96,6 +96,18 @@ function packDestination(
   return result;
 }
 
+/**
+ * 联动逻辑：抵达日期 ↔ 驻留天数。
+ *
+ * - 设置抵达日期时,如果有驻留天数,保持不变
+ * - 设置驻留天数时,如果有抵达日期,保持不变
+ * - 两者都存在时,不自动联动(避免覆盖用户的选择)
+ *
+ * 注意:当前设计是「抵达日期」是某个目的地的开始日期,而不是整个旅行的开始日期。
+ * 多目的地时,第 N 个目的地的抵达日期 = 第 N-1 个目的地的抵达日期 + 驻留天数。
+ * 但这个计算在父组件(DestinationList)里做,这里只负责单个目的地的字段。
+ */
+
 function PlaceFields({
   place,
   onChange,
@@ -437,6 +449,30 @@ export function DestinationList({
             onChange={(next) => {
               const list: (DestinationValue | undefined)[] = [...destinations];
               list[index] = next;
+
+              // 联动逻辑:抵达日期 ↔ 驻留天数
+              // 如果修改了驻留天数,且有抵达日期,自动计算下一个目的地的抵达日期
+              if (
+                next &&
+                next.stay_days !== undefined &&
+                next.arrival_date !== undefined &&
+                next.arrival_date.trim().length > 0 &&
+                index < destinations.length - 1
+              ) {
+                const nextArrivalDate = new Date(next.arrival_date);
+                nextArrivalDate.setDate(nextArrivalDate.getDate() + next.stay_days);
+                const nextArrivalDateStr = nextArrivalDate.toISOString().split('T')[0];
+
+                // 更新下一个目的地的抵达日期
+                const nextDest = list[index + 1];
+                if (nextDest && nextArrivalDateStr) {
+                  list[index + 1] = {
+                    ...nextDest,
+                    arrival_date: nextArrivalDateStr,
+                  } as DestinationValue;
+                }
+              }
+
               write(list);
             }}
             idPrefix={`${id}-${index}`}
