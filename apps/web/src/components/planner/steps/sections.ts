@@ -41,14 +41,14 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       icon: 'map',
     },
     {
-      title: '目的地 / 备选目的地',
-      fields: ['PV2-01-003'],
-      icon: 'map',
-    },
-    {
       title: '出发日期与返回日期',
       fields: ['PV2-01-004', 'PV2-01-005'],
       icon: 'calendar',
+    },
+    {
+      title: '目的地 / 备选目的地',
+      fields: ['PV2-01-003'],
+      icon: 'map',
     },
     { title: '这趟旅行为了什么', fields: ['PV2-01-006', 'PV2-01-007'], icon: 'tips' },
     {
