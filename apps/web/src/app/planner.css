@@ -4140,3 +4140,14 @@
     border-radius: 0;
   }
 }
+
+/* 选项卡片中的图标 */
+.planner-choice__icon {
+  flex-shrink: 0;
+  margin-right: 6px;
+  color: var(--primary);
+}
+
+.planner-choice--check .planner-choice__icon {
+  color: inherit;
+}

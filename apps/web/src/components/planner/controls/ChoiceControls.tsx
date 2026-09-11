@@ -2,6 +2,7 @@
 
 import { PLANNER_STANCE_VALUES, type PlannerStance } from '@tps/schemas';
 
+import { Icon } from '@/components/Icon';
 import { selectedValues } from '@/lib/planner/field-io';
 
 import type { ControlProps } from './control-props';
@@ -26,6 +27,18 @@ import type { ControlProps } from './control-props';
  */
 
 /** 单选卡片。再点一次已选项取消选择 —— 大多数字段可选，用户要有办法撤回 */
+
+/** 选项与图标的映射（风险排除项） */
+const OPTION_ICON_MAP: Record<string, string> = {
+  RED_EYE_FLIGHT: 'plane',
+  OVERNIGHT_GROUND: 'moon',
+  MULTI_TRANSFER: 'transfer',
+  REMOTE_AREA: 'mountain',
+  LAST_MINUTE_CHANGE: 'alert',
+  HIGH_RISK_ACTIVITY: 'shield',
+  LONG_QUEUE: 'users',
+};
+
 export function ChoiceRow({
   value,
   onChange,
@@ -123,6 +136,7 @@ export function CheckGroup({
         )}
         {options.map((option) => {
           const on = selected.includes(option);
+          const icon = OPTION_ICON_MAP[option];
           return (
             <button
               key={option}
@@ -134,6 +148,7 @@ export function CheckGroup({
                 else if (!full) write([...selected, option]);
               }}
             >
+              {icon ? <Icon name={icon} size={18} className="planner-choice__icon" /> : null}
               {labelOf(option)}
             </button>
           );
