@@ -4151,3 +4151,24 @@
 .planner-choice--check .planner-choice__icon {
   color: inherit;
 }
+
+/* 区块图标的颜色(按区块类型区分) */
+.planner-block__icon--blue {
+  color: #3478f6;
+}
+
+.planner-block__icon--yellow {
+  color: #fbbf24;
+}
+
+.planner-block__icon--brown {
+  color: #92400e;
+}
+
+.planner-block__icon--purple {
+  color: #8b5cf6;
+}
+
+.planner-block__icon--red {
+  color: #e65d65;
+}

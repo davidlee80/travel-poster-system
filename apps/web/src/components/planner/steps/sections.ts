@@ -30,6 +30,8 @@ export interface PlannerSection {
   readonly fields: readonly PlannerFieldId[];
   /** 区块图标（可选）。图标名来自 `@tps/icon-library`，如 'map' / 'calendar' / 'flag' */
   readonly icon?: string;
+  /** 区块图标颜色（可选）。'blue' / 'yellow' / 'brown' / 'purple' / 'red' */
+  readonly iconColor?: 'blue' | 'yellow' | 'brown' | 'purple' | 'red';
 }
 
 export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
@@ -80,37 +82,49 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
   ],
 
   '04': [
-    { title: '整体强度', fields: ['PV2-04-001'], icon: 'chart-bar' },
+    { title: '整体强度', fields: ['PV2-04-001'], icon: 'chart-bar', iconColor: 'blue' },
     {
       title: '一天怎么过',
-      fields: ['PV2-04-002', 'PV2-04-003'],
+      fields: ['PV2-04-002'],
       icon: 'clock',
+      iconColor: 'blue',
     },
     {
       title: '每天可接受步行量',
-      fields: ['PV2-04-004'],
+      fields: ['PV2-04-003'],
       icon: 'walk',
+      iconColor: 'blue',
     },
     {
       title: '每天希望安排几个核心项目?',
-      fields: ['PV2-04-005'],
+      fields: ['PV2-04-004'],
       icon: 'star',
+      iconColor: 'yellow',
     },
     {
       title: '每天希望留多少自由时间?',
-      fields: ['PV2-04-006'],
+      fields: ['PV2-04-005'],
       icon: 'clock',
+      iconColor: 'blue',
     },
     {
-      title: '换住与不能接受的方式',
-      intro: '「明确不要」不会被我们主动安排，除非你之后放宽。',
-      fields: ['PV2-04-007'],
-      icon: 'briefcase',
+      title: '是否需要固定午休或午睡?',
+      fields: ['PV2-04-006'],
+      icon: 'clock',
+      iconColor: 'blue',
     },
     {
       title: '最多愿意换几次住宿?',
-      fields: ['PV2-04-008'],
+      fields: ['PV2-04-007'],
       icon: 'luggage',
+      iconColor: 'purple',
+    },
+    {
+      title: '哪些方式你不能接受?',
+      intro: '「明确不要」不会被我们主动安排，除非你之后放宽。',
+      fields: ['PV2-04-008'],
+      icon: 'ban',
+      iconColor: 'red',
     },
   ],
 

@@ -120,7 +120,13 @@ export function StepPage({
           <div className="planner-block" key={section.title}>
             <h2 className="planner-block__title">
               {section.icon ? (
-                <Icon name={section.icon} size={24} className="planner-block__icon" />
+                <Icon
+                  name={section.icon}
+                  size={24}
+                  className={`planner-block__icon${
+                    section.iconColor ? ` planner-block__icon--${section.iconColor}` : ''
+                  }`}
+                />
               ) : null}
               {section.title}
             </h2>
