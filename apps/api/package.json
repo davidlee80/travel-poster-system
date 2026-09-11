@@ -12,6 +12,10 @@
     "./identity": {
       "types": "./dist/identity/index.d.ts",
       "default": "./dist/identity/index.js"
+    },
+    "./generation-outbox": {
+      "types": "./dist/generation-outbox.d.ts",
+      "default": "./dist/generation-outbox.js"
     }
   },
   "scripts": {

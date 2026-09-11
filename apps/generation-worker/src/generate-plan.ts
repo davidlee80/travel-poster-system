@@ -1,4 +1,10 @@
-import type { TravelPlansRepository } from '@tps/db';
+import {
+  GenerationLeaseLostError,
+  type TravelPlansRepository,
+  type GenerationExecutionRepository,
+  type GenerationLease,
+  type GenerationCheckpoint,
+} from '@tps/db';
 import type { EmbeddingClient, LlmClient } from '@tps/llm';
 import {
   LlmTimeoutError,
@@ -31,11 +37,17 @@ import {
   type TravelPlanContent,
   type TravelPlanLlmOutput,
 } from '@tps/schemas';
-import type { GenerationJobPayload } from '@tps/queue';
+import {
+  DEFAULT_JOB_OPTIONS,
+  GenerationJobPayloadSchema,
+  withRestoredTrace,
+  type GenerationJobPayload,
+} from '@tps/queue';
+import { DelayedError, UnrecoverableError, type Job } from 'bullmq';
 import { UsageMeter } from '@tps/billing';
 import { uuidv7, type Logger, type UserType } from '@tps/shared';
 
-import type { JobBilling } from './billing.js';
+import { finalizeGenerationBilling, type JobBilling } from './billing.js';
 import type { AiLayerDeps } from './assets/resolve-assets.js';
 import type { LicensedSourceLayerDeps } from './assets/resolvers/licensed-source.js';
 import {
@@ -112,6 +124,14 @@ export interface JobModelContext {
 }
 
 export interface GeneratePlanDeps {
+  readonly execution?: {
+    readonly repository: GenerationExecutionRepository;
+    readonly lease: GenerationLease;
+    readonly firstAttempt: boolean;
+    readonly attempt: number;
+    readonly attempts: number;
+    readonly checkpoint?: GenerationCheckpoint | null;
+  };
   readonly plans: TravelPlansRepository;
   readonly retrieval: RetrievalDeps;
   readonly llm: LlmClient | LlmClientFactory;
@@ -216,6 +236,8 @@ async function advance(
     readonly stageTimings?: Readonly<Record<string, number>>;
   } = {},
 ): Promise<boolean> {
+  // 新协议的终态与最终用量由外层在素材 finally 之后原子提交。
+  if (deps.execution !== undefined && to === 'COMPLETED') to = 'RENDERING_HTML';
   const display = JOB_STAGE_DISPLAY[to];
   return deps.plans.updateJobState({
     jobId,
@@ -246,6 +268,7 @@ async function fail(
   },
   planVersionId?: string,
 ): Promise<GenerateOutcome> {
+  if (deps.execution !== undefined) return { outcome: 'failed', errorCode };
   await deps.plans.updateJobState({
     jobId,
     to: 'FAILED',
@@ -471,7 +494,11 @@ async function runJob(
    * 等了 11 分钟的任务，用户早已离开页面，而生成它仍要花掉一次模型调用的钱。
    */
   const queueTiming = await deps.plans.findJobQueueTiming(context.jobId);
-  if (queueTiming !== null && queueWaitExceeded(queueTiming.queuedForMs)) {
+  if (
+    (deps.execution?.firstAttempt ?? true) &&
+    queueTiming !== null &&
+    queueWaitExceeded(queueTiming.queuedForMs)
+  ) {
     log.warn(
       { stage: 'QUEUED', error_code: 'JOB_QUEUE_TIMEOUT' },
       `任务排队超过上限（入队于 ${queueTiming.createdAt.toISOString()}，` +
@@ -504,11 +531,17 @@ async function runJob(
   const timer = new StageTimer(consumeStartedMs, now, daysBucket, queuedForMs);
 
   /** 推进状态并把上一阶段的耗时挂在同一次写入上 */
-  const step = (
+  const step = async (
     to: JobStatus,
     extra: { readonly errorCode?: string; readonly planVersionId?: string } = {},
-  ): Promise<boolean> =>
-    advance(deps, context.jobId, to, { ...extra, stageTimings: timer.enter(to) });
+  ): Promise<boolean> => {
+    const updated = await advance(deps, context.jobId, to, {
+      ...extra,
+      stageTimings: timer.enter(to),
+    });
+    if (!updated && deps.execution !== undefined) throw new GenerationLeaseLostError();
+    return updated;
+  };
 
   const failJob = (code: JobFailureCode, planVersionId?: string): Promise<GenerateOutcome> =>
     fail(
@@ -554,239 +587,271 @@ async function runJob(
     userType: context.userType,
     tierLevel: context.tierLevel,
   };
-  const llm: LlmClient =
-    typeof deps.llm === 'function' ? await deps.llm(normalized, modelContext) : deps.llm;
-
-  /*
-   * VALIDATING_REQUEST：3.1.2 的 N-01～N-12 已在 API 的同步路径执行过
-   * （失败直接 4xx，不入队）。这里只推进状态，不重跑 ——
-   * 重跑会让「入队后到消费前跨过了午夜」的任务因 N-01（出发日期在过去）
-   * 失败，而那不是用户的错。
-   */
-  if (!(await step('VALIDATING_REQUEST'))) {
-    return cancelled('VALIDATING_REQUEST');
-  }
-
-  // ── RETRIEVING_REFERENCES（3.2.4）──
-  if (!(await step('RETRIEVING_REFERENCES'))) {
-    return cancelled('RETRIEVING_REFERENCES');
-  }
-  const retrieved = await retrieveReferences(deps.retrieval, {
-    normalized,
-    excludePlanId: context.planId,
-  });
-  log.info(
-    {
-      stage: 'RETRIEVING_REFERENCES',
-      outcome: retrieved.outcome,
-      count: retrieved.references.length,
-    },
-    '历史参考检索完成',
-  );
-
-  // ── GENERATING_PLAN（6.3）──
-  if (deadline.expired()) {
-    log.warn({ stage: 'GENERATING_PLAN', error_code: 'JOB_TIMEOUT' }, '任务超过 300 秒上限，中止');
-    return failJob('JOB_TIMEOUT');
-  }
-
-  /*
-   * 取消检查放在**发出模型调用之前**：这是整条链路上唯一一次「不检查就会
-   * 白花钱」的边界。用户点取消的动机多数就是「我填错了」，
-   * 而此刻停下来能省掉一次完整的生成成本。
-   */
-  if (!(await step('GENERATING_PLAN'))) return cancelled('GENERATING_PLAN');
-  let generated;
-  try {
-    generated = await generateContent(deps, llm, normalized, retrieved.references, deadline, meter);
-  } catch (error) {
-    const code = errorCodeFor(error);
-    log.error({ stage: 'GENERATING_PLAN', error_code: code }, '计划生成失败');
-    return failJob(code);
-  }
-
-  // ── VALIDATING_PLAN ⇄ REPAIRING_PLAN（3.2.1、3.2.2）──
-  await step('VALIDATING_PLAN');
-
-  const injected: TravelPlanContent = {
-    ...generated.output,
-    schema_version: SCHEMA_VERSIONS.travelPlan,
-    // 状态由校验与修复流程决定，模型无从判断（6.3）
-    status: 'READY',
+  const checkpoint = deps.execution?.checkpoint;
+  let prepared: {
+    planContent: TravelPlanContent;
+    saved: { versionId: string };
+    finalStatus: 'READY' | 'REPAIRED';
   };
+  if (checkpoint !== undefined && checkpoint !== null) {
+    if (checkpoint.status === 'REJECTED')
+      return failJob('PLAN_REPAIR_EXHAUSTED', checkpoint.versionId);
+    prepared = {
+      planContent: TravelPlanContentSchema.parse(checkpoint.planJson),
+      saved: { versionId: checkpoint.versionId },
+      finalStatus: checkpoint.status,
+    };
+  } else {
+    const llm: LlmClient =
+      typeof deps.llm === 'function' ? await deps.llm(normalized, modelContext) : deps.llm;
 
-  let repairing = false;
-  const resolved = await resolvePlan(
-    injected,
-    { normalized },
-    {
-      observer: createPlanValidationObserver(),
-      regenerate: async ({ violations, plan, attempt }) => {
-        if (!repairing) {
-          repairing = true;
-          await step('REPAIRING_PLAN');
-        }
-        const messages = buildRepairPrompt({
-          normalized,
-          violations: violations.map((violation: PlanViolation) => ({
-            rule: violation.rule,
-            path: violation.path,
-            detail: violation.detail,
-          })),
-          previous: TravelPlanLlmOutputSchema.parse({
-            ...plan,
-            schema_version: undefined,
-            status: undefined,
-          }),
-          attempt,
-        });
-        const result = await callModel(
-          deps,
-          llm,
-          messages,
-          maxTokensForDays(normalized.total_days),
-          'repair',
-          deadline,
-          meter,
-        );
-        generated.inputTokens += result.inputTokens;
-        generated.outputTokens += result.outputTokens;
-        return { ...result.output, schema_version: SCHEMA_VERSIONS.travelPlan, status: 'READY' };
-      },
-    },
-  );
-
-  /*
-   * 3.2.4 / TP-2-24：无历史参考这件事对用户可见。
-   * 在 resolvePlan **之后**追加：它会 structuredClone 输入，
-   * 提前写进去也会被带过来，但那样就依赖了「克隆」这个实现细节。
-   */
-  for (const assumption of retrieved.assumptions) {
-    addAssumption(resolved.plan, assumption.code, assumption.text, null);
-  }
-
-  const finalStatus = resolved.status;
-  const planContent = TravelPlanContentSchema.parse({ ...resolved.plan, status: finalStatus });
-
-  // ── SAVING_PLAN（TP-2-14）──
-  /*
-   * 这里**不检查超时**。计划已经生成并通过校验，落库只差一次 INSERT ——
-   * 此刻因为超了 300 秒而丢弃它，等于把已经花掉的模型成本连同用户的全部
-   * 等待一起扔掉，而重试要从零开始再花一遍。超时的意义是「别再启动新的
-   * 昂贵工作」，不是「把做好的东西扔掉」。
-   */
-  await step('SAVING_PLAN');
-
-  /*
-   * 版本 ID 在这里生成，而不是交给数据库默认值：`plan_json` 里必须含
-   * `plan_version_id`（六章的 TravelPlan 三个 ID 都是必填）。
-   * 等插入后再补的话，库里会短暂存在一份 `TravelPlanSchema` 读不回来的
-   * 计划 —— 而 13.3 正是用它解析后返回。
-   *
-   * **UUIDv7 而不是 v4**（R-48，TP-6-10）：这个 ID 同时是 15.4 的
-   * `content_id` —— 该次生成的全部产物（展示数据、素材绑定、导出文件、
-   * 存储键、日志与 Trace）都以它为锚点。时间有序换来两件事：
-   * 15.4 的存储路径可以从 ID 派生年月而不引入第二个时间来源，
-   * 13.11 的时间范围检索可以在主键上做范围扫描而不需要新索引。
-   */
-  const versionId = uuidv7();
-
-  /*
-   * 投影与向量都由**最终落库的**计划算出。
-   * 用修复前的版本算会让检索召回一份与库里内容不一致的行程结构。
-   */
-  const projection = buildRetrievalProjection(planContent);
-  let embedding: number[] | null = null;
-  try {
-    const [vector] = await deps.embedding.embed([projectionToEmbeddingText(projection)]);
-    embedding = vector ?? null;
-  } catch (error) {
     /*
-     * 向量化失败不阻断保存：计划本身完全可用，只是暂时不参与他人的
-     * 历史检索（检索侧要求 `plan_embedding IS NOT NULL`）。
-     * 反过来让它阻断，会因为一个纯粹的「提高别人生成质量」的功能
-     * 而丢掉用户已经生成好的计划。
+     * VALIDATING_REQUEST：3.1.2 的 N-01～N-12 已在 API 的同步路径执行过
+     * （失败直接 4xx，不入队）。这里只推进状态，不重跑 ——
+     * 重跑会让「入队后到消费前跨过了午夜」的任务因 N-01（出发日期在过去）
+     * 失败，而那不是用户的错。
      */
-    log.warn({ stage: 'SAVING_PLAN' }, `向量化失败，该版本不参与历史检索：${String(error)}`);
-  }
+    if (!(await step('VALIDATING_REQUEST'))) {
+      return cancelled('VALIDATING_REQUEST');
+    }
 
-  let saved;
-  try {
-    saved = await deps.plans.savePlanVersion({
-      planId: context.planId,
-      status: finalStatus,
-      versionId,
-      planJson: {
-        ...planContent,
-        plan_id: context.planId,
-        plan_version_id: versionId,
-        request_id: context.requestId,
-      },
-      constraintReport: planContent.constraint_report,
-      retrievalProjection: projection,
-      destinationPlaceId: normalized.destination_place_id ?? null,
-      totalDays: normalized.total_days,
-      planEmbedding: embedding,
-      title: planContent.title,
-      llmModel: llm.model,
-      llmPromptVersion: PLAN_PROMPT_VERSION,
-      inputTokens: generated.inputTokens,
-      outputTokens: generated.outputTokens,
-      repairIterations: resolved.deterministicRounds,
-      regenerationCount: resolved.regenerations,
+    // ── RETRIEVING_REFERENCES（3.2.4）──
+    if (!(await step('RETRIEVING_REFERENCES'))) {
+      return cancelled('RETRIEVING_REFERENCES');
+    }
+    const retrieved = await retrieveReferences(deps.retrieval, {
+      normalized,
+      excludePlanId: context.planId,
     });
-  } catch (error) {
-    log.error({ stage: 'SAVING_PLAN' }, `持久化失败：${String(error)}`);
-    return failJob('PLAN_PERSIST_FAILED');
-  }
+    log.info(
+      {
+        stage: 'RETRIEVING_REFERENCES',
+        outcome: retrieved.outcome,
+        count: retrieved.references.length,
+      },
+      '历史参考检索完成',
+    );
 
-  if (finalStatus === 'REJECTED') {
+    // ── GENERATING_PLAN（6.3）──
+    if (deadline.expired()) {
+      log.warn(
+        { stage: 'GENERATING_PLAN', error_code: 'JOB_TIMEOUT' },
+        '任务超过 300 秒上限，中止',
+      );
+      return failJob('JOB_TIMEOUT');
+    }
+
     /*
-     * 3.2.2：修复失败的计划只落库供排查，不成为可展示版本。
-     * 先落库再置 FAILED，顺序不能反 —— 反了的话排查时拿不到那份草稿，
-     * 而它是唯一能说明「模型到底写了什么」的证据。
+     * 取消检查放在**发出模型调用之前**：这是整条链路上唯一一次「不检查就会
+     * 白花钱」的边界。用户点取消的动机多数就是「我填错了」，
+     * 而此刻停下来能省掉一次完整的生成成本。
      */
-    const code = resolved.errorCode ?? 'PLAN_REPAIR_EXHAUSTED';
-    log.warn({ stage: 'SAVING_PLAN', error_code: code }, '计划未通过校验，落库为 REJECTED');
-    await failJob(code, saved.versionId);
-    return { outcome: 'rejected', versionId: saved.versionId, errorCode: code };
+    if (!(await step('GENERATING_PLAN'))) return cancelled('GENERATING_PLAN');
+    let generated;
+    try {
+      generated = await generateContent(
+        deps,
+        llm,
+        normalized,
+        retrieved.references,
+        deadline,
+        meter,
+      );
+    } catch (error) {
+      const code = errorCodeFor(error);
+      log.error({ stage: 'GENERATING_PLAN', error_code: code }, '计划生成失败');
+      return failJob(code);
+    }
+
+    // ── VALIDATING_PLAN ⇄ REPAIRING_PLAN（3.2.1、3.2.2）──
+    await step('VALIDATING_PLAN');
+
+    const injected: TravelPlanContent = {
+      ...generated.output,
+      schema_version: SCHEMA_VERSIONS.travelPlan,
+      // 状态由校验与修复流程决定，模型无从判断（6.3）
+      status: 'READY',
+    };
+
+    let repairing = false;
+    const resolved = await resolvePlan(
+      injected,
+      { normalized },
+      {
+        observer: createPlanValidationObserver(),
+        regenerate: async ({ violations, plan, attempt }) => {
+          if (!repairing) {
+            repairing = true;
+            await step('REPAIRING_PLAN');
+          }
+          const messages = buildRepairPrompt({
+            normalized,
+            violations: violations.map((violation: PlanViolation) => ({
+              rule: violation.rule,
+              path: violation.path,
+              detail: violation.detail,
+            })),
+            previous: TravelPlanLlmOutputSchema.parse({
+              ...plan,
+              schema_version: undefined,
+              status: undefined,
+            }),
+            attempt,
+          });
+          const result = await callModel(
+            deps,
+            llm,
+            messages,
+            maxTokensForDays(normalized.total_days),
+            'repair',
+            deadline,
+            meter,
+          );
+          generated.inputTokens += result.inputTokens;
+          generated.outputTokens += result.outputTokens;
+          return { ...result.output, schema_version: SCHEMA_VERSIONS.travelPlan, status: 'READY' };
+        },
+      },
+    );
+
+    /*
+     * 3.2.4 / TP-2-24：无历史参考这件事对用户可见。
+     * 在 resolvePlan **之后**追加：它会 structuredClone 输入，
+     * 提前写进去也会被带过来，但那样就依赖了「克隆」这个实现细节。
+     */
+    for (const assumption of retrieved.assumptions) {
+      addAssumption(resolved.plan, assumption.code, assumption.text, null);
+    }
+
+    const finalStatus = resolved.status;
+    const planContent = TravelPlanContentSchema.parse({ ...resolved.plan, status: finalStatus });
+
+    // ── SAVING_PLAN（TP-2-14）──
+    /*
+     * 这里**不检查超时**。计划已经生成并通过校验，落库只差一次 INSERT ——
+     * 此刻因为超了 300 秒而丢弃它，等于把已经花掉的模型成本连同用户的全部
+     * 等待一起扔掉，而重试要从零开始再花一遍。超时的意义是「别再启动新的
+     * 昂贵工作」，不是「把做好的东西扔掉」。
+     */
+    await step('SAVING_PLAN');
+
+    /*
+     * 版本 ID 在这里生成，而不是交给数据库默认值：`plan_json` 里必须含
+     * `plan_version_id`（六章的 TravelPlan 三个 ID 都是必填）。
+     * 等插入后再补的话，库里会短暂存在一份 `TravelPlanSchema` 读不回来的
+     * 计划 —— 而 13.3 正是用它解析后返回。
+     *
+     * **UUIDv7 而不是 v4**（R-48，TP-6-10）：这个 ID 同时是 15.4 的
+     * `content_id` —— 该次生成的全部产物（展示数据、素材绑定、导出文件、
+     * 存储键、日志与 Trace）都以它为锚点。时间有序换来两件事：
+     * 15.4 的存储路径可以从 ID 派生年月而不引入第二个时间来源，
+     * 13.11 的时间范围检索可以在主键上做范围扫描而不需要新索引。
+     */
+    const versionId = uuidv7();
+
+    /*
+     * 投影与向量都由**最终落库的**计划算出。
+     * 用修复前的版本算会让检索召回一份与库里内容不一致的行程结构。
+     */
+    const projection = buildRetrievalProjection(planContent);
+    let embedding: number[] | null = null;
+    try {
+      const [vector] = await deps.embedding.embed([projectionToEmbeddingText(projection)]);
+      embedding = vector ?? null;
+    } catch (error) {
+      /*
+       * 向量化失败不阻断保存：计划本身完全可用，只是暂时不参与他人的
+       * 历史检索（检索侧要求 `plan_embedding IS NOT NULL`）。
+       * 反过来让它阻断，会因为一个纯粹的「提高别人生成质量」的功能
+       * 而丢掉用户已经生成好的计划。
+       */
+      log.warn({ stage: 'SAVING_PLAN' }, `向量化失败，该版本不参与历史检索：${String(error)}`);
+    }
+
+    let saved;
+    try {
+      saved = await deps.plans.savePlanVersion({
+        planId: context.planId,
+        status: finalStatus,
+        versionId,
+        planJson: {
+          ...planContent,
+          plan_id: context.planId,
+          plan_version_id: versionId,
+          request_id: context.requestId,
+        },
+        constraintReport: planContent.constraint_report,
+        retrievalProjection: projection,
+        destinationPlaceId: normalized.destination_place_id ?? null,
+        totalDays: normalized.total_days,
+        planEmbedding: embedding,
+        title: planContent.title,
+        llmModel: llm.model,
+        llmPromptVersion: PLAN_PROMPT_VERSION,
+        inputTokens: generated.inputTokens,
+        outputTokens: generated.outputTokens,
+        repairIterations: resolved.deterministicRounds,
+        regenerationCount: resolved.regenerations,
+        ...(deps.execution === undefined
+          ? {}
+          : { checkpoint: { jobId: context.jobId, usage: meter.snapshot() } }),
+      });
+    } catch (error) {
+      if (error instanceof GenerationLeaseLostError) throw error;
+      log.error({ stage: 'SAVING_PLAN' }, `持久化失败：${String(error)}`);
+      return failJob('PLAN_PERSIST_FAILED');
+    }
+
+    if (finalStatus === 'REJECTED') {
+      /*
+       * 3.2.2：修复失败的计划只落库供排查，不成为可展示版本。
+       * 先落库再置 FAILED，顺序不能反 —— 反了的话排查时拿不到那份草稿，
+       * 而它是唯一能说明「模型到底写了什么」的证据。
+       */
+      const code = resolved.errorCode ?? 'PLAN_REPAIR_EXHAUSTED';
+      log.warn({ stage: 'SAVING_PLAN', error_code: code }, '计划未通过校验，落库为 REJECTED');
+      await failJob(code, saved.versionId);
+      return { outcome: 'rejected', versionId: saved.versionId, errorCode: code };
+    }
+
+    await deps.plans.updateJobState({
+      jobId: context.jobId,
+      to: 'SAVING_PLAN',
+      progress: JOB_STAGE_DISPLAY.SAVING_PLAN.progress ?? 60,
+      message: stageMessage('SAVING_PLAN'),
+      planVersionId: saved.versionId,
+    });
+
+    /*
+     * ── T1 计划可读（21.2 措施一，TP-4-14）──
+     *
+     * 这一刻用户就能通过 13.3 读到完整文字版计划。里程碑写在这里而不是
+     * 任务结束时：客户端据此**提前**切换到「显示文字计划」，
+     * 而不是等 `status === 'COMPLETED'` —— 那要再等素材解析与渲染。
+     */
+    await deps.plans.markMilestone(context.jobId, 't1');
+    jobMilestoneSeconds.observe(
+      {
+        milestone: 't1',
+        total_days_bucket: totalDaysBucket(normalized.total_days),
+        user_type: context.userType,
+      },
+      sinceQueued() / 1000,
+    );
+
+    log.info(
+      {
+        stage: 'SAVING_PLAN',
+        plan_version_id: saved.versionId,
+        status: finalStatus,
+        repair_iterations: resolved.deterministicRounds,
+        regenerations: resolved.regenerations,
+      },
+      '计划已保存',
+    );
+    prepared = { planContent, saved, finalStatus };
   }
-
-  await deps.plans.updateJobState({
-    jobId: context.jobId,
-    to: 'SAVING_PLAN',
-    progress: JOB_STAGE_DISPLAY.SAVING_PLAN.progress ?? 60,
-    message: stageMessage('SAVING_PLAN'),
-    planVersionId: saved.versionId,
-  });
-
-  /*
-   * ── T1 计划可读（21.2 措施一，TP-4-14）──
-   *
-   * 这一刻用户就能通过 13.3 读到完整文字版计划。里程碑写在这里而不是
-   * 任务结束时：客户端据此**提前**切换到「显示文字计划」，
-   * 而不是等 `status === 'COMPLETED'` —— 那要再等素材解析与渲染。
-   */
-  await deps.plans.markMilestone(context.jobId, 't1');
-  jobMilestoneSeconds.observe(
-    {
-      milestone: 't1',
-      total_days_bucket: totalDaysBucket(normalized.total_days),
-      user_type: context.userType,
-    },
-    sinceQueued() / 1000,
-  );
-
-  log.info(
-    {
-      stage: 'SAVING_PLAN',
-      plan_version_id: saved.versionId,
-      status: finalStatus,
-      repair_iterations: resolved.deterministicRounds,
-      regenerations: resolved.regenerations,
-    },
-    '计划已保存',
-  );
+  const { planContent, saved, finalStatus } = prepared;
 
   /*
    * ── BUILDING_PRESENTATION → RESOLVING_ASSETS（TP-3-03～TP-3-16）──
@@ -810,6 +875,7 @@ async function runJob(
    */
   let ai: AiLayerDeps | undefined;
   let licensedSource: LicensedSourceLayerDeps | undefined;
+  let savedPages = 0;
 
   /**
    * 素材侧的计费打点（C-4 的三处之一，另一处是 `callModel` 里的 token）。
@@ -819,14 +885,14 @@ async function runJob(
    * 不计在内。这与 docs 里那条施工注意（打点必须挂在图真的生成成功处，
    * 不能挂在 `reserve`）说的是同一件事，而这里不需要改动素材管线就已经满足。
    */
-  const meterAssets = (pages: number): void => {
+  const meterAssets = (): void => {
     meter.addAiImages(ai?.budget.used.images ?? 0);
     meter.addImageSearches(licensedSource?.searchBudget.used.searches ?? 0);
-    meter.addRenderPages(pages);
+    meter.addRenderPages(savedPages);
   };
 
   try {
-    await step('BUILDING_PRESENTATION');
+    if (!(await step('BUILDING_PRESENTATION'))) return cancelled('BUILDING_PRESENTATION');
 
     const plan = {
       ...planContent,
@@ -835,27 +901,50 @@ async function runJob(
       request_id: context.requestId,
     };
 
-    await step('RESOLVING_ASSETS');
-    ai = deps.aiAssets === undefined ? undefined : await deps.aiAssets(modelContext);
-    licensedSource = deps.searchAssets?.();
-    const result = await buildAndSavePresentations(
-      {
-        ...presentation,
-        logger: log,
-        ...(ai === undefined ? {} : { ai }),
-        ...(licensedSource === undefined ? {} : { licensedSource }),
-      },
-      plan,
-      /*
-       * 用户选的样式套件（R-85）。这个值一直存在于标准化结果里，
-       * 而在 R-85 之前全仓**无人读** —— Zod 校验通过后就丢了，
-       * 编排用的是硬编码默认值。表现是「接口看起来支持选模板，
-       * 传什么都不报错，而产物永远是同一套」。
-       */
-      normalized.output_preferences.template_id,
-    );
+    if (!(await step('RESOLVING_ASSETS'))) return cancelled('RESOLVING_ASSETS');
+    const resumedPresentation = checkpoint?.presentation;
+    if (resumedPresentation == null) {
+      ai = deps.aiAssets === undefined ? undefined : await deps.aiAssets(modelContext);
+      licensedSource = deps.searchAssets?.();
+    }
+    const result =
+      resumedPresentation ??
+      (await buildAndSavePresentations(
+        {
+          ...presentation,
+          logger: log,
+          ...(ai === undefined ? {} : { ai }),
+          ...(licensedSource === undefined ? {} : { licensedSource }),
+          ...(deps.execution === undefined
+            ? {}
+            : {
+                checkpoint: (summary) => {
+                  const usage = meter.snapshot();
+                  return {
+                    jobId: context.jobId,
+                    presentation: summary,
+                    usage: {
+                      ...usage,
+                      aiImages: usage.aiImages + (ai?.budget.used.images ?? 0),
+                      imageSearches:
+                        usage.imageSearches + (licensedSource?.searchBudget.used.searches ?? 0),
+                      renderPages: usage.renderPages + summary.pages,
+                    },
+                  };
+                },
+              }),
+        },
+        plan,
+        /*
+         * 用户选的样式套件（R-85）。这个值一直存在于标准化结果里，
+         * 而在 R-85 之前全仓**无人读** —— Zod 校验通过后就丢了，
+         * 编排用的是硬编码默认值。表现是「接口看起来支持选模板，
+         * 传什么都不报错，而产物永远是同一套」。
+         */
+        normalized.output_preferences.template_id,
+      ));
 
-    meterAssets(result.pages);
+    savedPages = resumedPresentation == null ? result.pages : 0;
 
     log.info(
       {
@@ -940,7 +1029,8 @@ async function runJob(
         { stage: 'RENDERING_HTML', error_code: 'RENDER_CORE_ASSET_MISSING' },
         '必需素材的降级链未兜住，页面核心结构无法生成',
       );
-      await failJob('PLAN_PERSIST_FAILED', saved.versionId);
+      const failure = await failJob('PLAN_PERSIST_FAILED', saved.versionId);
+      if (deps.execution !== undefined) return failure;
       return { outcome: 'saved', versionId: saved.versionId, status: finalStatus };
     }
 
@@ -968,13 +1058,15 @@ async function runJob(
       },
     };
   } catch (error) {
-    /* 页数按 0：一页都没落库。但已经生成的 AI 图仍要计费，钱已经花了 */
-    meterAssets(0);
     log.error(
       { stage: 'RESOLVING_ASSETS', plan_version_id: saved.versionId },
       `展示编排失败，计划仍可通过 13.3 读取：${String(error)}`,
     );
+    if (deps.execution !== undefined) throw error;
     return { outcome: 'saved', versionId: saved.versionId, status: finalStatus };
+  } finally {
+    // 唯一计量出口：收尾写入失败不能重复累加预算，也不能清零已保存页数。
+    meterAssets();
   }
 }
 
@@ -1051,11 +1143,198 @@ async function settleBilling(
   }
 }
 
+/** 生产入口与真实队列回归共用：延迟异常不会增加 BullMQ attemptsMade。 */
+export async function processGenerationJob(
+  deps: Parameters<typeof consumeGeneration>[0],
+  job: Job,
+  token?: string,
+): Promise<void> {
+  const payload = GenerationJobPayloadSchema.parse(job.data);
+  await withRestoredTrace(payload.traceContext, async () => {
+    const outcome = await consumeGeneration(deps, payload, {
+      attempt: job.attemptsMade + 1,
+      attempts: job.opts.attempts ?? DEFAULT_JOB_OPTIONS.attempts ?? 3,
+    });
+    if (outcome.outcome === 'busy') {
+      await job.moveToDelayed(Date.now() + 1000, token);
+      throw new DelayedError();
+    }
+    if (
+      outcome.outcome === 'rejected' ||
+      (outcome.outcome === 'failed' && isUnrecoverable(outcome.errorCode))
+    ) {
+      throw new UnrecoverableError(outcome.errorCode);
+    }
+    if (outcome.outcome === 'failed') throw new Error(outcome.errorCode);
+  });
+}
+
+/** 消费入口统一领取与续租；冲突返回给 BullMQ 延迟，不消耗业务尝试。 */
+export async function consumeGeneration(
+  deps: {
+    readonly repository: GenerationExecutionRepository;
+    readonly createDeps: (lease: GenerationLease) => GeneratePlanDeps;
+    readonly billing?: JobBilling;
+    readonly logger: Logger;
+  },
+  payload: GenerationJobPayload,
+  attempt: { readonly attempt: number; readonly attempts: number },
+): Promise<GenerateOutcome | { readonly outcome: 'busy' }> {
+  const claim = await deps.repository.claim(payload.jobId, attempt.attempt);
+  if (claim.kind === 'busy') return { outcome: 'busy' };
+  if (claim.kind !== 'acquired') {
+    if (claim.kind === 'terminal')
+      await finalizeGenerationBilling(deps.repository, deps.billing, payload.jobId);
+    if (claim.kind === 'legacy')
+      deps.logger.warn({ job_id: payload.jobId }, '存量任务需人工核对，不自动重放');
+    return {
+      outcome: 'skipped',
+      reason: claim.kind === 'not_found' ? 'not_found' : 'already_terminal',
+    };
+  }
+  let stopped = false;
+  let lost = false;
+  let running = Promise.resolve();
+  let timer: ReturnType<typeof setTimeout>;
+  const renew = (): void => {
+    running = deps.repository
+      .renew(claim.lease)
+      .then((ok) => {
+        lost = !ok;
+      })
+      .catch((error: unknown) => {
+        lost = true;
+        deps.logger.warn({ job_id: payload.jobId, err: error }, '执行租约续期失败，停止本次提交');
+      })
+      .finally(() => {
+        if (!stopped && !lost) {
+          timer = setTimeout(renew, 10000);
+          timer.unref();
+        }
+      });
+  };
+  timer = setTimeout(renew, 10000);
+  timer.unref();
+  try {
+    const jobDeps = deps.createDeps(claim.lease);
+    const plans: TravelPlansRepository = {
+      ...jobDeps.plans,
+      updateJobState: async (input) => {
+        if (lost) throw new GenerationLeaseLostError();
+        return jobDeps.plans.updateJobState(input);
+      },
+    };
+    return await generatePlan(
+      {
+        ...jobDeps,
+        plans,
+        execution: {
+          repository: deps.repository,
+          lease: claim.lease,
+          firstAttempt: claim.firstAttempt,
+          ...attempt,
+        },
+      },
+      payload,
+    );
+  } catch (error) {
+    if (error instanceof GenerationLeaseLostError) {
+      const state = await deps.repository.read(payload.jobId);
+      if (state !== null && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(state.status)) {
+        await finalizeGenerationBilling(deps.repository, deps.billing, payload.jobId);
+        return { outcome: 'skipped', reason: 'already_terminal' };
+      }
+      return { outcome: 'busy' };
+    }
+    throw error;
+  } finally {
+    stopped = true;
+    clearTimeout(timer);
+    await running;
+  }
+}
+
 export async function generatePlan(
   deps: GeneratePlanDeps,
   payload: GenerationJobPayload,
 ): Promise<GenerateOutcome> {
   const meter = new UsageMeter();
+  if (deps.execution !== undefined) {
+    const execution = deps.execution;
+    const state = await execution.repository.read(payload.jobId);
+    if (state?.checkpoint != null) {
+      const usage = state.usage;
+      for (const model of new Set([
+        ...Object.keys(usage.llmInputTokens),
+        ...Object.keys(usage.llmOutputTokens),
+      ])) {
+        meter.addLlm(model, usage.llmInputTokens[model] ?? 0, usage.llmOutputTokens[model] ?? 0);
+      }
+      for (const [model, tokens] of Object.entries(usage.embeddingTokens))
+        meter.addEmbedding(model, tokens);
+      meter.addAiImages(usage.aiImages);
+      meter.addImageSearches(usage.imageSearches);
+      meter.addRenderPages(usage.renderPages);
+    }
+    let outcome: GenerateOutcome;
+    try {
+      outcome = await runJob(
+        { ...deps, execution: { ...execution, checkpoint: state?.checkpoint ?? null } },
+        payload,
+        meter,
+      );
+    } catch (error) {
+      if (error instanceof GenerationLeaseLostError) throw error;
+      deps.logger.error({ job_id: payload.jobId }, `生成尝试失败：${String(error)}`);
+      outcome = {
+        outcome: 'failed',
+        errorCode: error instanceof LlmTimeoutError ? 'PLAN_LLM_TIMEOUT' : 'PLAN_PERSIST_FAILED',
+      };
+    }
+    if (outcome.outcome === 'skipped') {
+      const current = await execution.repository.read(payload.jobId);
+      if (current !== null && !['COMPLETED', 'FAILED', 'CANCELLED'].includes(current.status)) {
+        throw new GenerationLeaseLostError();
+      }
+      await finalizeGenerationBilling(execution.repository, deps.billing, payload.jobId);
+      return outcome;
+    }
+    const failed = outcome.outcome === 'failed' || outcome.outcome === 'rejected';
+    const code =
+      outcome.outcome === 'failed' || outcome.outcome === 'rejected'
+        ? outcome.errorCode
+        : undefined;
+    if (
+      failed &&
+      outcome.outcome !== 'rejected' &&
+      !isUnrecoverable(code!) &&
+      execution.attempt < execution.attempts
+    ) {
+      if (!(await execution.repository.retry(execution.lease, code!)))
+        throw new GenerationLeaseLostError();
+      return outcome;
+    }
+    // COMMIT 已成功但连接断开时，调用方可能尚未收到页数；确认快照不得被覆盖为零。
+    const confirmed = await execution.repository.read(payload.jobId);
+    if (confirmed !== null) {
+      const current = meter.snapshot();
+      meter.addRenderPages(Math.max(0, confirmed.usage.renderPages - current.renderPages));
+      meter.addAiImages(Math.max(0, confirmed.usage.aiImages - current.aiImages));
+      meter.addImageSearches(Math.max(0, confirmed.usage.imageSearches - current.imageSearches));
+    }
+    if (
+      !(await execution.repository.finish(
+        execution.lease,
+        failed ? 'FAILED' : 'COMPLETED',
+        meter.snapshot(),
+        code,
+      ))
+    ) {
+      throw new GenerationLeaseLostError();
+    }
+    await finalizeGenerationBilling(execution.repository, deps.billing, payload.jobId);
+    return outcome;
+  }
   const outcome = await runJob(deps, payload, meter);
   /*
    * `runJob` 抛异常时**不**结算：那时任务不在终态，BullMQ 会重试，

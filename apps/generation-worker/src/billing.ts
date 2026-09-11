@@ -1,5 +1,5 @@
 import { priceUsage, type PriceBook, type PricedUsage, type UsageSnapshot } from '@tps/billing';
-import type { CreditWalletRepository } from '@tps/db';
+import type { CreditWalletRepository, GenerationExecutionRepository } from '@tps/db';
 import type { Logger } from '@tps/shared';
 
 import { creditSettledCrTotal, creditUnpricedTotal, skuDomain } from './credit-metrics.js';
@@ -51,6 +51,54 @@ export interface JobBilling {
     readonly jobId: string;
     readonly usage: UsageSnapshot;
   }): Promise<PricedUsage | null>;
+}
+
+/** 只处理持久终态；账务或确认失败保留标记，下一次消费或扫描继续。 */
+export async function finalizeGenerationBilling(
+  execution: GenerationExecutionRepository,
+  billing: JobBilling | undefined,
+  jobId: string,
+): Promise<void> {
+  const state = await execution.read(jobId);
+  if (state === null || !state.finalizationPending) return;
+  if (state.status === 'COMPLETED') {
+    await billing?.settle({ jobId, usage: state.usage });
+  } else if (state.status === 'FAILED' || state.status === 'CANCELLED') {
+    await billing?.release({ jobId, usage: state.usage });
+  } else {
+    return;
+  }
+  await execution.markFinalized(jobId);
+}
+
+/** BullMQ 最终失败与数据库待收尾分别扫描，一笔故障不能阻塞其他任务。 */
+export async function recoverGenerationBilling(deps: {
+  readonly repository: GenerationExecutionRepository;
+  readonly billing?: JobBilling;
+  readonly failedJobs: readonly { readonly jobId: string; readonly errorCode: string }[];
+  readonly logger: Logger;
+}): Promise<void> {
+  for (const job of deps.failedJobs) {
+    try {
+      await deps.repository.failAbandoned(
+        job.jobId,
+        job.errorCode.slice(0, 60) || 'PLAN_PERSIST_FAILED',
+      );
+    } catch (error) {
+      deps.logger.warn({ job_id: job.jobId, err: error }, '最终失败持久化未完成，下轮继续');
+    }
+  }
+  try {
+    for (const jobId of await deps.repository.pendingFinalizations()) {
+      try {
+        await finalizeGenerationBilling(deps.repository, deps.billing, jobId);
+      } catch (error) {
+        deps.logger.warn({ job_id: jobId, err: error }, '生成账务收尾未完成，下轮继续');
+      }
+    }
+  } catch (error) {
+    deps.logger.warn({ err: error }, '生成收尾扫描失败，下轮继续');
+  }
 }
 
 export interface JobBillingDeps {

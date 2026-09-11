@@ -77,7 +77,7 @@ describe('渲染全链路（fake 编排）', () => {
       logger: createSilentLogger(),
       launch: async () => {
         await new Promise((resolve) => setTimeout(resolve, 50));
-        return { browser: fakeBrowser(), devShm: DEV_SHM } as LaunchedBrowser;
+        return { browser: fakeBrowser(), devShm: DEV_SHM };
       },
     });
 
@@ -125,8 +125,9 @@ describe('渲染全链路（fake 编排）', () => {
      * 要覆盖「上传失败」本身，需要把它放在 upload 的入口：
      * 直接断言 put 的拒绝会传播，而不是被吞掉。
      */
-    await expect(failingStorage.put({ key: 'k', body: new Uint8Array(), contentType: 'image/png' }))
-      .rejects.toThrow(/No space left/);
+    await expect(
+      failingStorage.put({ key: 'k', body: new Uint8Array(), contentType: 'image/png' }),
+    ).rejects.toThrow(/No space left/);
   });
 
   it('存储预签名延迟：presign 编排 100ms 延迟，URL 仍返回', async () => {
@@ -184,6 +185,17 @@ describe('渲染全链路（fake 编排）', () => {
         exports: {
           findById: () => Promise.resolve(null),
         } as never,
+        execution: {
+          claim: () => Promise.resolve({ kind: 'not_found' }),
+          renew: () => Promise.resolve(false),
+          retry: () => Promise.resolve(false),
+          finish: () => Promise.resolve(false),
+          failAbandoned: () => Promise.resolve(false),
+          pendingFinalizations: () => Promise.resolve([]),
+          registerArtifact: async () => {},
+          pendingArtifacts: () => Promise.resolve([]),
+          deferArtifact: async () => {},
+        },
         presentations: { listDayNumbers: () => Promise.resolve([]) },
         storage,
         browser,

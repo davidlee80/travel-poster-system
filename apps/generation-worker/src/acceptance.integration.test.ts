@@ -1,5 +1,7 @@
 import { IdentityService, RedisSessionStore } from '@tps/api/identity';
 import { buildServer } from '@tps/api/server';
+import { dispatchGenerationOutbox } from '@tps/api/generation-outbox';
+import { createGenerationOutboxRepository, createCreditWalletRepository } from '@tps/db';
 import {
   createPool,
   createPresentationsRepository,
@@ -243,6 +245,7 @@ describeIntegration('24.1 #1：20 个端到端用例（集成）', () => {
         identity,
         quota,
         queue,
+        outbox: createGenerationOutboxRepository(pool),
         plans: createTravelPlansRepository(pool),
         presentations: createPresentationsRepository(pool),
         idempotencyLock: new RedisIdempotencyLock(redis),
@@ -375,6 +378,14 @@ describeIntegration('24.1 #1：20 个端到端用例（集成）', () => {
       const handles = created.json<{ plan_id: string; job_id: string; request_id: string }>();
 
       // ── 消费（真实队列消息，载荷由 schema 解析）──
+      await dispatchGenerationOutbox({
+        outbox: createGenerationOutboxRepository(pool),
+        queue,
+        logger: createSilentLogger(),
+        releaseFailed: async (jobId) => {
+          await createCreditWalletRepository(pool).releaseFailed({ jobId, burnedCr: 0, lines: [] });
+        },
+      });
       const waiting = await rawQueue.getJobs(['waiting', 'delayed', 'prioritized']);
       expect(waiting).toHaveLength(1);
       const payload = GenerationJobPayloadSchema.parse(waiting[0]!.data);

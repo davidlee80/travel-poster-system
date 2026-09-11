@@ -1,5 +1,12 @@
 import { IdentityService, RedisSessionStore } from '@tps/api/identity';
 import { buildServer } from '@tps/api/server';
+import { dispatchGenerationOutbox } from '@tps/api/generation-outbox';
+import {
+  createGenerationOutboxRepository,
+  createCreditWalletRepository,
+  createGenerationExecutionRepository,
+  type GenerationLease,
+} from '@tps/db';
 import {
   createPool,
   createPresentationsRepository,
@@ -12,7 +19,11 @@ import {
 import { LocalHashingEmbeddingClient } from '@tps/llm';
 import { metricsText } from '@tps/observability';
 import { GenerationMetadataSchema, TravelPosterViewModelSchema } from '@tps/schemas';
-import { parseRetrievalProjection, projectionToEmbeddingText } from '@tps/planning';
+import {
+  makeValidContext,
+  parseRetrievalProjection,
+  projectionToEmbeddingText,
+} from '@tps/planning';
 import {
   BullMqPlanQueue,
   GenerationJobPayloadSchema,
@@ -42,7 +53,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { MAX_AI_IMAGES_PER_JOB } from './assets/ai-budget.js';
 import { createE2eWorkerDeps } from './e2e-harness.js';
-import { generatePlan } from './generate-plan.js';
+import { consumeGeneration } from './generate-plan.js';
 
 /**
  * 端到端链路（TP-2-17 的验收点，需真实 PostgreSQL + Redis）。
@@ -91,6 +102,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
   let app: ReturnType<typeof buildServer>;
   let queue: BullMqPlanQueue;
   let rawQueue: Queue;
+  let sessionCookie: string;
 
   beforeAll(async () => {
     pool = createPool({
@@ -114,10 +126,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
       now: () => new Date(),
     });
 
-    /*
-     * 身份走真实的 Redis 会话存储与真实 users 表 —— 这条链路的第一环就是
-     * 「没有身份也能生成」（13.0 第 3.a 条），用假身份服务会把它测掉。
-     */
+    // 注册会话走真实 Redis 与 users 表；匿名创建保留用于验证 API 的产品策略拦截。
     const identity = new IdentityService({
       users: createUsersRepository(pool),
       sessions: new RedisSessionStore(redis),
@@ -125,7 +134,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
       quotaConfig,
       now: () => new Date(),
       secureCookies: false,
-      // P7：这条链路验的是「无身份提交 → 自动建号」，因此保持打开
+      // 即使允许创建匿名号，生成 API 也必须拒绝匿名身份。
       anonymousEnabled: true,
     });
 
@@ -138,6 +147,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
         identity,
         quota,
         queue,
+        outbox: createGenerationOutboxRepository(pool),
         plans: createTravelPlansRepository(pool),
         presentations: createPresentationsRepository(pool),
         idempotencyLock: new RedisIdempotencyLock(redis),
@@ -164,6 +174,15 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     await pool.query('DELETE FROM assets');
     await redis.flushdb();
     await rawQueue.obliterate({ force: true }).catch(() => undefined);
+    const user = await createUsersRepository(pool).createRegistered({
+      email: 'pipeline@example.invalid',
+      passwordHash: 'fake',
+      displayName: null,
+      dailyQuota: 50,
+      monthlyQuota: 100,
+    });
+    const session = await new RedisSessionStore(redis).create(user.id);
+    sessionCookie = `${COOKIE_NAMES.session}=${session.token}`;
   });
 
   /**
@@ -225,19 +244,46 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
 
   /** 从队列里取出唯一一条待处理任务的载荷 */
   async function takeQueuedPayload(): Promise<ReturnType<typeof GenerationJobPayloadSchema.parse>> {
+    await dispatchGenerationOutbox({
+      outbox: createGenerationOutboxRepository(pool),
+      queue,
+      logger: createSilentLogger(),
+      releaseFailed: async (jobId) => {
+        await createCreditWalletRepository(pool).releaseFailed({ jobId, burnedCr: 0, lines: [] });
+      },
+    });
     const waiting = await rawQueue.getJobs(['waiting', 'delayed', 'prioritized']);
     expect(waiting).toHaveLength(1);
     return GenerationJobPayloadSchema.parse(waiting[0]!.data);
   }
 
   // 依赖装配见 e2e-harness.ts（与 acceptance.integration.test.ts 共用）
-  const workerDeps = () => createE2eWorkerDeps(pool);
+  async function consume(payload: ReturnType<typeof GenerationJobPayloadSchema.parse>) {
+    const base = createE2eWorkerDeps(pool);
+    return consumeGeneration(
+      {
+        repository: createGenerationExecutionRepository(pool),
+        logger: base.logger,
+        createDeps: (lease: GenerationLease) => ({
+          ...base,
+          plans: createTravelPlansRepository(pool, lease),
+          presentation: {
+            ...base.presentation!,
+            presentations: createPresentationsRepository(pool, lease),
+          },
+        }),
+      },
+      payload,
+      { attempt: 1, attempts: 3 },
+    );
+  }
 
-  it('无身份提交 → 入队 → 生成 → 计划可读', async () => {
-    // 1. 提交（13.0 第 3.a 条：无身份也不返回 401，现场建匿名号）
+  it('注册会话提交 → Outbox → 生成租约 → 计划可读', async () => {
+    // 1. 使用真实注册会话提交，不绕过当前匿名生成限制。
     const created = await app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie: sessionCookie },
       payload: requestBody(),
     });
 
@@ -250,7 +296,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     }>();
     expect(handles.status).toBe('QUEUED');
 
-    const cookie = anonymousCookie(created.headers['set-cookie']);
+    const cookie = sessionCookie;
 
     // 2. 队列里确实有这条任务，且载荷只含标识符
     const payload = await takeQueuedPayload();
@@ -270,7 +316,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     expect(tooEarly.statusCode).toBe(404);
 
     // 4. Worker 消费
-    const outcome = await generatePlan(workerDeps(), payload);
+    const outcome = await consume(payload);
     expect(outcome).toMatchObject({ outcome: 'saved' });
 
     /*
@@ -377,13 +423,14 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     const created = await app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie: sessionCookie },
       payload: requestBody(),
     });
     expect(created.statusCode).toBe(201);
     const handles = created.json<{ plan_id: string; job_id: string }>();
-    const cookie = anonymousCookie(created.headers['set-cookie']);
+    const cookie = sessionCookie;
 
-    const outcome = await generatePlan(workerDeps(), await takeQueuedPayload());
+    const outcome = await consume(await takeQueuedPayload());
     expect(outcome).toMatchObject({ outcome: 'saved' });
 
     // N+1 页（5 天 + 完整页）
@@ -470,12 +517,13 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     const created = await app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie: sessionCookie },
       payload: requestBody(),
     });
     const handles = created.json<{ plan_id: string }>();
-    const cookie = anonymousCookie(created.headers['set-cookie']);
+    const cookie = sessionCookie;
 
-    await generatePlan(workerDeps(), await takeQueuedPayload());
+    await consume(await takeQueuedPayload());
 
     /*
      * 本地素材库是空的（没有灌种子素材，也没灌占位图）。P3 时这意味着
@@ -518,14 +566,8 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
       expect(GenerationMetadataSchema.safeParse(row.generation_metadata).success).toBe(true);
     }
 
-    /*
-     * TP-4-17：匿名身份的 AI Hero 额度为 0。
-     *
-     * 这条用例走的是无身份提交（13.0 第 3.a 条现场建匿名号），因此
-     * **一张 Hero 都不该被生成**，而计划仍然可读、页面仍然可渲染
-     * （模板对 `hero_asset: null` 有渐变背景分支）。
-     */
-    expect(bindings.rows.some((row) => row.role === 'HERO_BACKGROUND')).toBe(false);
+    // 注册用户有 Hero 配额；匿名零额度由下面的仓储夹具独立覆盖。
+    expect(bindings.rows.some((row) => row.role === 'HERO_BACKGROUND')).toBe(true);
 
     /*
      * 21.4：单任务 AI 图上限 3 张。绑定数可以多于 3
@@ -545,16 +587,66 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     expect(presentation.json<{ validation_status: string }>().validation_status).toBe('DEGRADED');
   });
 
-  it('同一任务重复投递被终态挡住（13.8 的 Worker 侧并发保护）', async () => {
-    const created = await app.inject({
+  it('匿名提交被拒绝，不产生任务或 Outbox', async () => {
+    const response = await app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
       payload: requestBody(),
     });
-    const cookie = anonymousCookie(created.headers['set-cookie']);
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('AUTH_ANONYMOUS_FORBIDDEN');
+    expect(anonymousCookie(response.headers['set-cookie'])).toContain(`${COOKIE_NAMES.anonymous}=`);
+    expect((await pool.query('SELECT id FROM generation_jobs')).rows).toHaveLength(0);
+    expect((await pool.query('SELECT job_id FROM generation_outbox')).rows).toHaveLength(0);
+  });
+
+  it('仓储构造的匿名任务保留 Hero 零额度且仍可生成展示页', async () => {
+    const user = await createUsersRepository(pool).createAnonymous({
+      tokenHash: 'a'.repeat(64),
+      expiresAt: new Date(Date.now() + 86400000),
+      createdIp: null,
+      dailyQuota: 5,
+      monthlyQuota: 20,
+    });
+    const normalized = makeValidContext().normalized;
+    const handles = await createTravelPlansRepository(pool).createGeneration({
+      userId: user.id,
+      clientRequestId: 'anon-fixture',
+      idempotencyKey: 'b'.repeat(64),
+      rawRequest: {},
+      normalizedRequest: normalized,
+      destinationName: normalized.destination_name,
+      destinationPlaceId: normalized.destination_place_id ?? null,
+      startDate: normalized.start_date,
+      endDate: normalized.end_date,
+      totalDays: normalized.total_days,
+      travelerCount: normalized.traveler_count,
+      supersedeBefore: new Date(0),
+    });
+    expect(await consume({ ...handles, userId: user.id })).toMatchObject({ outcome: 'saved' });
+    const bindings = await pool.query('SELECT role FROM plan_asset_bindings WHERE plan_id = $1', [
+      handles.planId,
+    ]);
+    expect(bindings.rows.length).toBeGreaterThan(0);
+    expect(bindings.rows.some((row) => row.role === 'HERO_BACKGROUND')).toBe(false);
+    expect(
+      (await pool.query('SELECT id FROM plan_presentations WHERE plan_id = $1', [handles.planId]))
+        .rows.length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('同一任务重复投递被终态挡住（13.8 的 Worker 侧并发保护）', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/travel-plans/generate',
+      headers: { cookie: sessionCookie },
+      payload: requestBody(),
+    });
+    expect(created.statusCode).toBe(201);
+    const cookie = sessionCookie;
     const payload = await takeQueuedPayload();
 
-    const first = await generatePlan(workerDeps(), payload);
+    const first = await consume(payload);
     expect(first.outcome).toBe('saved');
 
     /*
@@ -574,7 +666,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
      * 因此这里改为断言重复投递的正确行为，版本隔离的断言下移到
      * `presentations` 仓储的集成测试（它直接构造两个版本）。
      */
-    const second = await generatePlan(workerDeps(), payload);
+    const second = await consume(payload);
     expect(second).toEqual({ outcome: 'skipped', reason: 'already_terminal' });
 
     if (first.outcome !== 'saved') return;
@@ -649,10 +741,11 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     const first = await app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie: sessionCookie },
       payload: requestBody(),
     });
     expect(first.statusCode).toBe(201);
-    const saved = await generatePlan(workerDeps(), await takeQueuedPayload());
+    const saved = await consume(await takeQueuedPayload());
     expect(saved.outcome).toBe('saved');
 
     const stored = await pool.query<{
@@ -714,11 +807,12 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     const first = await app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie: sessionCookie },
       payload: body,
     });
     expect(first.statusCode).toBe(201);
 
-    const cookie = anonymousCookie(first.headers['set-cookie']);
+    const cookie = sessionCookie;
 
     // 同一身份、同一 client_request_id、同一内容 → 任务仍在进行中 → 409
     const again = await app.inject({
@@ -734,7 +828,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     expect(count.rows[0]!.count).toBe('1');
   });
 
-  it('显式指定第二套套件：提交 → 生成 → 落库全部是 blueprint_v1（R-85 P3，兼计费 B4）', async () => {
+  it('显式指定第二套套件：提交 → 生成 → 落库全部是 blueprint_v1（R-85 P3）', async () => {
     /*
      * P3 的端到端：用户选了非默认套件后，模板 ID 必须从请求一路传到落库。
      *
@@ -742,21 +836,20 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
      * 显式传另一个值才真正验「output_preferences 被消费」。
      * 若不消费：落库全是默认套件，而任务 COMPLETED —— 没有报错。
      *
-     * **本用例提交时不带任何会话 Cookie（匿名身份），因此它同时是计费计划
-     * B4 的覆盖**：匿名豁免 × 模板两个维度正交 —— 匿名用户选非默认套件
-     * 照常生成，不因任何计费交互失败。计费端点对匿名的拒绝（403）
-     * 由 credits.test.ts 的既有用例覆盖。
+     * 本用例使用注册会话且未装配计费；验证免费任务仍写 Outbox，
+     * 并保留用户选择的模板，不改变模板计费规则。
      */
     const created = await app.inject({
       method: 'POST',
       url: '/api/v1/travel-plans/generate',
+      headers: { cookie: sessionCookie },
       payload: requestBody('blueprint_v1'),
     });
     expect(created.statusCode).toBe(201);
     const handles = created.json<{ plan_id: string; job_id: string }>();
 
     const payload = await takeQueuedPayload();
-    const outcome = await generatePlan(workerDeps(), payload);
+    const outcome = await consume(payload);
     expect(outcome).toMatchObject({ outcome: 'saved' });
 
     // 落库核对：全览页 + 每日页全部是 blueprint_v1，没有一个行是默认套件
@@ -782,7 +875,7 @@ describeIntegration('端到端：提交 → 生成 → 读取（集成）', () =
     expect(rows.rows.some((row) => row.page_type === 'DAILY_POSTER')).toBe(true);
 
     // 展示数据可读，且取回的就是 blueprint 那一套
-    const cookie = anonymousCookie(created.headers['set-cookie']);
+    const cookie = sessionCookie;
     const full = await app.inject({
       method: 'GET',
       url: `/api/v1/travel-plans/${handles.plan_id}/presentations/full`,

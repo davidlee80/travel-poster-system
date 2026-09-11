@@ -21,6 +21,8 @@ import {
 } from '@tps/shared';
 import {
   InMemoryCreditWalletRepository,
+  InsufficientGenerationCreditsError,
+  type CreateGenerationInput,
   UniqueViolationError,
   samplePriceBook,
   type CancelJobResult,
@@ -28,7 +30,7 @@ import {
   type PresentationsRepository,
   type TravelPlansRepository,
 } from '@tps/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_JOB_LIMITS } from '@tps/billing';
 
@@ -58,7 +60,14 @@ const config: ServiceConfig = {
 const quotaConfig: QuotaConfig = {
   anonymous: { perMinute: 10, dailyPlans: 5, monthlyPlans: 10, exportsPerPlan: 3, aiHero: 0 },
   registered: { perMinute: 10, dailyPlans: 5, monthlyPlans: 20, exportsPerPlan: 10, aiHero: 2 },
-  ip: { anonCreatePerHour: 100, anonCreatePerDay: 200, plansPerDay: 100, loginFailuresPerHour: 10, registerPerHour: 10, registerPerDay: 50 },
+  ip: {
+    anonCreatePerHour: 100,
+    anonCreatePerDay: 200,
+    plansPerDay: 100,
+    loginFailuresPerHour: 10,
+    registerPerHour: 10,
+    registerPerDay: 50,
+  },
   emailLoginFailuresPerHour: 5,
   /*
    * 少了这一项，`anonTtlSeconds()` 会算出 NaN，匿名令牌的过期时间成为
@@ -138,6 +147,8 @@ class FakePresentationsRepository implements PresentationsRepository {
 const IDEMPOTENCY_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000;
 
 class FakePlansRepository implements TravelPlansRepository {
+  readonly outbox: { jobId: string; requestId: string; planId: string; userId: string }[] = [];
+  constructor(private readonly wallet?: InMemoryCreditWalletRepository) {}
   private sequence = 0;
   readonly byKey = new Map<
     string,
@@ -166,11 +177,9 @@ class FakePlansRepository implements TravelPlansRepository {
   /** 置为 true 时下一次 createGeneration 抛唯一约束冲突（模拟 Redis 失效后的兜底） */
   forceUniqueViolation = false;
 
-  createGeneration(input: {
-    userId: string;
-    idempotencyKey: string;
-    supersedeBefore: Date;
-  }): Promise<{ requestId: string; planId: string; jobId: string }> {
+  async createGeneration(
+    input: CreateGenerationInput,
+  ): Promise<{ requestId: string; planId: string; jobId: string }> {
     if (this.forceUniqueViolation) {
       this.forceUniqueViolation = false;
       return Promise.reject(new UniqueViolationError('travel_requests_idempotency_uk'));
@@ -182,6 +191,18 @@ class FakePlansRepository implements TravelPlansRepository {
       planId: `plan-${this.sequence}`,
       jobId: `job-${this.sequence}`,
     };
+    if (input.hold !== undefined) {
+      if (this.wallet === undefined) throw new Error('计费夹具缺少钱包');
+      const reserved = await this.wallet.reserve({
+        ...input.hold,
+        userId: input.userId,
+        jobId: handles.jobId,
+      });
+      if (!reserved.ok && reserved.reason === 'INSUFFICIENT') {
+        throw new InsufficientGenerationCreditsError(input.hold.amountCr, reserved.balanceCr);
+      }
+    }
+    this.outbox.push({ ...handles, userId: input.userId });
     this.byKey.set(input.idempotencyKey, {
       ...handles,
       jobStatus: 'QUEUED',
@@ -355,6 +376,7 @@ function build(
   /** 背压准入。缺省不装，与引入它之前的行为一致 */
   backlog?: QueueBacklog,
   admissionMaxDepth = 40,
+  outboxPending?: number,
 ): Harness {
   const users = new FakeUsersRepository(now);
   const sessions = new InMemorySessionStore();
@@ -374,11 +396,10 @@ function build(
     anonymousEnabled: true,
   });
 
-  const repository = new FakePlansRepository();
+  const wallet = new InMemoryCreditWalletRepository();
+  const repository = new FakePlansRepository(wallet);
   const presentations = new FakePresentationsRepository();
   const queue = new InMemoryPlanQueue();
-
-  const wallet = new InMemoryCreditWalletRepository();
   wallet.priceBook = samplePriceBook();
   const credits =
     billing === 'off'
@@ -408,6 +429,11 @@ function build(
       // N-01 需要「今天」；请求 fixture 的出发日期是 2026-04-10
       now,
       ...(backlog === undefined ? {} : { backlog, admissionMaxDepth }),
+      ...(outboxPending === undefined
+        ? {}
+        : {
+            outbox: { stats: () => Promise.resolve({ pending: outboxPending, oldestSeconds: 0 }) },
+          }),
       ...(credits === undefined ? {} : { credits }),
     },
   });
@@ -417,6 +443,27 @@ function build(
 
 beforeEach(() => {
   harness = build();
+});
+
+it('Redis 入队故障不改变持久接受的 201，同键重放指向原任务', async () => {
+  const cookie = await registeredCookie();
+  vi.spyOn(h().queue, 'enqueue').mockRejectedValue(new Error('Redis unavailable'));
+  const first = await h().app.inject({
+    method: 'POST',
+    url: '/api/v1/travel-plans/generate',
+    headers: { cookie },
+    payload: makeValidRequest(),
+  });
+  expect(first.statusCode).toBe(201);
+  const second = await h().app.inject({
+    method: 'POST',
+    url: '/api/v1/travel-plans/generate',
+    headers: { cookie },
+    payload: makeValidRequest(),
+  });
+  expect(second.statusCode).toBe(409);
+  expect(second.headers['x-tps-job-id']).toBe(first.json().job_id);
+  expect(h().repository.jobs.size).toBe(1);
 });
 
 afterEach(async () => {
@@ -523,10 +570,11 @@ describe('13.1 POST /travel-plans/generate', () => {
       payload: body(),
     });
 
-    expect(h().queue.enqueued).toEqual([
+    expect(h().repository.outbox).toEqual([
       { jobId: 'job-1', requestId: 'request-1', planId: 'plan-1', userId: expect.any(String) },
     ]);
-    expect(JSON.stringify(h().queue.enqueued)).not.toContain('杭州');
+    expect(JSON.stringify(h().repository.outbox)).not.toContain('杭州');
+    expect(h().queue.enqueued).toEqual([]);
   });
 
   it('结构非法返回 400 REQ_SCHEMA_INVALID 且带 field', async () => {
@@ -1602,7 +1650,8 @@ describe('TP-5-10 灰度开关', () => {
     });
 
     expect(response.statusCode).toBe(201);
-    expect(harness.queue.enqueued).toHaveLength(1);
+    expect(harness.repository.outbox).toHaveLength(1);
+    expect(harness.queue.enqueued).toHaveLength(0);
   });
 
   it('未装配开关时视为全开（不因为漏配而拒绝服务）', async () => {
@@ -1882,6 +1931,24 @@ describe('背压准入（生成端点）', () => {
     const cookie = await registeredCookie();
 
     expect((await generate(cookie)).statusCode).toBe(201);
+  });
+
+  it.each([
+    [undefined, 41, 503],
+    [20, 21, 503],
+    [20, 20, 201],
+  ])('队列深度 %s 加未投递 Outbox %s 返回 %s', async (depth, pending, status) => {
+    await h().app.close();
+    const backlog = depth === undefined ? undefined : createQueueDepthTracker();
+    if (depth !== undefined) backlog!.record(PLAN_QUEUE_NAME, depth);
+    harness = build(new InMemoryIdempotencyLock(), undefined, 'off', backlog, 40, pending);
+    const cookie = await registeredCookie();
+    const response = await generate(cookie);
+    expect(response.statusCode).toBe(status);
+    expect(h().repository.jobs.size).toBe(status === 201 ? 1 : 0);
+    if (status === 503) {
+      expect(response.json()).toMatchObject({ error: { code: 'SYS_QUEUE_SATURATED' } });
+    }
   });
 
   it('未装配准入时行为不变（默认夹具）', async () => {

@@ -1,4 +1,9 @@
-import type { PresentationsRepository, SavePresentationInput } from '@tps/db';
+import type {
+  PresentationsRepository,
+  SavePresentationInput,
+  SavePresentationCheckpoint,
+  PresentationCheckpoint,
+} from '@tps/db';
 import {
   assetRequirementEnvelope,
   buildDailyPoster,
@@ -47,6 +52,7 @@ import { resolveAssets, toAssetLookup, type ResolveAssetsDeps } from '../assets/
  */
 
 export interface BuildPresentationDeps extends ResolveAssetsDeps {
+  readonly checkpoint?: (summary: PresentationCheckpoint) => SavePresentationCheckpoint;
   readonly presentations: PresentationsRepository;
   readonly logger: Logger;
 }
@@ -150,9 +156,7 @@ export async function buildAndSavePresentations(
     });
   }
 
-  await deps.presentations.savePresentations(rows);
-
-  return {
+  const result: BuildPresentationResult = {
     pages: rows.length,
     validationStatus,
     resolved: resolution.all,
@@ -161,6 +165,9 @@ export async function buildAndSavePresentations(
     budgetMismatch,
     warnings: resolution.warnings,
   };
+  const { resolved: _resolved, ...summary } = result;
+  await deps.presentations.savePresentations(rows, deps.checkpoint?.(summary));
+  return result;
 }
 
 /** 十五章的三档 */

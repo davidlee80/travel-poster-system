@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { PhoneVerificationService } from '../identity/phone-verification.js';
 import {
   COOKIE_NAMES,
   InMemoryCounterStore,
@@ -33,7 +34,14 @@ function quotaConfig(overrides: Partial<QuotaConfig> = {}): QuotaConfig {
   return {
     anonymous: { perMinute: 99, dailyPlans: 5, monthlyPlans: 10, exportsPerPlan: 3, aiHero: 0 },
     registered: { perMinute: 99, dailyPlans: 5, monthlyPlans: 20, exportsPerPlan: 10, aiHero: 2 },
-    ip: { anonCreatePerHour: 5, anonCreatePerDay: 20, plansPerDay: 10, loginFailuresPerHour: 10, registerPerHour: 10, registerPerDay: 50 },
+    ip: {
+      anonCreatePerHour: 5,
+      anonCreatePerDay: 20,
+      plansPerDay: 10,
+      loginFailuresPerHour: 10,
+      registerPerHour: 10,
+      registerPerDay: 50,
+    },
     emailLoginFailuresPerHour: 5,
     anonTokenTtlDays: 30,
     ...overrides,
@@ -42,7 +50,11 @@ function quotaConfig(overrides: Partial<QuotaConfig> = {}): QuotaConfig {
 
 function makeApp(
   config: QuotaConfig = quotaConfig(),
-  options: { readonly anonymousEnabled?: boolean } = {},
+  options: {
+    readonly anonymousEnabled?: boolean;
+    readonly nodeEnv?: ServiceConfig['nodeEnv'];
+    readonly phoneVerification?: PhoneVerificationService;
+  } = {},
 ) {
   const logger = createSilentLogger();
   const users = new FakeUsersRepository(() => NOW);
@@ -62,7 +74,7 @@ function makeApp(
   });
 
   const app = buildServer({
-    config: serviceConfig,
+    config: { ...serviceConfig, nodeEnv: options.nodeEnv ?? 'test' },
     logger,
     shutdown: new GracefulShutdown({
       logger,
@@ -70,7 +82,14 @@ function makeApp(
         throw new Error('__exit__');
       },
     }),
-    auth: { identity, quota, secureCookies: false },
+    auth: {
+      identity,
+      quota,
+      secureCookies: false,
+      ...(options.phoneVerification === undefined
+        ? {}
+        : { phoneVerification: options.phoneVerification }),
+    },
   });
 
   return { app, users };
@@ -95,6 +114,28 @@ let app: ReturnType<typeof makeApp>['app'] | undefined;
 afterEach(async () => {
   await app?.close();
   app = undefined;
+});
+
+describe('短信响应的生产隔离', () => {
+  it.each(['production', 'test'] as const)('%s 环境按服务配置控制验证码输出', async (nodeEnv) => {
+    const send = vi.fn().mockResolvedValue({ outcome: 'sent', devCode: '123456' });
+    const harness = makeApp(quotaConfig(), {
+      nodeEnv,
+      phoneVerification: { send } as unknown as PhoneVerificationService,
+    });
+    app = harness.app;
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/sms/send',
+      payload: { phone: '13900000000', purpose: 'LOGIN' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(
+      nodeEnv === 'production'
+        ? { sent: true, expires_in_seconds: 300 }
+        : { sent: true, expires_in_seconds: 300, dev_code: '123456' },
+    );
+  });
 });
 
 describe('GET /api/v1/auth/session（13.9.1）', () => {

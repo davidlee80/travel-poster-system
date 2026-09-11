@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { InMemoryExportStorage, exportObjectKeyFor } from '@tps/storage';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { createCreditWalletRepository } from './credit-wallet.js';
 import { createRetentionRepository, type RetentionRepository } from './retention.js';
 import { migrate } from './migrate.js';
 import { migrationsDirectory } from './migrations-dir.js';
@@ -103,6 +104,106 @@ describeIntegration('计划仓储（集成，需 PostgreSQL）', () => {
   const notBefore = (): Date => new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000);
 
   describe('createGeneration', () => {
+    it('原子提交：余额不足回滚请求、计划、任务，不占幂等键', async () => {
+      const userId = await anonymousUser();
+      const input = {
+        ...generationInput(userId, key('no-credit')),
+        hold: { amountCr: 100, priceVersion: 1, expiresAt: new Date(Date.now() + 60_000) },
+      };
+      await expect(repository.createGeneration(input)).rejects.toMatchObject({
+        name: 'InsufficientGenerationCreditsError',
+        requiredCr: 100,
+        balanceCr: 0,
+      });
+      expect(
+        await repository.findByIdempotencyKey(userId, input.idempotencyKey, notBefore()),
+      ).toBeNull();
+      const counts = await pool.query('SELECT count(*)::int AS count FROM generation_jobs');
+      expect(counts.rows[0].count).toBe(0);
+    });
+
+    it('原子提交：两个不同键争抢余额只接受一个，预留和 Outbox 同时持久化', async () => {
+      const userId = await anonymousUser();
+      const wallet = createCreditWalletRepository(pool);
+      await wallet.credit({
+        userId,
+        amountCr: 100,
+        kind: 'GRANT',
+        idempotencyKey: `grant:${userId}`,
+      });
+      const outcomes = await Promise.allSettled(
+        ['race-a', 'race-b'].map((seed) =>
+          repository.createGeneration({
+            ...generationInput(userId, key(seed)),
+            hold: { amountCr: 100, priceVersion: 1, expiresAt: new Date(Date.now() + 60_000) },
+          }),
+        ),
+      );
+      expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+      expect(await wallet.balance(userId)).toEqual({ balanceCr: 0, heldCr: 100 });
+      const counts = await pool.query(`SELECT
+        (SELECT count(*)::int FROM generation_jobs) AS jobs,
+        (SELECT count(*)::int FROM generation_outbox) AS pending,
+        (SELECT count(*)::int FROM credit_holds) AS holds`);
+      expect(counts.rows[0]).toEqual({ jobs: 1, pending: 1, holds: 1 });
+    });
+
+    it('同键并发付费提交只保留一笔预留与一条 Outbox', async () => {
+      const userId = await registeredUser('hold-race@example.invalid');
+      const wallet = createCreditWalletRepository(pool);
+      await wallet.credit({ userId, amountCr: 1000, kind: 'GRANT', idempotencyKey: 'hold-race' });
+      const input = {
+        ...generationInput(userId, key('same-hold')),
+        hold: { amountCr: 100, priceVersion: 1, expiresAt: new Date(Date.now() + 60000) },
+      };
+      const outcomes = await Promise.allSettled(
+        Array.from({ length: 5 }, () => repository.createGeneration(input)),
+      );
+      expect(outcomes.filter((item) => item.status === 'fulfilled')).toHaveLength(1);
+      expect(
+        outcomes
+          .filter((item) => item.status === 'rejected')
+          .every((item) => item.reason instanceof UniqueViolationError),
+      ).toBe(true);
+      expect(await wallet.balance(userId)).toEqual({ balanceCr: 900, heldCr: 100 });
+      const counts = await pool.query(`SELECT
+        (SELECT count(*)::int FROM credit_holds) AS holds,
+        (SELECT count(*)::int FROM generation_outbox) AS outbox`);
+      expect(counts.rows[0]).toEqual({ holds: 1, outbox: 1 });
+    });
+
+    it('Outbox 插入故障回滚已执行的预留和全部业务行', async () => {
+      const userId = await registeredUser('outbox-fault@example.invalid');
+      const wallet = createCreditWalletRepository(pool);
+      await wallet.credit({
+        userId,
+        amountCr: 1000,
+        kind: 'GRANT',
+        idempotencyKey: 'outbox-fault',
+      });
+      const input = {
+        ...generationInput(userId, key('outbox-fault')),
+        hold: { amountCr: 100, priceVersion: 1, expiresAt: new Date(Date.now() + 60000) },
+      };
+      await pool.query(
+        'ALTER TABLE generation_outbox ADD CONSTRAINT p1_insert_fault CHECK (false) NOT VALID',
+      );
+      try {
+        await expect(repository.createGeneration(input)).rejects.toThrow('p1_insert_fault');
+        expect(await wallet.balance(userId)).toEqual({ balanceCr: 1000, heldCr: 0 });
+        const counts = await pool.query(`SELECT
+          (SELECT count(*)::int FROM travel_requests) AS requests,
+          (SELECT count(*)::int FROM travel_plans) AS plans,
+          (SELECT count(*)::int FROM generation_jobs) AS jobs,
+          (SELECT count(*)::int FROM credit_holds) AS holds,
+          (SELECT count(*)::int FROM credit_ledger WHERE kind = 'RESERVE') AS reserves`);
+        expect(counts.rows[0]).toEqual({ requests: 0, plans: 0, jobs: 0, holds: 0, reserves: 0 });
+      } finally {
+        await pool.query('ALTER TABLE generation_outbox DROP CONSTRAINT p1_insert_fault');
+      }
+      expect(await repository.createGeneration(input)).toHaveProperty('jobId');
+    });
+
     it('同事务插入请求、计划与任务', async () => {
       const userId = await anonymousUser();
       const handles = await repository.createGeneration(generationInput(userId, key('abc')));

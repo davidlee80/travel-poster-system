@@ -12,6 +12,8 @@ import {
 } from '@tps/shared';
 import {
   UniqueViolationError,
+  InsufficientGenerationCreditsError,
+  type GenerationOutboxRepository,
   type ExistingGeneration,
   type PlannerConfigRepository,
   type PresentationsRepository,
@@ -40,7 +42,7 @@ import {
   type QueueBacklog,
 } from '../queue-depth.js';
 import { recordCreditGate } from '../credits/metrics.js';
-import type { CreditsService, JobCreditCheck } from '../credits/service.js';
+import { HOLD_TTL_MS, type CreditsService, type JobCreditCheck } from '../credits/service.js';
 import { resolveIdentity, type IdentityContextDeps } from './identity-context.js';
 
 /**
@@ -125,6 +127,7 @@ export interface TravelPlanRoutesDeps extends IdentityContextDeps {
   readonly presentations: PresentationsRepository;
   readonly quota: QuotaGuard;
   readonly queue: PlanQueue;
+  readonly outbox?: Pick<GenerationOutboxRepository, 'stats'>;
   readonly idempotencyLock: IdempotencyLock;
   /**
    * 灰度开关（TP-5-10）。缺省视为全开 —— 未装配开关的部署
@@ -210,7 +213,7 @@ function generateResponse(existing: ExistingGeneration): GenerateResponse {
 }
 
 export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanRoutesDeps): void {
-  const { plans, presentations, quota, queue, idempotencyLock } = deps;
+  const { plans, presentations, quota, idempotencyLock } = deps;
 
   /**
    * 13.1 创建生成任务。
@@ -242,9 +245,10 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
      * 代价是拒绝指标没有 `user_type` 维度。可以接受：过载时要的结论是
      * 「该加多少副本」，而那与被拒的人是否注册无关。
      */
-    if (deps.backlog !== undefined) {
+    if (deps.backlog !== undefined || deps.outbox !== undefined) {
+      const pending = (await deps.outbox?.stats())?.pending ?? 0;
       const admission = decideAdmission(
-        deps.backlog,
+        { depthOf: (name) => (deps.backlog?.depthOf(name) ?? 0) + pending },
         PLAN_QUEUE_NAME,
         deps.admissionMaxDepth ?? loadQueueAdmissionMaxDepth(),
       );
@@ -479,8 +483,19 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
     }
 
     let handles;
+    const traceContext = captureTraceContext();
     try {
       handles = await plans.createGeneration({
+        ...(traceContext === undefined ? {} : { traceContext }),
+        ...(creditCheck?.kind === 'chargeable'
+          ? {
+              hold: {
+                amountCr: creditCheck.holdCr,
+                priceVersion: creditCheck.priceVersion,
+                expiresAt: new Date(deps.now().getTime() + HOLD_TTL_MS),
+              },
+            }
+          : {}),
         userId: resolved.identity.userId,
         clientRequestId: normalized.client_request_id,
         idempotencyKey,
@@ -495,6 +510,12 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
         supersedeBefore: idempotencyNotBefore,
       });
     } catch (error) {
+      if (error instanceof InsufficientGenerationCreditsError) {
+        recordCreditGate('generate', 'insufficient');
+        return fail(request, reply, 'AUTH_INSUFFICIENT_CREDITS', {
+          details: { required_cr: error.requiredCr, balance_cr: error.balanceCr },
+        });
+      }
       if (!(error instanceof UniqueViolationError)) throw error;
 
       // 唯一索引兜底命中（Redis 不可用时的正常路径）
@@ -511,61 +532,8 @@ export function registerTravelPlanRoutes(app: FastifyInstance, deps: TravelPlanR
       return reply.code(200).send(generateResponse(raced));
     }
 
-    /*
-     * ── 原子预留（C-3）──
-     *
-     * **这一步才是闸门**：`UPDATE ... WHERE balance_cr >= $n` 让「查余额」与
-     * 「扣余额」之间没有窗口，因此并发请求不会超发（见 credit-wallet.ts）。
-     * 上面那次预检只是为了让常见情形不留垃圾行。
-     *
-     * 在入队**之前**。反过来的话，worker 可能在预留落库前就跑完并结算，
-     * 而结算找不到预留 = 那次生成免费。
-     *
-     * 走到 402 说明预检之后余额被另一个并发请求抢走了。这时任务行已经建好，
-     * 因此把它取消 —— 留一行永远不会跑的 QUEUED 任务会让用户在列表里
-     * 看到一份卡住的计划。
-     */
-    if (credits !== null && creditCheck?.kind === 'chargeable') {
-      const reserved = await credits.reserve({
-        userId: resolved.identity.userId,
-        jobId: handles.jobId,
-        holdCr: creditCheck.holdCr,
-        priceVersion: creditCheck.priceVersion,
-      });
-      if (reserved.kind === 'insufficient') {
-        recordCreditGate('generate', 'insufficient');
-        await plans.cancelJob(handles.jobId, resolved.identity.userId);
-        request.log.info(
-          { stage: 'billing', required_cr: reserved.requiredCr, balance_cr: reserved.balanceCr },
-          '并发争抢导致余额不足，已取消刚建立的任务',
-        );
-        return fail(request, reply, 'AUTH_INSUFFICIENT_CREDITS', {
-          details: { required_cr: reserved.requiredCr, balance_cr: reserved.balanceCr },
-        });
-      }
-      recordCreditGate('generate', 'allowed');
-    }
-
-    await queue.enqueue({
-      jobId: handles.jobId,
-      requestId: handles.requestId,
-      planId: handles.planId,
-      userId: resolved.identity.userId,
-      /*
-       * 21.3：trace context 随消息透传（TP-5-03）。
-       *
-       * 不带的话链路在这一行断开 —— 而用户等待的大头全在入队之后
-       * （排队 + 生成 + 素材 + 渲染）。api 侧的 span 只覆盖这几十毫秒，
-       * 排查「为什么等了两分钟」时看到的是「40 毫秒完成」。
-       *
-       * 未装配 OTel SDK 时 `captureTraceContext()` 返回 undefined，
-       * 该字段不出现在消息里。
-       */
-      ...(() => {
-        const traceContext = captureTraceContext();
-        return traceContext === undefined ? {} : { traceContext };
-      })(),
-    });
+    // 预留与 Outbox 已随任务原子提交；201 不依赖此刻的 Redis 可用性。
+    if (creditCheck?.kind === 'chargeable') recordCreditGate('generate', 'allowed');
 
     return reply.code(201).send({
       request_id: handles.requestId,

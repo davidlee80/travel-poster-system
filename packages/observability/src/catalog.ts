@@ -316,6 +316,22 @@ export const METRICS_CATALOG: readonly CatalogEntry[] = [
     note: '产品信号而非故障信号：定价配错时的表现不是报错，是「一批用户点了生成什么也没发生」，而每一次都返回了语义完全正确的 402。outcome=free 那条序列同样必须可见 —— 它意味着所有生成都不收费，而除此之外没有任何迹象',
   },
   {
+    name: 'travel_generation_outbox_pending',
+    kind: 'gauge',
+    labels: [],
+    owner: 'api',
+    source: 'supplementary',
+    note: '持久接受但尚未确认投递的非终态生成任务数，多实例使用 max 聚合',
+  },
+  {
+    name: 'travel_generation_outbox_oldest_seconds',
+    kind: 'gauge',
+    labels: [],
+    owner: 'api',
+    source: 'supplementary',
+    note: '最老待投递任务的等待秒数，Redis 故障期间持续可见',
+  },
+  {
     name: 'travel_queue_depth',
     kind: 'gauge',
     labels: ['queue'],

@@ -392,13 +392,18 @@ jobs:
       # 子进程跑的是 dist/main.js —— 必须先构建，否则测试会在
       # 「Worker 启动即退出」上失败，而那个错误信息与停机毫无关系
       - name: Build
-        run: pnpm --filter "@tps/generation-worker..." run build
+        run: pnpm --filter "@tps/generation-worker..." --filter "@tps/render-worker..." run build
 
       - name: Migrate
         run: pnpm db:migrate
 
       - name: L-10 优雅停机（三条）
         run: pnpm --filter @tps/generation-worker exec vitest run shutdown.integration
+
+      - name: P1 生成与导出真实队列恢复
+        run: |
+          pnpm --filter @tps/generation-worker exec vitest run generation-queue.integration generation-recovery.integration pipeline.integration acceptance.integration --no-file-parallelism
+          pnpm --filter @tps/render-worker run test:integration
 
   # ── L-03：四个镜像在 linux/amd64 构建 ──────────────────────
   images:
@@ -413,13 +418,19 @@ jobs:
         include:
           - name: api
             dockerfile: deploy/images/node-service.Dockerfile
-            args: APP=api,PROBE_PORT=3001
+            args: |
+              APP=api
+              PROBE_PORT=3001
           - name: generation-worker
             dockerfile: deploy/images/node-service.Dockerfile
-            args: APP=generation-worker,PROBE_PORT=3011
+            args: |
+              APP=generation-worker
+              PROBE_PORT=3011
           - name: retention-worker
             dockerfile: deploy/images/node-service.Dockerfile
-            args: APP=retention-worker,PROBE_PORT=3013
+            args: |
+              APP=retention-worker
+              PROBE_PORT=3013
           - name: web
             dockerfile: deploy/images/web.Dockerfile
             args: ''
@@ -459,6 +470,30 @@ jobs:
              case "$LANG" in C.UTF-8) ;; *) echo "LANG 非 C.UTF-8: $LANG"; exit 1;; esac
              test -e /usr/share/zoneinfo/Asia/Shanghai || { echo "tzdata 缺失"; exit 1; }
              echo ok'
+
+      - name: 验证 Web 健康探针
+        if: matrix.name == 'web'
+        run: |
+          docker run -d --name tps-web-probes tps/web:ci
+          trap 'docker logs tps-web-probes; docker stop tps-web-probes' EXIT
+          docker exec tps-web-probes node --input-type=module -e '
+            for (const path of ["/healthz", "/readyz"]) {
+              let healthy = false;
+              for (let attempt = 0; attempt < 30; attempt++) {
+                try {
+                  const response = await fetch("http://127.0.0.1:3000" + path, {
+                    signal: AbortSignal.timeout(2000)
+                  });
+                  healthy = response.status === 200
+                    && response.headers.get("cache-control")?.includes("no-store")
+                    && (await response.json()).status === "ok";
+                } catch {}
+                if (healthy) break;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+              if (!healthy) throw new Error(path + " 探针失败");
+            }
+          '
 
   # ── L-04～L-08：渲染链路在 Linux 容器内的验证 ────────────────
   #

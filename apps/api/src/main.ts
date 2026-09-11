@@ -15,6 +15,7 @@ import { loadCreditConfig, loadJobLimits } from '@tps/billing';
 import {
   checkDatabase,
   createCreditWalletRepository,
+  createGenerationOutboxRepository,
   createExportsRepository,
   createPool,
   createPresentationsRepository,
@@ -39,6 +40,7 @@ import {
   PhoneVerificationService,
 } from './identity/phone-verification.js';
 import { RedisSessionStore } from './identity/redis-session-store.js';
+import { loadSmsConfig } from './identity/sms-config.js';
 import { CreditsService } from './credits/service.js';
 import {
   startQueueDepthSampler,
@@ -46,6 +48,7 @@ import {
   loadQueueAdmissionMaxDepth,
 } from './queue-depth.js';
 import { buildServer } from './server.js';
+import { startGenerationOutbox } from './generation-outbox.js';
 
 const SERVICE_NAME = 'tps-api';
 
@@ -61,6 +64,7 @@ async function main(): Promise<void> {
   const tracing = startTracing(loadTracingConfig(SERVICE_NAME));
 
   const config = loadServiceConfig(SERVICE_NAME, 3001);
+  const smsConfig = loadSmsConfig({ ...process.env, NODE_ENV: config.nodeEnv });
   const logger = createLogger({
     service: SERVICE_NAME,
     level: config.logLevel,
@@ -120,14 +124,22 @@ async function main(): Promise<void> {
   const redisUrl = requireString('REDIS_URL');
   const redis = createRedis(redisUrl);
   const queueRedis = createQueueRedis(redisUrl);
+  const planRedis = createRedis(redisUrl, {
+    maxRetriesPerRequest: 1,
+    enableOfflineQueue: false,
+    commandTimeout: 5000,
+  });
+  planRedis.on('error', (error) => logger.warn({ err: error }, '生成投递 Redis 连接异常'));
   shutdown.register('redis', async () => {
+    planRedis.disconnect();
     await redis.quit();
     await queueRedis.quit();
   });
 
   const sessions = new RedisSessionStore(redis);
   const counters = new RedisCounterStore(redis);
-  const queue = new BullMqPlanQueue(queueRedis);
+  const queue = new BullMqPlanQueue(planRedis);
+  const outbox = createGenerationOutboxRepository(pool);
   shutdown.register('plan-queue', async () => {
     await queue.close();
   });
@@ -158,19 +170,11 @@ async function main(): Promise<void> {
     anonymousEnabled: featureFlags.anonymousEnabled,
   });
 
-  const smsMode = optionalString('SMS_MODE', 'local').toLowerCase();
   const smsSender =
-    smsMode === 'aliyun'
-      ? new AliyunSmsSender({
-          accessKeyId: requireString('ALIBABA_CLOUD_ACCESS_KEY_ID'),
-          accessKeySecret: requireString('ALIBABA_CLOUD_ACCESS_KEY_SECRET'),
-          signName: requireString('ALIYUN_SMS_SIGN_NAME'),
-          templateCode: requireString('ALIYUN_SMS_TEMPLATE_CODE'),
-        })
-      : new LocalSmsSender();
+    smsConfig.mode === 'aliyun' ? new AliyunSmsSender(smsConfig.aliyun) : new LocalSmsSender();
   const phoneVerification = new PhoneVerificationService(redis, smsSender, {
-    pepper: optionalString('SMS_VERIFICATION_PEPPER', 'local-development-only'),
-    exposeDevCode: smsMode === 'local',
+    pepper: smsConfig.pepper,
+    exposeDevCode: smsConfig.exposeDevCode,
   });
   const plannerConfig = createPlannerConfigRepository(pool);
 
@@ -230,6 +234,7 @@ async function main(): Promise<void> {
       identity,
       quota,
       queue,
+      outbox,
       plans: createTravelPlansRepository(pool),
       presentations: createPresentationsRepository(pool),
       idempotencyLock: new RedisIdempotencyLock(redis),
@@ -323,6 +328,22 @@ async function main(): Promise<void> {
     stopQueueDepthSampler();
     return Promise.resolve();
   });
+
+  const outboxWallet = createCreditWalletRepository(pool);
+  const stopOutbox = startGenerationOutbox({
+    outbox,
+    queue: {
+      enqueue: async (payload) => {
+        if (planRedis.status !== 'ready') throw new Error('OUTBOX_REDIS_NOT_READY');
+        return queue.enqueue(payload);
+      },
+    },
+    logger,
+    releaseFailed: async (jobId) => {
+      await outboxWallet.releaseFailed({ jobId, burnedCr: 0, lines: [] });
+    },
+  });
+  shutdown.register('generation-outbox', stopOutbox);
 
   // 0.0.0.0 而非 localhost：容器内必须监听所有接口才能被外部访问
   await app.listen({ host: '0.0.0.0', port: config.port });

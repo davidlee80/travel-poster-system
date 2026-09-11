@@ -366,7 +366,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
    */
   app.after(() => {
     if (auth !== undefined) {
-      registerAuthRoutes(app, auth);
+      registerAuthRoutes(app, { ...auth, allowDevCode: config.nodeEnv !== 'production' });
     }
     if (travelPlans !== undefined) {
       registerTravelPlanRoutes(app, travelPlans);

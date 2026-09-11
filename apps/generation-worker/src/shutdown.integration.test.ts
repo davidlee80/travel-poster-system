@@ -1,5 +1,7 @@
 import { IdentityService, RedisSessionStore } from '@tps/api/identity';
 import { buildServer } from '@tps/api/server';
+import { dispatchGenerationOutbox } from '@tps/api/generation-outbox';
+import { createGenerationOutboxRepository, createCreditWalletRepository } from '@tps/db';
 import {
   createPool,
   createPresentationsRepository,
@@ -62,7 +64,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 const databaseUrl = process.env['DATABASE_URL'];
 const redisUrl = process.env['REDIS_URL'];
 
-const canRun = databaseUrl !== undefined && redisUrl !== undefined && process.platform === 'linux';
+const canRun = databaseUrl !== undefined && redisUrl !== undefined;
 const describeShutdown = canRun ? describe : describe.skip;
 
 /** 22.3.3：从收到信号到强制退出的总预算。K8s 侧的宽限期必须大于它 */
@@ -133,6 +135,7 @@ describeShutdown('L-10 / 门禁 #34：优雅停机（集成，仅 Linux）', () 
         identity,
         quota,
         queue,
+        outbox: createGenerationOutboxRepository(pool),
         plans: createTravelPlansRepository(pool),
         presentations: createPresentationsRepository(pool),
         idempotencyLock: new RedisIdempotencyLock(redis),
@@ -203,11 +206,15 @@ describeShutdown('L-10 / 门禁 #34：优雅停机（集成，仅 Linux）', () 
 
   /** 提交一个真实任务，返回 job_id */
   async function submit(): Promise<string> {
-    const session = await app.inject({ method: 'GET', url: '/api/v1/auth/session' });
-    const raw = session.headers['set-cookie'];
-    const list = Array.isArray(raw) ? raw.map(String) : [String(raw)];
-    const entry = list.find((item) => item.startsWith(`${COOKIE_NAMES.anonymous}=`))!;
-    const cookie = `${COOKIE_NAMES.anonymous}=${entry.slice(COOKIE_NAMES.anonymous.length + 1).split(';')[0] ?? ''}`;
+    const user = await createUsersRepository(pool).createRegistered({
+      email: 'shutdown@example.invalid',
+      passwordHash: 'fake',
+      displayName: null,
+      dailyQuota: 50,
+      monthlyQuota: 100,
+    });
+    const session = await new RedisSessionStore(redis).create(user.id);
+    const cookie = `${COOKIE_NAMES.session}=${session.token}`;
 
     const start = new Date(Date.now() + 86_400_000);
     const created = await app.inject({
@@ -253,6 +260,14 @@ describeShutdown('L-10 / 门禁 #34：优雅停机（集成，仅 Linux）', () 
       },
     });
     expect(created.statusCode, created.body).toBe(201);
+    await dispatchGenerationOutbox({
+      outbox: createGenerationOutboxRepository(pool),
+      queue,
+      logger: createSilentLogger(),
+      releaseFailed: async (jobId) => {
+        await createCreditWalletRepository(pool).releaseFailed({ jobId, burnedCr: 0, lines: [] });
+      },
+    });
     return created.json<{ job_id: string }>().job_id;
   }
 
@@ -284,94 +299,112 @@ describeShutdown('L-10 / 门禁 #34：优雅停机（集成，仅 Linux）', () 
     });
   }
 
-  it('空闲 Worker 收到 SIGTERM 后在预算内以 0 退出', async () => {
-    child = await startWorker(3211);
-
-    const exited = waitForExit(child);
-    child.kill('SIGTERM');
-    const { code, ms } = await exited;
-
-    /*
-     * 退出码必须是 0。非零会被 K8s 记成崩溃，进而触发重启计数与
-     * CrashLoopBackOff —— 而这只是一次正常的滚动更新。
-     */
-    expect(code).toBe(0);
-    expect(ms).toBeLessThan(SHUTDOWN_BUDGET_MS);
-    child = null;
-  }, 60_000);
-
-  it('生成中的任务收到 SIGTERM 后不留悬挂状态', async () => {
-    child = await startWorker(3212);
-
-    // 14 天档：分段生成 + 15 个展示页，足够让任务在信号到达时仍在处理中
+  it('关闭匿名入口时停机夹具仍能持久提交并投递任务', async () => {
     const jobId = await submit();
+    expect(await jobStatus(jobId)).toBe('QUEUED');
+    expect((await rawQueue.getJob(jobId))?.data).toMatchObject({ jobId });
+  });
 
-    /*
-     * 等任务真的离开 QUEUED —— 直接发信号可能赶在消费开始之前，
-     * 那样测的就是「空闲退出」而不是「生成中退出」（上一条已经覆盖了前者）。
-     */
-    const running = await waitForStatus(jobId, (status) => status !== 'QUEUED', 15_000);
-    expect(running, '任务应已开始处理').not.toBe('QUEUED');
+  it.skipIf(process.platform !== 'linux')(
+    '空闲 Worker 收到 SIGTERM 后在预算内以 0 退出',
+    async () => {
+      child = await startWorker(3211);
 
-    const exited = waitForExit(child);
-    child.kill('SIGTERM');
-    const { code, ms } = await exited;
+      const exited = waitForExit(child);
+      child.kill('SIGTERM');
+      const { code, ms } = await exited;
 
-    expect(code).toBe(0);
-    expect(ms).toBeLessThan(SHUTDOWN_BUDGET_MS);
-    child = null;
+      /*
+       * 退出码必须是 0。非零会被 K8s 记成崩溃，进而触发重启计数与
+       * CrashLoopBackOff —— 而这只是一次正常的滚动更新。
+       */
+      expect(code).toBe(0);
+      expect(ms).toBeLessThan(SHUTDOWN_BUDGET_MS);
+      child = null;
+    },
+    60_000,
+  );
 
-    /*
-     * ── 「不留悬挂状态」的判据 ──
-     *
-     * 22.3.3 的原文是「避免任务半途中断留下 RENDERING_HTML 悬挂状态」。
-     * 悬挂的准确含义是：**既不是终态，也不会再被消费**。因此两种结局都合格：
-     *
-     *   终态             任务在停机前跑完了（BullMQ 的 close 等在途任务结束）
-     *   非终态 + 消息在  重启后会被重新消费（13.8 的锁已随进程释放）
-     *
-     * 不合格的只有第三种：非终态、且队列里没有对应消息 —— 那条任务永远
-     * 停在中间态，用户的页面一直转圈而没有任何东西会推进它。
-     */
-    const finalStatus = await jobStatus(jobId);
-    const terminal = ['COMPLETED', 'FAILED', 'CANCELLED'].includes(finalStatus);
+  it.skipIf(process.platform !== 'linux')(
+    '生成中的任务收到 SIGTERM 后不留悬挂状态',
+    async () => {
+      child = await startWorker(3212);
 
-    if (!terminal) {
-      const pending = await rawQueue.getJobs(['waiting', 'delayed', 'active', 'prioritized']);
-      const stillQueued = pending.some((job) => (job.data as { jobId?: string }).jobId === jobId);
-      expect(
-        stillQueued,
-        `任务停在 ${finalStatus} 且队列里没有它 —— 这就是 22.3.3 要防的悬挂`,
-      ).toBe(true);
-    }
-  }, 90_000);
+      // 14 天档：分段生成 + 15 个展示页，足够让任务在信号到达时仍在处理中
+      const jobId = await submit();
 
-  it('排空期间就绪探针返回 503（负载均衡据此摘除实例）', async () => {
-    child = await startWorker(3213);
+      /*
+       * 等任务真的离开 QUEUED —— 直接发信号可能赶在消费开始之前，
+       * 那样测的就是「空闲退出」而不是「生成中退出」（上一条已经覆盖了前者）。
+       */
+      const running = await waitForStatus(jobId, (status) => status !== 'QUEUED', 15_000);
+      expect(running, '任务应已开始处理').not.toBe('QUEUED');
 
-    /*
-     * 探针在 SIGTERM 之后、进程退出之前必须变成 not_ready。这是优雅停机能
-     * 真正「优雅」的前提：LB 还在往一个正在排空的实例上转发请求的话，
-     * 那些请求会在连接被关时失败。
-     *
-     * 这里只在信号后立刻查一次 —— 空闲 worker 退出很快，查不到 503 也可能
-     * 是因为它已经退出了，因此两种结果都接受，只要不是 200。
-     */
-    child.kill('SIGTERM');
+      const exited = waitForExit(child);
+      child.kill('SIGTERM');
+      const { code, ms } = await exited;
 
-    let observed: number | 'closed' = 200;
-    for (let i = 0; i < 30 && observed === 200; i += 1) {
-      try {
-        const response = await fetch('http://127.0.0.1:3213/readyz');
-        observed = response.status;
-      } catch {
-        observed = 'closed';
+      expect(code).toBe(0);
+      expect(ms).toBeLessThan(SHUTDOWN_BUDGET_MS);
+      child = null;
+
+      /*
+       * ── 「不留悬挂状态」的判据 ──
+       *
+       * 22.3.3 的原文是「避免任务半途中断留下 RENDERING_HTML 悬挂状态」。
+       * 悬挂的准确含义是：**既不是终态，也不会再被消费**。因此两种结局都合格：
+       *
+       *   终态             任务在停机前跑完了（BullMQ 的 close 等在途任务结束）
+       *   非终态 + 消息在  重启后会被重新消费（13.8 的锁已随进程释放）
+       *
+       * 不合格的只有第三种：非终态、且队列里没有对应消息 —— 那条任务永远
+       * 停在中间态，用户的页面一直转圈而没有任何东西会推进它。
+       */
+      const finalStatus = await jobStatus(jobId);
+      const terminal = ['COMPLETED', 'FAILED', 'CANCELLED'].includes(finalStatus);
+
+      if (!terminal) {
+        const pending = await rawQueue.getJobs(['waiting', 'delayed', 'active', 'prioritized']);
+        const stillQueued = pending.some((job) => (job.data as { jobId?: string }).jobId === jobId);
+        expect(
+          stillQueued,
+          `任务停在 ${finalStatus} 且队列里没有它 —— 这就是 22.3.3 要防的悬挂`,
+        ).toBe(true);
       }
-      if (observed === 200) await new Promise((resolve) => setTimeout(resolve, 50));
-    }
+    },
+    90_000,
+  );
 
-    expect(observed).not.toBe(200);
-    await waitForExit(child);
-    child = null;
-  }, 60_000);
+  it.skipIf(process.platform !== 'linux')(
+    '排空期间就绪探针返回 503（负载均衡据此摘除实例）',
+    async () => {
+      child = await startWorker(3213);
+
+      /*
+       * 探针在 SIGTERM 之后、进程退出之前必须变成 not_ready。这是优雅停机能
+       * 真正「优雅」的前提：LB 还在往一个正在排空的实例上转发请求的话，
+       * 那些请求会在连接被关时失败。
+       *
+       * 这里只在信号后立刻查一次 —— 空闲 worker 退出很快，查不到 503 也可能
+       * 是因为它已经退出了，因此两种结果都接受，只要不是 200。
+       */
+      child.kill('SIGTERM');
+
+      let observed: number | 'closed' = 200;
+      for (let i = 0; i < 30 && observed === 200; i += 1) {
+        try {
+          const response = await fetch('http://127.0.0.1:3213/readyz');
+          observed = response.status;
+        } catch {
+          observed = 'closed';
+        }
+        if (observed === 200) await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      expect(observed).not.toBe(200);
+      await waitForExit(child);
+      child = null;
+    },
+    60_000,
+  );
 });

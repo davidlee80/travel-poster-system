@@ -76,6 +76,8 @@ export interface AuthRoutesDeps {
   readonly quota: QuotaGuard;
   readonly secureCookies: boolean;
   readonly phoneVerification?: PhoneVerificationService;
+  /** 独立于短信发送器的响应防线，默认不允许回传验证码。 */
+  readonly allowDevCode?: boolean;
   /** CR 钱包（C-3）。未提供时会话响应里没有 `wallet` 字段 */
   readonly credits?: CreditsService;
 }
@@ -421,7 +423,9 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
     return reply.code(200).send({
       sent: true,
       expires_in_seconds: 300,
-      ...(result.devCode === undefined ? {} : { dev_code: result.devCode }),
+      ...(deps.allowDevCode === true && result.devCode !== undefined
+        ? { dev_code: result.devCode }
+        : {}),
     });
   });
 

@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { DelayedError, type Job } from 'bullmq';
+import { ExportJobPayloadSchema, withRestoredTrace } from '@tps/queue';
 
-import type { ExportJobRow, ExportsRepository, PresentationsRepository } from '@tps/db';
+import {
+  ExportLeaseLostError,
+  type ExportExecutionRepository,
+  type ExportJobRow,
+  type ExportsRepository,
+  type PresentationsRepository,
+} from '@tps/db';
 import {
   ExportArtifactSchema,
   EXPORT_URL_TTL_SECONDS,
@@ -16,7 +24,6 @@ import {
 } from '@tps/storage';
 import type { Browser, BrowserContext } from 'playwright-core';
 
-import type { ExportBilling } from './billing.js';
 import { createRenderContext } from './browser.js';
 import { buildDailyPngZip } from './daily-png-zip.js';
 import { capturePdf, mergePdfs } from './pdf.js';
@@ -57,20 +64,16 @@ import { renderPage } from './render-page.js';
 
 export interface RunExportDeps {
   readonly exports: ExportsRepository;
+  readonly execution: ExportExecutionRepository;
   /** `ALL_DAYS` 的天号来自这里，见 `listDayNumbers` 的说明 */
   readonly presentations: Pick<PresentationsRepository, 'listDayNumbers'>;
   readonly storage: ExportStorage;
-  readonly browser: Browser;
+  readonly browser: Browser | (() => Promise<Browser>);
   /** 渲染服务的基地址，形如 `http://web:3000` */
   readonly baseUrl: string;
   /** 17.1 的渲染令牌签名密钥 */
   readonly signingKey: string;
   readonly logger: Logger;
-  /**
-   * CR 退款（C-4b）。缺省时不退也不读钱包表 ——
-   * 与另两个进程的 `CREDIT_BILLING_ENABLED` 成对，理由同它们。
-   */
-  readonly billing?: ExportBilling;
 }
 
 /**
@@ -90,6 +93,7 @@ export type RunExportOutcome =
       readonly files: number;
       readonly failed: readonly number[];
     } & ExportShape)
+  | ({ readonly kind: 'busy' } & ExportShape)
   | ({ readonly kind: 'failed'; readonly errorCode: string } & ExportShape)
   | { readonly kind: 'skipped'; readonly reason: 'not_found' | 'not_queued' };
 
@@ -100,7 +104,32 @@ interface Captured {
   readonly degraded: boolean;
 }
 
-export async function runExport(deps: RunExportDeps, exportId: string): Promise<RunExportOutcome> {
+export async function processExportJob(
+  deps: RunExportDeps,
+  job: Job,
+  token?: string,
+  report?: (outcome: RunExportOutcome) => void,
+): Promise<void> {
+  const payload = ExportJobPayloadSchema.parse(job.data);
+  await withRestoredTrace(payload.traceContext, async () => {
+    const outcome = await runExport(deps, payload.exportId, {
+      attempt: job.attemptsMade + 1,
+      attempts: job.opts.attempts ?? 2,
+    });
+    if (outcome.kind === 'busy') {
+      await job.moveToDelayed(Date.now() + 1000, token);
+      throw new DelayedError();
+    }
+    report?.(outcome);
+    if (outcome.kind === 'failed') throw new Error(outcome.errorCode);
+  });
+}
+
+export async function runExport(
+  deps: RunExportDeps,
+  exportId: string,
+  attempt = { attempt: 1, attempts: 2 },
+): Promise<RunExportOutcome> {
   const row = await deps.exports.findById(exportId);
   if (row === null) {
     /*
@@ -112,103 +141,177 @@ export async function runExport(deps: RunExportDeps, exportId: string): Promise<
     return { kind: 'skipped', reason: 'not_found' };
   }
 
-  if (!(await deps.exports.markRendering(exportId))) {
-    // 重复投递：另一个消费者已经在处理（或已完成）
-    return { kind: 'skipped', reason: 'not_queued' };
-  }
-
-  /*
-   * `ALL_DAYS` 要渲染「实际落了 ViewModel 的那些天」，而不是请求里的天数：
-   * 编排失败时两者不一致，按后者渲染会对不存在的页面发请求。
-   *
-   * 必须带 `row.templateId`（R-85）：一个版本下可以共存多套模板的展示数据，
-   * 不过滤的话 14 天会变 28 行，于是这里渲染 28 页 —— 时长翻倍、
-   * 按页计费翻倍，而任务状态是 COMPLETED。
-   */
-  const days =
-    row.scope === 'ALL_DAYS'
-      ? await deps.presentations.listDayNumbers(row.planVersionId, row.templateId)
-      : row.dayNumbers;
-  const pages = pagesFor(row.scope, days, row.planVersionId);
-  const context = await createRenderContext(deps.browser);
-
-  const captured: Captured[] = [];
-  const failedDays: number[] = [];
-
-  try {
-    for (const page of pages) {
-      try {
-        captured.push(
-          await capture(deps, context, row.planVersionId, row.templateId, row.format, page),
-        );
-      } catch (error) {
-        /*
-         * 单页失败不中断整批（13.6 的 PARTIAL）。记下天号，最后一起报告。
-         * 中断的话，一个 14 天导出会因为第 3 天的一次瞬时失败而全部作废，
-         * 而前两天已经渲染完的成本白花。
-         */
-        failedDays.push(page.dayNumber ?? 0);
-        // R-42：失败原因进指标，21.3 的字体故障告警据此判定
-        recordRenderFailure(error);
-        deps.logger.warn(
-          { format: row.format, page_type: page.dayNumber === null ? 'full' : 'day' },
-          `第 ${page.dayNumber ?? 0} 页导出失败：${String(error)}`,
-        );
-      }
-    }
-  } finally {
-    await context.close();
-  }
-
-  if (captured.length === 0) {
-    const errorCode = row.format === 'PNG' ? 'EXPORT_PNG_FAILED' : 'EXPORT_PDF_FAILED';
-    await deps.exports.finish({
-      exportId,
-      status: 'FAILED',
-      files: [],
-      errorCode,
-      errorDetail: { failed_days: failedDays },
-    });
-    /*
-     * 一页都没成功 → 用户什么也没拿到 → 退回当时扣的那一笔（C-4b）。
-     *
-     * 放在 `finish` 之后：用户看到的状态比账目更急，而退款自己吞掉异常
-     * （见 billing.ts），因此这个顺序不会让 FAILED 写不进去。
-     *
-     * `PARTIAL` 那条路径**不退** —— 至少一页成功并上传了，服务确实交付了。
-     */
-    await deps.billing?.refundFailed(exportId);
-    return {
-      kind: 'failed',
-      errorCode,
-      format: row.format,
-      scope: row.scope,
-      userType: row.userType,
-    };
-  }
-
-  const artifacts = await upload(
-    deps,
-    contentSpaceOf(row),
-    row.exportId,
-    row.format,
-    row.scope,
-    captured,
-  );
-
-  const partial = failedDays.length > 0;
-  await deps.exports.finish({
-    exportId,
-    status: partial ? 'PARTIAL' : 'COMPLETED',
-    files: artifacts,
-    errorCode: partial ? (row.format === 'PNG' ? 'EXPORT_PNG_FAILED' : 'EXPORT_PDF_FAILED') : null,
-    ...(partial ? { errorDetail: { failed_days: failedDays } } : {}),
-  });
-
   const shape = { format: row.format, scope: row.scope, userType: row.userType };
-  return partial
-    ? { kind: 'partial', files: artifacts.length, failed: failedDays, ...shape }
-    : { kind: 'completed', files: artifacts.length, ...shape };
+  const claim = await deps.execution.claim(exportId, attempt.attempt);
+  if (claim.kind === 'busy') return { kind: 'busy', ...shape };
+  if (claim.kind !== 'acquired') return { kind: 'skipped', reason: 'not_queued' };
+  const lease = claim.lease;
+  let stopped = false;
+  let lost = false;
+  let renewal = Promise.resolve();
+  let timer: ReturnType<typeof setTimeout>;
+  const renew = (): void => {
+    renewal = deps.execution
+      .renew(lease)
+      .then((ok) => {
+        lost = !ok;
+      })
+      .catch((error: unknown) => {
+        lost = true;
+        deps.logger.warn({ err: error, export_id: exportId }, '导出租约续期失败，停止本次提交');
+      })
+      .finally(() => {
+        if (!stopped && !lost) {
+          timer = setTimeout(renew, 10000);
+          timer.unref();
+        }
+      });
+  };
+  timer = setTimeout(renew, 10000);
+  timer.unref();
+  const assertLease = async (): Promise<void> => {
+    if (lost || !(await deps.execution.renew(lease))) throw new ExportLeaseLostError();
+  };
+  try {
+    /*
+     * `ALL_DAYS` 要渲染「实际落了 ViewModel 的那些天」，而不是请求里的天数：
+     * 编排失败时两者不一致，按后者渲染会对不存在的页面发请求。
+     *
+     * 必须带 `row.templateId`（R-85）：一个版本下可以共存多套模板的展示数据，
+     * 不过滤的话 14 天会变 28 行，于是这里渲染 28 页 —— 时长翻倍、
+     * 按页计费翻倍，而任务状态是 COMPLETED。
+     */
+    const days =
+      row.scope === 'ALL_DAYS'
+        ? await deps.presentations.listDayNumbers(row.planVersionId, row.templateId)
+        : row.dayNumbers;
+    const pages = pagesFor(row.scope, days, row.planVersionId);
+    const browser = typeof deps.browser === 'function' ? await deps.browser() : deps.browser;
+    const context = await createRenderContext(browser);
+
+    const captured: Captured[] = [];
+    const failedDays: number[] = [];
+
+    try {
+      for (const page of pages) {
+        await assertLease();
+        try {
+          captured.push(
+            await capture(deps, context, row.planVersionId, row.templateId, row.format, page),
+          );
+        } catch (error) {
+          /*
+           * 单页失败不中断整批（13.6 的 PARTIAL）。记下天号，最后一起报告。
+           * 中断的话，一个 14 天导出会因为第 3 天的一次瞬时失败而全部作废，
+           * 而前两天已经渲染完的成本白花。
+           */
+          failedDays.push(page.dayNumber ?? 0);
+          // R-42：失败原因进指标，21.3 的字体故障告警据此判定
+          recordRenderFailure(error);
+          deps.logger.warn(
+            { format: row.format, page_type: page.dayNumber === null ? 'full' : 'day' },
+            `第 ${page.dayNumber ?? 0} 页导出失败：${String(error)}`,
+          );
+        }
+      }
+    } finally {
+      await context.close();
+    }
+
+    if (captured.length === 0) {
+      throw new Error(row.format === 'PNG' ? 'EXPORT_PNG_FAILED' : 'EXPORT_PDF_FAILED');
+    }
+    await assertLease();
+
+    const artifacts = await upload(
+      {
+        ...deps,
+        storage: {
+          put: async (input) => {
+            await assertLease();
+            await deps.execution.registerArtifact(lease, input.key);
+            await deps.storage.put(input);
+          },
+          presign: (key, ttl, options) => deps.storage.presign(key, ttl, options),
+          delete: (keys) => deps.storage.delete(keys),
+        },
+      },
+      contentSpaceOf(row),
+      `${row.exportId}/attempts/${lease.token}`,
+      row.format,
+      row.scope,
+      captured,
+    );
+
+    const partial = failedDays.length > 0;
+    await assertLease();
+    if (
+      !(await deps.execution.finish(lease, {
+        exportId,
+        status: partial ? 'PARTIAL' : 'COMPLETED',
+        files: artifacts,
+        errorCode: partial
+          ? row.format === 'PNG'
+            ? 'EXPORT_PNG_FAILED'
+            : 'EXPORT_PDF_FAILED'
+          : null,
+        ...(partial ? { errorDetail: { failed_days: failedDays } } : {}),
+      }))
+    )
+      throw new ExportLeaseLostError();
+    return partial
+      ? { kind: 'partial', files: artifacts.length, failed: failedDays, ...shape }
+      : { kind: 'completed', files: artifacts.length, ...shape };
+  } catch (error) {
+    // 提交成功后连接中断也不能退款或删除已经发布的文件。
+    const current = await deps.exports.findById(exportId);
+    if (current === null || ['COMPLETED', 'PARTIAL', 'FAILED'].includes(current.status)) {
+      return { kind: 'skipped', reason: current === null ? 'not_found' : 'not_queued' };
+    }
+    if (error instanceof ExportLeaseLostError || lost) return { kind: 'busy', ...shape };
+    const errorCode = row.format === 'PNG' ? 'EXPORT_PNG_FAILED' : 'EXPORT_PDF_FAILED';
+    deps.logger.warn({ err: error, export_id: exportId }, '导出尝试失败');
+    const changed =
+      attempt.attempt < attempt.attempts
+        ? await deps.execution.retry(lease, errorCode)
+        : await deps.execution.finish(lease, { exportId, status: 'FAILED', files: [], errorCode });
+    return changed ? { kind: 'failed', errorCode, ...shape } : { kind: 'busy', ...shape };
+  } finally {
+    stopped = true;
+    clearTimeout(timer);
+    await renewal;
+  }
+}
+
+/** 恢复只收尾最终失败任务和未发布尝试，不重放历史任务。 */
+export async function recoverExports(deps: {
+  readonly execution: ExportExecutionRepository;
+  readonly storage: ExportStorage;
+  readonly logger: Logger;
+  readonly failedJobs: readonly { exportId: string; errorCode: string }[];
+}): Promise<void> {
+  const jobs = [...deps.failedJobs, ...(await deps.execution.pendingFinalizations())];
+  for (const job of jobs) {
+    try {
+      await deps.execution.failAbandoned(
+        job.exportId,
+        job.errorCode.slice(0, 60) || 'EXPORT_PNG_FAILED',
+      );
+    } catch (error) {
+      deps.logger.warn({ err: error, export_id: job.exportId }, '导出最终收尾失败，下轮继续');
+    }
+  }
+  for (const artifact of await deps.execution.pendingArtifacts()) {
+    try {
+      await deps.storage.delete([artifact.key]);
+      await deps.execution.deferArtifact(artifact.token, artifact.key);
+    } catch (error) {
+      deps.logger.warn(
+        { err: error, attempt_token: artifact.token },
+        '导出尝试产物清理失败，下轮继续',
+      );
+    }
+  }
 }
 
 /**

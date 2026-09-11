@@ -2,6 +2,7 @@ import {
   checkDatabase,
   createAssetsRepository,
   createCreditWalletRepository,
+  createGenerationExecutionRepository,
   createModelPoolsRepository,
   createPool,
   createPresentationsRepository,
@@ -9,7 +10,6 @@ import {
   createTravelPlansRepository,
   loadDbConfig,
 } from '@tps/db';
-import { EMPTY_USAGE } from '@tps/billing';
 import {
   FakeLlmClient,
   LocalHashingEmbeddingClient,
@@ -34,10 +34,8 @@ import {
   RedisAssetLock,
   RedisCounterStore,
   RedisDeadLetterQueue,
-  RedisJobLock,
   createQueueRedis,
   createRedis,
-  withRestoredTrace,
 } from '@tps/queue';
 import { S3ObjectStorage, loadAssetsStorageConfig } from '@tps/storage';
 import {
@@ -48,16 +46,15 @@ import {
   requireString,
   runWorker,
 } from '@tps/shared';
-import { UnrecoverableError, Worker } from 'bullmq';
+import { Queue, UnrecoverableError, Worker } from 'bullmq';
 
 import { AiImageBudget, DEFAULT_AI_IMAGE_DAILY_BUDGET } from './assets/ai-budget.js';
-import { createJobBilling, type JobBilling } from './billing.js';
+import { createJobBilling, recoverGenerationBilling, type JobBilling } from './billing.js';
 import { selectImageClient, selectLlmClient } from './assets/model-selection.js';
 import { ImageSearchBudget } from './assets/search-budget.js';
-import { isUnrecoverable } from './retry-policy.js';
 import { renderFakeGeneratedImage } from './assets/fake-image.js';
 import { fixturePlanFor } from './fixture-plan.js';
-import { generatePlan, type LlmClientFactory } from './generate-plan.js';
+import { processGenerationJob, type LlmClientFactory } from './generate-plan.js';
 
 /**
  * 生成 Worker。
@@ -77,12 +74,10 @@ const redisUrl = requireString('REDIS_URL');
 const redis = createRedis(redisUrl);
 const queueRedis = createQueueRedis(redisUrl);
 
-const plans = createTravelPlansRepository(dbPool);
+const execution = createGenerationExecutionRepository(dbPool);
 const modelPools = createModelPoolsRepository(dbPool);
 const retrievalRepository = createRetrievalRepository(dbPool);
 const assetsRepository = createAssetsRepository(dbPool);
-const presentationsRepository = createPresentationsRepository(dbPool);
-const jobLock = new RedisJobLock(redis);
 const assetLock = new RedisAssetLock(redis);
 const deadLetters = new RedisDeadLetterQueue(redis);
 const counters = new RedisCounterStore(redis);
@@ -193,135 +188,92 @@ await runWorker({
 
     const worker = new Worker(
       PLAN_QUEUE_NAME,
-      async (job) => {
-        const payload = GenerationJobPayloadSchema.parse(job.data);
-
-        /*
-         * 在 api 侧那次请求的 trace 里继续（TP-5-03，21.3）。
-         *
-         * `withRestoredTrace` 之内产生的每个 span（数据库、Redis、模型调用）
-         * 都挂在同一个 trace 下，日志也自动带上同一个 `trace_id`
-         * （见 @tps/shared 的 logger mixin）。未装配 SDK 时它只是直接执行 fn。
-         *
-         * 包在最外层而不是只包 `generatePlan`：锁的获取与失败分类同样属于
-         * 这次消费，而「为什么这条消息被跳过了」是排查时的常见问题。
-         */
-        return withRestoredTrace(payload.traceContext, async () => {
-          /*
-           * 13.8：同一 job_id 只允许一个消费者。抢不到锁说明另一个实例正在
-           * 处理 —— 直接返回而不是等待，等待会占住 BullMQ 的并发槽位。
-           */
-          if (!(await jobLock.acquire(payload.jobId))) {
-            handle.logger.warn({ job_id: payload.jobId }, '任务已被其他实例持有，跳过');
-            return;
-          }
-
-          try {
-            const outcome = await generatePlan(
-              {
-                plans,
-                retrieval: { repository: retrievalRepository, embedding },
-                llm,
+      (job, token) =>
+        processGenerationJob(
+          {
+            repository: execution,
+            logger: handle.logger,
+            ...(billing === undefined ? {} : { billing }),
+            createDeps: (lease) => ({
+              plans: createTravelPlansRepository(dbPool, lease),
+              retrieval: { repository: retrievalRepository, embedding },
+              llm,
+              embedding,
+              logger: handle.logger,
+              llmTimeoutMs: llmConfig.timeoutMs,
+              presentation: {
+                assets: assetsRepository,
+                presentations: createPresentationsRepository(dbPool, lease),
+                storage,
                 embedding,
-                logger: handle.logger,
-                llmTimeoutMs: llmConfig.timeoutMs,
-                presentation: {
-                  assets: assetsRepository,
-                  presentations: presentationsRepository,
-                  storage,
-                  embedding,
-                },
-                /*
-                 * 每任务一个预算实例（21.4 的 3 张图与 21.2 的 2 次 Hero 都是
-                 * 单任务计数），额度上限按身份取（匿名的 AI Hero 为 0，TP-4-17）。
-                 */
-                /*
-                 * 搜索层同样是每任务一个预算实例（9.6 的单任务 8 次与连续
-                 * 失败 2 次都是任务内状态）。与 aiAssets 不同的是它**不看身份**
-                 * —— 9.6 规定匿名与注册同额，因为命中入库为全平台共享资产。
-                 */
-                searchAssets: () => ({
-                  search: licensedSource,
-                  searchTimeoutMs: imageSearchConfig.timeoutMs,
-                  searchBudget: new ImageSearchBudget({
-                    counters,
-                    dailyBudget: imageSearchConfig.dailyBudget,
-                  }),
-                }),
-                ...(billing === undefined ? {} : { billing }),
-                aiAssets: async ({ userType, tierLevel }) => {
-                  /*
-                   * 候选模型按 `tier_level` 从池里取（迁移 0009）。
-                   * 无配置时 `selectImageClient` 回落到 `image`（env 单模型），
-                   * 装饰器也不会包装 —— 标准用户档的单候选路径零开销。
-                   */
-                  const selected = await selectImageClient({
-                    pools: modelPools,
-                    tierLevel,
-                    logger: handle.logger,
-                    fallback: image,
-                    build: (model) =>
-                      createImageClient(
-                        { ...imageConfig, model },
-                        { renderer: renderFakeGeneratedImage },
-                      ),
-                    perAttemptMs: imageConfig.timeoutMs,
-                    totalBudgetMs: imageConfig.jobAiBudgetMs,
-                  });
-
-                  return {
-                    image: selected.client,
-                    assetLock,
-                    imageTimeoutMs: imageConfig.timeoutMs,
-                    userTypeLabel: userType,
-                    budget: new AiImageBudget({
-                      counters,
-                      userType,
-                      heroQuota: quotaFor(quotaConfig, userType).aiHero,
-                      dailyBudget: aiDailyBudget,
-                      jobAiBudgetMs: imageConfig.jobAiBudgetMs,
-                      /*
-                       * 一条链最坏耗时 = 单候选超时 × 候选数。空的 `candidates`
-                       * 表示回落到了 env 单模型（无池配置），此时就是 1 个候选。
-                       *
-                       * 预算闸靠它前瞻：配了 2 候选的档，每条链最坏 80 秒，
-                       * 而窗口也是 80 秒 —— 于是同一任务只放行「能在窗口内
-                       * 结束」的那些链，不会等 80 秒走完才发现超了。
-                       */
-                      chainWorstCaseMs:
-                        imageConfig.timeoutMs * Math.max(1, selected.candidates.length),
-                    }),
-                  };
-                },
               },
-              payload,
-            );
+              /*
+               * 每任务一个预算实例（21.4 的 3 张图与 21.2 的 2 次 Hero 都是
+               * 单任务计数），额度上限按身份取（匿名的 AI Hero 为 0，TP-4-17）。
+               */
+              /*
+               * 搜索层同样是每任务一个预算实例（9.6 的单任务 8 次与连续
+               * 失败 2 次都是任务内状态）。与 aiAssets 不同的是它**不看身份**
+               * —— 9.6 规定匿名与注册同额，因为命中入库为全平台共享资产。
+               */
+              searchAssets: () => ({
+                search: licensedSource,
+                searchTimeoutMs: imageSearchConfig.timeoutMs,
+                searchBudget: new ImageSearchBudget({
+                  counters,
+                  dailyBudget: imageSearchConfig.dailyBudget,
+                }),
+              }),
+              ...(billing === undefined ? {} : { billing }),
+              aiAssets: async ({ userType, tierLevel }) => {
+                /*
+                 * 候选模型按 `tier_level` 从池里取（迁移 0009）。
+                 * 无配置时 `selectImageClient` 回落到 `image`（env 单模型），
+                 * 装饰器也不会包装 —— 标准用户档的单候选路径零开销。
+                 */
+                const selected = await selectImageClient({
+                  pools: modelPools,
+                  tierLevel,
+                  logger: handle.logger,
+                  fallback: image,
+                  build: (model) =>
+                    createImageClient(
+                      { ...imageConfig, model },
+                      { renderer: renderFakeGeneratedImage },
+                    ),
+                  perAttemptMs: imageConfig.timeoutMs,
+                  totalBudgetMs: imageConfig.jobAiBudgetMs,
+                });
 
-            /*
-             * 13.7 第四层：不可重试的失败以 `UnrecoverableError` 结束消费 ——
-             * BullMQ 见到它就不再重试，`attempts` 不被消耗。
-             *
-             * 抛错而不是静默返回，是因为 BullMQ 只按「消费函数是否抛错」判定
-             * 成败：静默返回会让一个失败的任务在队列里显示为成功，
-             * 而排查时「任务失败了但队列说成功」是最难定位的一类不一致。
-             */
-            if (outcome.outcome === 'failed' && isUnrecoverable(outcome.errorCode)) {
-              throw new UnrecoverableError(outcome.errorCode);
-            }
-
-            /*
-             * 可重试的失败照常抛错，交给队列退避重试（13.7 第三层）。
-             * 任务状态已经是 FAILED 且带错误码 —— 用户此刻能看到明确的失败，
-             * 而重试成功后状态会被推回去。
-             */
-            if (outcome.outcome === 'failed') {
-              throw new Error(outcome.errorCode);
-            }
-          } finally {
-            await jobLock.release(payload.jobId);
-          }
-        });
-      },
+                return {
+                  image: selected.client,
+                  assetLock,
+                  imageTimeoutMs: imageConfig.timeoutMs,
+                  userTypeLabel: userType,
+                  budget: new AiImageBudget({
+                    counters,
+                    userType,
+                    heroQuota: quotaFor(quotaConfig, userType).aiHero,
+                    dailyBudget: aiDailyBudget,
+                    jobAiBudgetMs: imageConfig.jobAiBudgetMs,
+                    /*
+                     * 一条链最坏耗时 = 单候选超时 × 候选数。空的 `candidates`
+                     * 表示回落到了 env 单模型（无池配置），此时就是 1 个候选。
+                     *
+                     * 预算闸靠它前瞻：配了 2 候选的档，每条链最坏 80 秒，
+                     * 而窗口也是 80 秒 —— 于是同一任务只放行「能在窗口内
+                     * 结束」的那些链，不会等 80 秒走完才发现超了。
+                     */
+                    chainWorstCaseMs:
+                      imageConfig.timeoutMs * Math.max(1, selected.candidates.length),
+                  }),
+                };
+              },
+            }),
+          },
+          job,
+          token,
+        ),
       {
         connection: queueRedis,
         /*
@@ -333,6 +285,48 @@ await runWorker({
         concurrency: 2,
       },
     );
+
+    const recoveryQueue = new Queue(PLAN_QUEUE_NAME, { connection: queueRedis });
+    let recoveryStopped = false;
+    let recoveryCursor = 0;
+    let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+    let recoveryRunning: Promise<void> | undefined;
+    const recover = (): void => {
+      if (recoveryStopped || recoveryRunning !== undefined) return;
+      if (recoveryTimer !== undefined) clearTimeout(recoveryTimer);
+      recoveryRunning = (async () => {
+        const failedJobs: { jobId: string; errorCode: string }[] = [];
+        try {
+          const jobs = await recoveryQueue.getFailed(recoveryCursor, recoveryCursor + 99);
+          recoveryCursor = jobs.length < 100 ? 0 : recoveryCursor + jobs.length;
+          for (const job of jobs) {
+            const parsed = GenerationJobPayloadSchema.safeParse(job.data);
+            if (parsed.success && (await job.getState()) === 'failed') {
+              failedJobs.push({ jobId: parsed.data.jobId, errorCode: job.failedReason });
+            }
+          }
+        } catch (error) {
+          handle.logger.warn({ err: error }, '最终失败队列扫描失败，下轮继续；仍处理数据库待收尾');
+        }
+        await recoverGenerationBilling({
+          repository: execution,
+          failedJobs,
+          logger: handle.logger,
+          ...(billing === undefined ? {} : { billing }),
+        });
+      })()
+        .catch((error: unknown) => {
+          handle.logger.warn({ err: error }, '生成恢复扫描失败，下轮继续');
+        })
+        .finally(() => {
+          recoveryRunning = undefined;
+          if (!recoveryStopped) {
+            recoveryTimer = setTimeout(recover, 10000);
+            recoveryTimer.unref();
+          }
+        });
+    };
+    recover();
 
     /*
      * 13.7：队列重试耗尽后进入死信队列 `dlq:*`。
@@ -363,16 +357,7 @@ await runWorker({
        * 「记坏账」与「释放预留」变成两个可分开调用的操作，而那会让
        * 「既结算又坏账」这种自相矛盾的记录成为可能。
        */
-      if (billing !== undefined) {
-        void billing
-          .release({ jobId: parsed.data.jobId, usage: EMPTY_USAGE })
-          .catch((releaseError: unknown) => {
-            handle.logger.error(
-              { job_id: parsed.data.jobId, stage: 'billing' },
-              `重试耗尽后释放预留失败：${String(releaseError)}`,
-            );
-          });
-      }
+      recover();
 
       void deadLetters
         .push(PLAN_QUEUE_NAME, {
@@ -393,8 +378,12 @@ await runWorker({
     return Promise.resolve(async () => {
       handle.logger.info('生成 Worker 停止领取新任务');
       // 先 pause 停止领新任务，再 close 等在途任务跑完
+      recoveryStopped = true;
+      if (recoveryTimer !== undefined) clearTimeout(recoveryTimer);
       await worker.pause(true);
       await worker.close();
+      await recoveryRunning;
+      await recoveryQueue.close();
       await redis.quit();
       await queueRedis.quit();
       await dbPool.end();

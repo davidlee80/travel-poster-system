@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 
 import { UniqueViolationError } from './users.js';
+import { refundCreditsInTransaction } from './credit-wallet.js';
 
 /** PostgreSQL unique_violation。与 travel-plans.ts 同一判定 */
 const UNIQUE_VIOLATION = '23505';
@@ -176,6 +177,222 @@ function toDownloadRow(row: DownloadRow): ExportDownloadRow {
   };
 }
 
+export interface ExportLease {
+  readonly exportId: string;
+  readonly token: string;
+}
+
+export class ExportLeaseLostError extends Error {
+  constructor() {
+    super('EXPORT_LEASE_LOST');
+  }
+}
+
+export type ExportClaim =
+  | { readonly kind: 'acquired'; readonly lease: ExportLease }
+  | { readonly kind: 'busy' | 'terminal' | 'not_found' | 'legacy' };
+
+export interface ExportExecutionRepository {
+  claim(exportId: string, attempt: number): Promise<ExportClaim>;
+  renew(lease: ExportLease): Promise<boolean>;
+  retry(lease: ExportLease, errorCode: string): Promise<boolean>;
+  finish(lease: ExportLease, input: FinishExportInput): Promise<boolean>;
+  failAbandoned(exportId: string, errorCode: string): Promise<boolean>;
+  pendingFinalizations(): Promise<readonly { exportId: string; errorCode: string }[]>;
+  registerArtifact(lease: ExportLease, key: string): Promise<void>;
+  pendingArtifacts(): Promise<readonly { token: string; key: string }[]>;
+  deferArtifact(token: string, key: string): Promise<void>;
+}
+
+export function createExportExecutionRepository(
+  pool: Pool,
+  billingEnabled: boolean,
+): ExportExecutionRepository {
+  const finish = async (input: FinishExportInput, lease?: ExportLease): Promise<boolean> => {
+    if (lease !== undefined && lease.exportId !== input.exportId) throw new ExportLeaseLostError();
+    // 退款事务失败仍留下待收尾标记；不提前公开 FAILED。
+    if (input.status === 'FAILED') {
+      await pool.query(
+        `UPDATE exports SET finalization_pending = true, error_code = $3
+        WHERE id = $1 AND execution_protocol = 1 AND status IN ('QUEUED', 'RENDERING')
+          AND (($2::uuid IS NOT NULL AND execution_token = $2 AND execution_expires_at > clock_timestamp())
+            OR ($2::uuid IS NULL AND (execution_expires_at IS NULL OR execution_expires_at <= clock_timestamp())))`,
+        [input.exportId, lease?.token ?? null, input.errorCode],
+      );
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `SELECT id FROM exports
+        WHERE id = $1 AND execution_protocol = 1 AND status IN ('QUEUED', 'RENDERING')
+          AND (($2::uuid IS NOT NULL AND execution_token = $2 AND execution_expires_at > clock_timestamp())
+            OR ($2::uuid IS NULL AND (execution_expires_at IS NULL OR execution_expires_at <= clock_timestamp())))
+        FOR UPDATE`,
+        [input.exportId, lease?.token ?? null],
+      );
+      if (result.rowCount !== 1) return false;
+      if (input.status === 'FAILED' && billingEnabled) {
+        const spend = await client.query<{ user_id: string; amount_cr: string }>(
+          `SELECT user_id, amount_cr FROM credit_ledger
+           WHERE ref_type = 'EXPORT' AND ref_id = $1 AND kind = 'SPEND' ORDER BY created_at DESC LIMIT 1`,
+          [input.exportId],
+        );
+        const row = spend.rows[0];
+        if (row !== undefined && Number(row.amount_cr) < 0) {
+          await refundCreditsInTransaction(client, {
+            userId: row.user_id,
+            amountCr: -Number(row.amount_cr),
+            idempotencyKey: `refund:export:${input.exportId}`,
+            refType: 'EXPORT',
+            refId: input.exportId,
+          });
+        }
+      }
+      const updated = await client.query(
+        `UPDATE exports SET status = $2::text,
+        progress = CASE WHEN $2::text = 'FAILED' THEN progress ELSE 100 END,
+        files = $3::jsonb, error_code = $4, error_detail = $5::jsonb, finished_at = NOW(),
+        execution_token = NULL, execution_expires_at = NULL, finalization_pending = false
+        WHERE id = $1 AND ($6::uuid IS NULL OR (execution_token = $6 AND execution_expires_at > clock_timestamp()))`,
+        [
+          input.exportId,
+          input.status,
+          JSON.stringify(input.files),
+          input.errorCode,
+          JSON.stringify(input.errorDetail ?? null),
+          lease?.token ?? null,
+        ],
+      );
+      if (updated.rowCount !== 1) return false;
+      if (input.status !== 'FAILED' && lease !== undefined) {
+        await client.query('DELETE FROM export_attempt_artifacts WHERE token = $1', [lease.token]);
+      }
+      await client.query('COMMIT');
+      return true;
+    } finally {
+      try {
+        await client.query('ROLLBACK');
+      } finally {
+        client.release();
+      }
+    }
+  };
+  return {
+    async claim(exportId, attempt) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const result = await client.query<{
+          status: string;
+          execution_protocol: number;
+          busy: boolean;
+        }>(
+          `SELECT status, execution_protocol, COALESCE(execution_expires_at > clock_timestamp(), false) AS busy
+           FROM exports WHERE id = $1 FOR UPDATE`,
+          [exportId],
+        );
+        const row = result.rows[0];
+        if (row === undefined) return { kind: 'not_found' };
+        if (['COMPLETED', 'PARTIAL', 'FAILED'].includes(row.status)) return { kind: 'terminal' };
+        if (row.execution_protocol !== 1) return { kind: 'legacy' };
+        if (row.busy) return { kind: 'busy' };
+        const claimed = await client.query<{ execution_token: string }>(
+          `UPDATE exports
+          SET execution_token = gen_random_uuid(), execution_expires_at = clock_timestamp() + interval '60 seconds',
+            status = 'RENDERING', progress = GREATEST(progress, 50), attempt_count = GREATEST(attempt_count, $2)
+          WHERE id = $1 RETURNING execution_token`,
+          [exportId, attempt],
+        );
+        await client.query('COMMIT');
+        return { kind: 'acquired', lease: { exportId, token: claimed.rows[0]!.execution_token } };
+      } finally {
+        try {
+          await client.query('ROLLBACK');
+        } finally {
+          client.release();
+        }
+      }
+    },
+    async renew(lease) {
+      const result = await pool.query(
+        `UPDATE exports SET execution_expires_at = clock_timestamp() + interval '60 seconds'
+        WHERE id = $1 AND execution_token = $2 AND execution_expires_at > clock_timestamp() AND status = 'RENDERING'`,
+        [lease.exportId, lease.token],
+      );
+      return result.rowCount === 1;
+    },
+    async retry(lease, errorCode) {
+      const result = await pool.query(
+        `UPDATE exports SET status = 'QUEUED', error_code = $3,
+        error_detail = '{"message":"暂时失败，正在重试"}'::jsonb,
+        execution_token = NULL, execution_expires_at = NULL, finalization_pending = false
+        WHERE id = $1 AND execution_token = $2 AND execution_expires_at > clock_timestamp() AND status = 'RENDERING'`,
+        [lease.exportId, lease.token, errorCode],
+      );
+      return result.rowCount === 1;
+    },
+    async registerArtifact(lease, key) {
+      if (!key.includes(`/exports/${lease.exportId}/attempts/${lease.token}/`))
+        throw new ExportLeaseLostError();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const valid = await client.query(
+          `SELECT id FROM exports WHERE id = $1 AND execution_token = $2
+          AND execution_expires_at > clock_timestamp() AND status = 'RENDERING' FOR UPDATE`,
+          [lease.exportId, lease.token],
+        );
+        if (valid.rowCount !== 1) throw new ExportLeaseLostError();
+        await client.query(
+          `INSERT INTO export_attempt_artifacts (token, export_id, storage_key)
+          VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+          [lease.token, lease.exportId, key],
+        );
+        await client.query('COMMIT');
+      } finally {
+        try {
+          await client.query('ROLLBACK');
+        } finally {
+          client.release();
+        }
+      }
+    },
+    async pendingArtifacts() {
+      const result = await pool.query<{
+        token: string;
+        storage_key: string;
+      }>(`SELECT a.token, a.storage_key
+        FROM export_attempt_artifacts a LEFT JOIN exports e ON e.id = a.export_id
+        WHERE a.cleanup_after <= NOW() AND NOT COALESCE(e.execution_token = a.token
+          AND e.execution_expires_at > clock_timestamp(), false)
+        ORDER BY a.cleanup_after, a.token, a.storage_key LIMIT 100`);
+      return result.rows.map((row) => ({ token: row.token, key: row.storage_key }));
+    },
+    async deferArtifact(token, key) {
+      // 保留登记并重复删除，覆盖失去租约后才返回的迟到上传；绝不按前缀删除。
+      await pool.query(
+        `UPDATE export_attempt_artifacts SET cleanup_after = NOW() + interval '60 seconds'
+        WHERE token = $1 AND storage_key = $2`,
+        [token, key],
+      );
+    },
+    finish: (lease, input) => finish(input, lease),
+    failAbandoned: (exportId, errorCode) =>
+      finish({ exportId, status: 'FAILED', files: [], errorCode }),
+    async pendingFinalizations() {
+      const result = await pool.query<{
+        id: string;
+        error_code: string;
+      }>(`SELECT id, error_code FROM exports
+        WHERE execution_protocol = 1 AND finalization_pending
+          AND (execution_expires_at IS NULL OR execution_expires_at <= clock_timestamp())
+          AND status IN ('QUEUED', 'RENDERING') ORDER BY id LIMIT 100`);
+      return result.rows.map((row) => ({ exportId: row.id, errorCode: row.error_code }));
+    },
+  };
+}
+
 export function createExportsRepository(pool: Pool): ExportsRepository {
   return {
     async create(input) {
@@ -288,14 +505,14 @@ export function createExportsRepository(pool: Pool): ExportsRepository {
        */
       const { rowCount } = await pool.query(
         `UPDATE exports SET status = 'RENDERING', progress = GREATEST(progress, 50)
-          WHERE id = $1 AND status = 'QUEUED'`,
+          WHERE id = $1 AND status = 'QUEUED' AND execution_token IS NULL`,
         [exportId],
       );
       return (rowCount ?? 0) > 0;
     },
 
     async finish(input) {
-      await pool.query(
+      const result = await pool.query(
         `UPDATE exports
             SET status = $2::text,
                 -- 显式 ::text：同一个占位符既赋给 varchar 列又参与比较时，
@@ -305,7 +522,8 @@ export function createExportsRepository(pool: Pool): ExportsRepository {
                 error_code = $4,
                 error_detail = $5::jsonb,
                 finished_at = NOW()
-          WHERE id = $1`,
+          WHERE id = $1 AND execution_token IS NULL
+            AND status NOT IN ('COMPLETED', 'PARTIAL', 'FAILED')`,
         [
           input.exportId,
           input.status,
@@ -314,6 +532,7 @@ export function createExportsRepository(pool: Pool): ExportsRepository {
           input.errorDetail === undefined ? null : JSON.stringify(input.errorDetail),
         ],
       );
+      if (result.rowCount !== 1) throw new ExportLeaseLostError();
     },
 
     async replaceFiles(exportId, files) {

@@ -319,6 +319,90 @@ async function inTransaction<T>(pool: Pool, fn: (client: PoolClient) => Promise<
   }
 }
 
+/** 复用调用方的事务，生成提交不得再开启独立钱包事务。 */
+export async function reserveCreditsInTransaction(
+  client: PoolClient,
+  input: Parameters<CreditWalletRepository['reserve']>[0],
+): Promise<ReserveResult> {
+  if (input.amountCr <= 0) throw new Error(`预留金额必须为正，实际 ${input.amountCr}`);
+  /* 同一任务重复提交（队列重投、幂等命中之外的竞态）不再扣第二次 */
+  const existing = await client.query<{ hold_id: string }>(
+    `SELECT hold_id FROM credit_holds WHERE job_id = $1`,
+    [input.jobId],
+  );
+  const held = existing.rows[0];
+  if (held !== undefined) {
+    return { ok: false, reason: 'ALREADY_HELD', holdId: held.hold_id };
+  }
+
+  await ensureWallet(client, input.userId);
+
+  /*
+   * **不超发的关键就是这一条语句。**
+   *
+   * 谓词与更新在同一条 UPDATE 里，因此「检查余额」与「扣减余额」之间
+   * 不存在窗口。写成 SELECT + 比较 + UPDATE 的话，两个并发请求会都
+   * 读到足够的余额然后各扣一次 —— 而那正是超发。
+   */
+  const moved = await client.query<WalletRow>(
+    `UPDATE credit_wallets
+     SET balance_cr = balance_cr - $2, held_cr = held_cr + $2
+     WHERE user_id = $1 AND balance_cr >= $2
+     RETURNING balance_cr, held_cr`,
+    [input.userId, input.amountCr],
+  );
+  if (moved.rowCount === 0) {
+    const current = await client.query<WalletRow>(
+      `SELECT balance_cr, held_cr FROM credit_wallets WHERE user_id = $1`,
+      [input.userId],
+    );
+    return {
+      ok: false,
+      reason: 'INSUFFICIENT',
+      balanceCr: big(current.rows[0]?.balance_cr ?? '0'),
+    };
+  }
+  const created = await client.query<{ hold_id: string }>(
+    `INSERT INTO credit_holds (hold_id, user_id, job_id, amount_cr, price_version, expires_at)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5) RETURNING hold_id`,
+    [input.userId, input.jobId, input.amountCr, input.priceVersion, input.expiresAt],
+  );
+  /*
+   * 预留**不写流水**：钱还在用户账上，只是从可用挪到了冻结。
+   * 写一条 SPEND 会让「求和 = 余额」这条自校验失效，
+   * 也会让用户在流水里看到一笔尚未发生的消费。
+   */
+  return { ok: true, holdId: created.rows[0]!.hold_id, balanceCr: big(moved.rows[0]!.balance_cr) };
+}
+
+/** 导出 FAILED 与退款共用同一个事务，幂等键同时覆盖 API 建行失败补偿。 */
+export async function refundCreditsInTransaction(
+  client: PoolClient,
+  input: Parameters<CreditWalletRepository['refund']>[0],
+): Promise<{ readonly balanceCr: number; readonly replayed: boolean }> {
+  await ensureWallet(client, input.userId);
+  const updated = await client.query<WalletRow>(
+    `UPDATE credit_wallets SET balance_cr = balance_cr + $2
+     WHERE user_id = $1 RETURNING balance_cr`,
+    [input.userId, input.amountCr],
+  );
+  const balanceCr = big(updated.rows[0]?.balance_cr ?? '0');
+  const fresh = await appendLedger(client, {
+    ...input,
+    kind: 'REFUND',
+    balanceAfterCr: balanceCr,
+  });
+  if (!fresh) {
+    const reverted = await client.query<WalletRow>(
+      `UPDATE credit_wallets SET balance_cr = balance_cr - $2
+       WHERE user_id = $1 RETURNING balance_cr`,
+      [input.userId, input.amountCr],
+    );
+    return { balanceCr: big(reverted.rows[0]?.balance_cr ?? '0'), replayed: true };
+  }
+  return { balanceCr, replayed: false };
+}
+
 export function createCreditWalletRepository(pool: Pool): CreditWalletRepository {
   return {
     async balance(userId) {
@@ -408,66 +492,7 @@ export function createCreditWalletRepository(pool: Pool): CreditWalletRepository
     },
 
     async reserve(input) {
-      if (input.amountCr <= 0) throw new Error(`预留金额必须为正，实际 ${input.amountCr}`);
-
-      return inTransaction(pool, async (client): Promise<ReserveResult> => {
-        /* 同一任务重复提交（队列重投、幂等命中之外的竞态）不再扣第二次 */
-        const existing = await client.query<{ hold_id: string }>(
-          `SELECT hold_id FROM credit_holds WHERE job_id = $1`,
-          [input.jobId],
-        );
-        const held = existing.rows[0];
-        if (held !== undefined) {
-          return { ok: false, reason: 'ALREADY_HELD', holdId: held.hold_id };
-        }
-
-        await ensureWallet(client, input.userId);
-
-        /*
-         * **不超发的关键就是这一条语句。**
-         *
-         * 谓词与更新在同一条 UPDATE 里，因此「检查余额」与「扣减余额」之间
-         * 不存在窗口。写成 SELECT + 比较 + UPDATE 的话，两个并发请求会都
-         * 读到足够的余额然后各扣一次 —— 而那正是超发。
-         */
-        const moved = await client.query<WalletRow>(
-          `UPDATE credit_wallets
-           SET balance_cr = balance_cr - $2, held_cr = held_cr + $2
-           WHERE user_id = $1 AND balance_cr >= $2
-           RETURNING balance_cr, held_cr`,
-          [input.userId, input.amountCr],
-        );
-
-        if (moved.rowCount === 0) {
-          const current = await client.query<WalletRow>(
-            `SELECT balance_cr, held_cr FROM credit_wallets WHERE user_id = $1`,
-            [input.userId],
-          );
-          return {
-            ok: false,
-            reason: 'INSUFFICIENT',
-            balanceCr: big(current.rows[0]?.balance_cr ?? '0'),
-          };
-        }
-
-        const created = await client.query<{ hold_id: string }>(
-          `INSERT INTO credit_holds (hold_id, user_id, job_id, amount_cr, price_version, expires_at)
-           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
-           RETURNING hold_id`,
-          [input.userId, input.jobId, input.amountCr, input.priceVersion, input.expiresAt],
-        );
-
-        /*
-         * 预留**不写流水**：钱还在用户账上，只是从可用挪到了冻结。
-         * 写一条 SPEND 会让「求和 = 余额」这条自校验失效，
-         * 也会让用户在流水里看到一笔尚未发生的消费。
-         */
-        return {
-          ok: true,
-          holdId: created.rows[0]?.hold_id ?? '',
-          balanceCr: big(moved.rows[0]?.balance_cr ?? '0'),
-        };
-      });
+      return inTransaction(pool, (client) => reserveCreditsInTransaction(client, input));
     },
 
     async settle(input) {
@@ -821,36 +846,7 @@ export function createCreditWalletRepository(pool: Pool): CreditWalletRepository
     },
 
     async refund(input) {
-      return inTransaction(pool, async (client) => {
-        await ensureWallet(client, input.userId);
-        const updated = await client.query<WalletRow>(
-          `UPDATE credit_wallets SET balance_cr = balance_cr + $2
-           WHERE user_id = $1 RETURNING balance_cr`,
-          [input.userId, input.amountCr],
-        );
-        const balanceCr = big(updated.rows[0]?.balance_cr ?? '0');
-
-        const fresh = await appendLedger(client, {
-          userId: input.userId,
-          kind: 'REFUND',
-          amountCr: input.amountCr,
-          balanceAfterCr: balanceCr,
-          idempotencyKey: input.idempotencyKey,
-          refType: input.refType,
-          refId: input.refId,
-        });
-
-        if (!fresh) {
-          const reverted = await client.query<WalletRow>(
-            `UPDATE credit_wallets SET balance_cr = balance_cr - $2
-             WHERE user_id = $1 RETURNING balance_cr`,
-            [input.userId, input.amountCr],
-          );
-          return { balanceCr: big(reverted.rows[0]?.balance_cr ?? '0'), replayed: true };
-        }
-
-        return { balanceCr, replayed: false };
-      });
+      return inTransaction(pool, (client) => refundCreditsInTransaction(client, input));
     },
 
     async publishedPrices() {

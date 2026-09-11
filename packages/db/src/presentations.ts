@@ -1,4 +1,11 @@
 import type { Pool, PoolClient } from 'pg';
+import type { UsageSnapshot } from '@tps/billing';
+import {
+  GenerationLeaseLostError,
+  lockGenerationWrite,
+  type GenerationLease,
+  type PresentationCheckpoint,
+} from './generation-execution.js';
 
 /**
  * 展示数据与素材绑定的仓储（TP-3-15、TP-3-16，设计稿 13.4、十五章）。
@@ -76,9 +83,18 @@ export interface BindingRow {
   readonly height: number | null;
 }
 
+export interface SavePresentationCheckpoint {
+  readonly jobId: string;
+  readonly usage: UsageSnapshot;
+  readonly presentation: PresentationCheckpoint;
+}
+
 export interface PresentationsRepository {
   /** N+1 页一次事务写入（重复编排走 upsert，见 `plan_presentations_uk`） */
-  savePresentations(inputs: readonly SavePresentationInput[]): Promise<void>;
+  savePresentations(
+    inputs: readonly SavePresentationInput[],
+    checkpoint?: SavePresentationCheckpoint,
+  ): Promise<void>;
   findPresentation(input: FindPresentationInput): Promise<PresentationDetail | null>;
 
   /**
@@ -155,14 +171,20 @@ export interface PresentationsRepository {
   listBindings(planVersionId: string, templateId?: string): Promise<readonly BindingRow[]>;
 }
 
-export function createPresentationsRepository(pool: Pool): PresentationsRepository {
+export function createPresentationsRepository(
+  pool: Pool,
+  lease?: GenerationLease,
+): PresentationsRepository {
   return {
-    async savePresentations(inputs) {
+    async savePresentations(inputs, checkpoint) {
       if (inputs.length === 0) return;
 
       const client: PoolClient = await pool.connect();
       try {
         await client.query('BEGIN');
+        for (const planId of [...new Set(inputs.map((input) => input.planId))].sort()) {
+          await lockGenerationWrite(client, planId, lease);
+        }
         for (const input of inputs) {
           /*
            * upsert 而不是「先删后插」：13.4 会并发读这些行，
@@ -190,6 +212,29 @@ export function createPresentationsRepository(pool: Pool): PresentationsReposito
               input.validationStatus,
             ],
           );
+        }
+        if (checkpoint !== undefined) {
+          const result = await client.query(
+            `UPDATE generation_jobs
+            SET usage_snapshot = $3::jsonb, presentation_checkpoint = $4::jsonb, updated_at = NOW()
+            WHERE id = $1 AND plan_id = $2 AND plan_version_id = $5
+              AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
+              AND (($6::uuid IS NULL AND execution_token IS NULL) OR
+                (id = $6 AND execution_token = $7 AND execution_expires_at > clock_timestamp()))`,
+            [
+              checkpoint.jobId,
+              inputs[0]!.planId,
+              JSON.stringify(checkpoint.usage),
+              JSON.stringify(checkpoint.presentation),
+              inputs[0]!.planVersionId,
+              lease?.jobId ?? null,
+              lease?.token ?? null,
+            ],
+          );
+          if (result.rowCount !== 1) throw new GenerationLeaseLostError();
+        }
+        for (const planId of [...new Set(inputs.map((input) => input.planId))].sort()) {
+          await lockGenerationWrite(client, planId, lease);
         }
         await client.query('COMMIT');
       } catch (error) {
@@ -314,6 +359,9 @@ export function createPresentationsRepository(pool: Pool): PresentationsReposito
       const client: PoolClient = await pool.connect();
       try {
         await client.query('BEGIN');
+        for (const planId of [...new Set(inputs.map((input) => input.planId))].sort()) {
+          await lockGenerationWrite(client, planId, lease);
+        }
         for (const input of inputs) {
           await client.query(
             `INSERT INTO plan_asset_bindings (
@@ -336,6 +384,9 @@ export function createPresentationsRepository(pool: Pool): PresentationsReposito
               input.resolutionScore,
             ],
           );
+        }
+        for (const planId of [...new Set(inputs.map((input) => input.planId))].sort()) {
+          await lockGenerationWrite(client, planId, lease);
         }
         await client.query('COMMIT');
       } catch (error) {

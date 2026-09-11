@@ -4,6 +4,8 @@ import type { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createExportsRepository, type ExportsRepository } from './exports.js';
+import * as exportExecution from './exports.js';
+import { createCreditWalletRepository } from './credit-wallet.js';
 import { migrate } from './migrate.js';
 import { migrationsDirectory } from './migrations-dir.js';
 import { createPool } from './pool.js';
@@ -178,6 +180,118 @@ describeIntegration('exports 仓储（集成，需 PostgreSQL）', () => {
           }),
         ),
       ).rejects.toThrow();
+    });
+  });
+
+  describe('执行租约与原子退款', () => {
+    it('首败不退款，过期旧 token 不得覆盖成功产物', async () => {
+      expect(exportExecution).toHaveProperty('createExportExecutionRepository');
+      const seeded = await seed();
+      const row = await repository.create(input(seeded));
+      const execution = exportExecution.createExportExecutionRepository(pool, true);
+      const first = await execution.claim(row.exportId, 1);
+      if (first.kind !== 'acquired') throw new Error('未领取');
+      expect(await execution.claim(row.exportId, 1)).toEqual({ kind: 'busy' });
+      expect(await execution.retry(first.lease, 'EXPORT_PDF_FAILED')).toBe(true);
+      expect(await repository.findById(row.exportId)).toMatchObject({
+        status: 'QUEUED',
+        progress: 50,
+      });
+      const second = await execution.claim(row.exportId, 2);
+      if (second.kind !== 'acquired') throw new Error('未领取');
+      expect(await execution.renew(first.lease)).toBe(false);
+      await expect(
+        repository.finish({
+          exportId: row.exportId,
+          status: 'FAILED',
+          files: [],
+          errorCode: 'old',
+        }),
+      ).rejects.toThrow('EXPORT_LEASE_LOST');
+      expect(
+        await execution.finish(first.lease, {
+          exportId: row.exportId,
+          status: 'FAILED',
+          files: [],
+          errorCode: 'old',
+        }),
+      ).toBe(false);
+      expect(
+        await execution.finish(second.lease, {
+          exportId: row.exportId,
+          status: 'COMPLETED',
+          files: [{ storage_key: 'new' }],
+          errorCode: null,
+        }),
+      ).toBe(true);
+      expect(await execution.claim(row.exportId, 3)).toEqual({ kind: 'terminal' });
+      expect(await execution.retry(second.lease, 'late')).toBe(false);
+      expect(await repository.findById(row.exportId)).toMatchObject({
+        status: 'COMPLETED',
+        files: [{ storage_key: 'new' }],
+        errorCode: null,
+      });
+    });
+
+    it('退款数据库故障回滚 FAILED，恢复仅退回原 SPEND 一次', async () => {
+      expect(exportExecution).toHaveProperty('createExportExecutionRepository');
+      const seeded = await seed();
+      const row = await repository.create(input(seeded));
+      const wallet = createCreditWalletRepository(pool);
+      await wallet.credit({
+        userId: seeded.userId,
+        amountCr: 1000,
+        kind: 'GRANT',
+        idempotencyKey: 'seed',
+      });
+      await wallet.charge({
+        userId: seeded.userId,
+        amountCr: 37,
+        idempotencyKey: 'spend',
+        refType: 'EXPORT',
+        refId: row.exportId,
+        priceVersion: 1,
+      });
+      const execution = exportExecution.createExportExecutionRepository(pool, true);
+      const first = await execution.claim(row.exportId, 1);
+      if (first.kind !== 'acquired') throw new Error('未领取');
+      await execution.retry(first.lease, 'EXPORT_PDF_FAILED');
+      expect(await wallet.balance(seeded.userId)).toMatchObject({ balanceCr: 963 });
+      const last = await execution.claim(row.exportId, 2);
+      if (last.kind !== 'acquired') throw new Error('未领取');
+      await pool.query(
+        "ALTER TABLE credit_ledger ADD CONSTRAINT p1_refund_fault CHECK (kind <> 'REFUND')",
+      );
+      try {
+        await expect(
+          execution.finish(last.lease, {
+            exportId: row.exportId,
+            status: 'FAILED',
+            files: [],
+            errorCode: 'EXPORT_PDF_FAILED',
+          }),
+        ).rejects.toThrow();
+        expect(await repository.findById(row.exportId)).toMatchObject({ status: 'RENDERING' });
+        expect(await wallet.balance(seeded.userId)).toMatchObject({ balanceCr: 963 });
+      } finally {
+        await pool.query('ALTER TABLE credit_ledger DROP CONSTRAINT p1_refund_fault');
+      }
+      await pool.query(
+        "UPDATE exports SET execution_expires_at = NOW() - interval '1 second' WHERE id = $1",
+        [row.exportId],
+      );
+      expect(await execution.failAbandoned(row.exportId, 'EXPORT_PDF_FAILED')).toBe(true);
+      expect(await execution.failAbandoned(row.exportId, 'EXPORT_PDF_FAILED')).toBe(false);
+      expect(await repository.findById(row.exportId)).toMatchObject({
+        status: 'FAILED',
+        files: [],
+      });
+      expect(await wallet.balance(seeded.userId)).toMatchObject({ balanceCr: 1000 });
+      expect(
+        (await wallet.history({ userId: seeded.userId, limit: 100 })).filter(
+          (entry) => entry.kind === 'REFUND',
+        ),
+      ).toHaveLength(1);
     });
   });
 

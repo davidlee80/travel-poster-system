@@ -46,6 +46,11 @@ export {
 } from './retention.js';
 export {
   createExportsRepository,
+  createExportExecutionRepository,
+  ExportLeaseLostError,
+  type ExportExecutionRepository,
+  type ExportLease,
+  type ExportClaim,
   type CreateExportInput,
   type ExportJobRow,
   type ExportDownloadRow,
@@ -72,9 +77,11 @@ export {
   type PresentationsRepository,
   type SaveBindingInput,
   type SavePresentationInput,
+  type SavePresentationCheckpoint,
   type ValidationStatusValue,
 } from './presentations.js';
 export {
+  InsufficientGenerationCreditsError,
   createTravelPlansRepository,
   decodeCursor,
   encodeCursor,
@@ -133,3 +140,20 @@ export {
 } from './credit-wallet.js';
 
 export { InMemoryCreditWalletRepository, samplePriceBook } from './in-memory-credit-wallet.js';
+export {
+  createGenerationOutboxRepository,
+  type GenerationOutboxRepository,
+  type OutboxClaim,
+  type OutboxPreparation,
+  type OutboxStats,
+} from './generation-outbox.js';
+export {
+  createGenerationExecutionRepository,
+  GenerationLeaseLostError,
+  type GenerationLease,
+  type GenerationClaim,
+  type GenerationCheckpoint,
+  type GenerationExecutionState,
+  type GenerationExecutionRepository,
+  type PresentationCheckpoint,
+} from './generation-execution.js';

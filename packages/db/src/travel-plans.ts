@@ -1,6 +1,13 @@
 import type { Pool, PoolClient } from 'pg';
+import type { UsageSnapshot } from '@tps/billing';
+import {
+  GenerationLeaseLostError,
+  lockGenerationWrite,
+  type GenerationLease,
+} from './generation-execution.js';
 
 import { UniqueViolationError } from './users.js';
+import { reserveCreditsInTransaction } from './credit-wallet.js';
 
 /**
  * 计划、请求与任务的仓储（TP-2-08、TP-2-09、TP-2-15、TP-2-28）。
@@ -20,8 +27,24 @@ import { UniqueViolationError } from './users.js';
 
 export type JobStatusValue = string;
 
+export class InsufficientGenerationCreditsError extends Error {
+  override readonly name = 'InsufficientGenerationCreditsError';
+  constructor(
+    readonly requiredCr: number,
+    readonly balanceCr: number,
+  ) {
+    super('生成提交余额不足');
+  }
+}
+
 export interface CreateGenerationInput {
   readonly userId: string;
+  readonly hold?: {
+    readonly amountCr: number;
+    readonly priceVersion: number;
+    readonly expiresAt: Date;
+  };
+  readonly traceContext?: Readonly<Record<string, string>>;
   readonly clientRequestId: string;
   readonly idempotencyKey: string;
   /** 原始 `TravelRequestUI`。标准化规则变更后要靠它重放 */
@@ -196,6 +219,7 @@ export interface JobQueueTiming {
 }
 
 export interface SavePlanVersionInput {
+  readonly checkpoint?: { readonly jobId: string; readonly usage: UsageSnapshot };
   /**
    * 版本 ID 由**调用方**生成，不用数据库的 `gen_random_uuid()` 默认值。
    *
@@ -368,7 +392,10 @@ export function decodeCursor(cursor: string): Cursor | null {
   }
 }
 
-export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
+export function createTravelPlansRepository(
+  pool: Pool,
+  lease?: GenerationLease,
+): TravelPlansRepository {
   return {
     async createGeneration(input) {
       const client: PoolClient = await pool.connect();
@@ -433,8 +460,23 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
           [input.userId, requestId, planId, '已加入队列，正在等待处理'],
         );
 
+        const jobId = job.rows[0]!.id;
+        if (input.hold !== undefined) {
+          const reserved = await reserveCreditsInTransaction(client, {
+            ...input.hold,
+            userId: input.userId,
+            jobId,
+          });
+          if (!reserved.ok && reserved.reason === 'INSUFFICIENT') {
+            throw new InsufficientGenerationCreditsError(input.hold.amountCr, reserved.balanceCr);
+          }
+        }
+        await client.query(
+          `INSERT INTO generation_outbox (job_id, trace_context) VALUES ($1, $2::jsonb)`,
+          [jobId, input.traceContext === undefined ? null : JSON.stringify(input.traceContext)],
+        );
         await client.query('COMMIT');
-        return { requestId, planId, jobId: job.rows[0]!.id };
+        return { requestId, planId, jobId };
       } catch (error) {
         await client.query('ROLLBACK').catch(() => undefined);
         if (isUniqueViolation(error)) {
@@ -687,10 +729,10 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
        */
       const { rowCount } = await pool.query(
         `UPDATE generation_jobs
-            SET status = $2,
+            SET status = $2::text,
                 progress = GREATEST(progress, $3::smallint),
                 message = $4,
-                error_code = COALESCE($5, error_code),
+                error_code = CASE WHEN $2::text = 'COMPLETED' THEN NULL ELSE COALESCE($5, error_code) END,
                 plan_version_id = COALESCE($6::uuid, plan_version_id),
                 started_at = COALESCE(started_at, NOW()),
                 finished_at = CASE WHEN $7::boolean THEN NOW() ELSE finished_at END,
@@ -698,7 +740,9 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
                 updated_at = NOW()
           WHERE id = $1
             AND ($8::text IS NULL OR status = $8::text)
-            AND status <> ALL($9::text[])`,
+            AND status <> ALL($9::text[])
+            AND (($11::uuid IS NULL AND execution_token IS NULL)
+              OR (id = $11 AND execution_token = $12 AND execution_expires_at > clock_timestamp()))`,
         [
           input.jobId,
           input.to,
@@ -715,6 +759,8 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
            * （例如取消、或 P2 时期的老代码路径）不受影响。
            */
           JSON.stringify(input.stageTimings ?? {}),
+          lease?.jobId ?? null,
+          lease?.token ?? null,
         ],
       );
 
@@ -739,10 +785,14 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
         milestone === 't1'
           ? 't1_at = COALESCE(t1_at, NOW())'
           : 't2_at = COALESCE(t2_at, GREATEST(NOW(), t1_at))';
-      await pool.query(
-        `UPDATE generation_jobs SET ${assignment}, updated_at = NOW() WHERE id = $1`,
-        [jobId],
+      const result = await pool.query(
+        `UPDATE generation_jobs SET ${assignment}, updated_at = NOW() WHERE id = $1
+          AND (($2::uuid IS NULL AND execution_token IS NULL)
+            OR (id = $2 AND execution_token = $3 AND execution_expires_at > clock_timestamp()
+              AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')))`,
+        [jobId, lease?.jobId ?? null, lease?.token ?? null],
       );
+      if (lease !== undefined && result.rowCount !== 1) throw new GenerationLeaseLostError();
     },
 
     async cancelJob(jobId, userId) {
@@ -759,6 +809,9 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
               SET status = 'CANCELLED',
                   -- 16.2：CANCELLED 保持当前 progress
                   message = $3,
+                  execution_token = NULL,
+                  execution_expires_at = NULL,
+                  finalization_pending = (j.execution_protocol = 1),
                   finished_at = NOW(),
                   updated_at = NOW()
              FROM target t
@@ -787,7 +840,7 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
        * 顺序按去重后的文本序而不是首次出现序 —— 数组本身是集合语义
        * （13.7 的告警码集合），顺序不承载信息。
        */
-      await pool.query(
+      const result = await pool.query(
         `UPDATE generation_jobs
             SET warnings = COALESCE(
                   (SELECT jsonb_agg(DISTINCT value)
@@ -795,9 +848,13 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
                   '[]'::jsonb
                 ),
                 updated_at = NOW()
-          WHERE id = $1`,
-        [jobId, JSON.stringify(codes)],
+          WHERE id = $1
+            AND (($3::uuid IS NULL AND execution_token IS NULL)
+              OR (id = $3 AND execution_token = $4 AND execution_expires_at > clock_timestamp()
+                AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')))`,
+        [jobId, JSON.stringify(codes), lease?.jobId ?? null, lease?.token ?? null],
       );
+      if (lease !== undefined && result.rowCount !== 1) throw new GenerationLeaseLostError();
     },
 
     async findJobQueueTiming(jobId) {
@@ -826,6 +883,7 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
       const client: PoolClient = await pool.connect();
       try {
         await client.query('BEGIN');
+        await lockGenerationWrite(client, input.planId, lease);
 
         /*
          * 版本号在事务里取 `MAX + 1`。`travel_plan_versions` 上有
@@ -888,6 +946,29 @@ export function createTravelPlansRepository(pool: Pool): TravelPlansRepository {
           );
         }
 
+        if (input.checkpoint !== undefined) {
+          const checkpoint = await client.query(
+            `UPDATE generation_jobs
+            SET plan_version_id = $2, usage_snapshot = $3::jsonb,
+                t1_at = CASE WHEN $4::boolean THEN COALESCE(t1_at, NOW()) ELSE t1_at END,
+                updated_at = NOW()
+            WHERE id = $1 AND plan_id = $5 AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
+              AND (($6::uuid IS NULL AND execution_token IS NULL)
+                OR (id = $6 AND execution_token = $7 AND execution_expires_at > clock_timestamp()))`,
+            [
+              input.checkpoint.jobId,
+              versionId,
+              JSON.stringify(input.checkpoint.usage),
+              promoted,
+              input.planId,
+              lease?.jobId ?? null,
+              lease?.token ?? null,
+            ],
+          );
+          if (checkpoint.rowCount !== 1) throw new GenerationLeaseLostError();
+        }
+        // 提交前再次确认租约未过期；旧执行的版本与提升操作一起回滚。
+        await lockGenerationWrite(client, input.planId, lease);
         await client.query('COMMIT');
         return { versionId, versionNumber, promoted };
       } catch (error) {
