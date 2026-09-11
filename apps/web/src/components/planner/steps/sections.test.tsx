@@ -56,7 +56,6 @@ const RICH: PlannerState = {
   answers: {
     trip: {
       origin: { text: '上海', country: '中国' },
-      destination_status: 'CONFIRMED',
       destinations: [
         { text: '东京', country: '日本' },
         { text: '京都', country: '日本' },
@@ -318,7 +317,7 @@ describe('控件真的渲染出来了', () => {
       />,
     );
     expect(html).toContain('aria-pressed');
-    expect(html).toContain('已经确定');
+    expect(html).toContain('日期固定');
     expect(html).toContain('前后可差 3 天');
   });
 

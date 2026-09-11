@@ -324,23 +324,6 @@ export const PLANNER_FIELDS = [
     validation: '必须可解析到城市+国家；允许补充具体机场/车站',
   },
   {
-    field_id: 'PV2-01-002',
-    step: '01',
-    api_key: 'trip.destination_status',
-    level: 'MAIN',
-    runtime_type: 'FACT',
-    priority: 'P0',
-    required: 'ALWAYS',
-    blocking: 'ALWAYS',
-    summary_group: 'SKELETON',
-    sensitivity: 'NORMAL',
-    data_type: 'enum',
-    question: '目的地是否已经确定？',
-    control: '单选卡片',
-    trigger: '始终显示',
-    validation: '只能选择“已经确定”或“有几个备选”；不能跳过具体目的地',
-  },
-  {
     field_id: 'PV2-01-004',
     step: '01',
     api_key: 'trip.dates',
@@ -1612,8 +1595,10 @@ export const PLANNER_FIELDS = [
 /**
  * 字段总数。写成常量供测试断言 —— 规范 21.1 与附录 C 都把它列为**阻塞发布**
  * 的硬门槛，而「视觉复合控件不改变这一数量」意味着重构 UI 时最容易破的正是它。
+ *
+ * 删除了「目的地是否已经确定」(PV2-01-002)之后,数量从 76 减少到 75。
  */
-export const PLANNER_FIELD_COUNT = 76;
+export const PLANNER_FIELD_COUNT = 75;
 
 /** 76 个字面量的联合。`source_field_id` 用它，拼错是编译错误 */
 export type PlannerFieldId = (typeof PLANNER_FIELDS)[number]['field_id'];
@@ -1682,7 +1667,6 @@ export interface PlannerFieldRequirement {
 
 const BASE_REQUIRED_FIELD_IDS = new Set<PlannerFieldId>([
   'PV2-01-001',
-  'PV2-01-002',
   'PV2-01-003',
   'PV2-01-004',
   'PV2-01-008',

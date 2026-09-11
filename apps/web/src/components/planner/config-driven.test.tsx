@@ -107,7 +107,6 @@ const RICH: PlannerState = {
   answers: {
     trip: {
       origin: { text: '上海', country: '中国' },
-      destination_status: 'CONFIRMED',
       destinations: [{ text: '东京', country: '日本' }],
     },
     transport: { intercity_modes: [{ code: 'transport.flight', stance: 'PREFER' }] },
@@ -116,23 +115,6 @@ const RICH: PlannerState = {
 };
 
 describe('停用一个选项，界面上就没有了', () => {
-  it('目的地状态不展示「完全没定」，即使远端配置仍保留旧选项', () => {
-    const after = render(
-      '01',
-      config({
-        'trip.destination_status': [
-          option('CONFIRMED', '已经确定'),
-          option('SHORTLISTED', '有几个备选'),
-          option('UNDECIDED', '完全没定'),
-        ],
-      }),
-    );
-    expect(after).toContain('>已经确定</button>');
-    expect(after).toContain('>有几个备选</button>');
-    expect(after).not.toContain('完全没定');
-    expect(after).not.toContain('UNDECIDED');
-  });
-
   it('条件码：停用「夜间活动」之后兴趣多选里不再出现它', () => {
     const before = render('07', undefined);
     expect(before).toContain('夜间活动');
@@ -144,20 +126,6 @@ describe('停用一个选项，界面上就没有了', () => {
     );
     expect(after).not.toContain('夜间活动');
     expect(after).toContain('标签-interest.food');
-  });
-
-  it('枚举：停用「有几个备选」之后单选卡里不再出现它', () => {
-    const kept = builtIn('trip.destination_status').filter((value) => value !== 'SHORTLISTED');
-    const after = render(
-      '01',
-      config({
-        'trip.destination_status': kept.map((value) => option(value, `选项-${value}`)),
-      }),
-    );
-    expect(after).toContain('选项-CONFIRMED');
-    expect(after).not.toContain('选项-SHORTLISTED');
-    /* 内置文案也不该漏出来 —— 漏出来说明有一条路径绕过了解析器 */
-    expect(after).not.toContain('有几个备选');
   });
 });
 
@@ -192,30 +160,12 @@ describe('必填项来自后台配置', () => {
         </PlannerConfigProvider>,
       );
 
-    expect(renderProbe(changed)).toBe('<output>76:BASE_REQUIRED</output>');
-    expect(renderProbe(changed.slice(1))).toBe('<output>76:OPTIONAL</output>');
+    expect(renderProbe(changed)).toBe('<output>75:BASE_REQUIRED</output>');
+    expect(renderProbe(changed.slice(1))).toBe('<output>75:OPTIONAL</output>');
   });
 });
 
 describe('改文案与改排序都是纯配置', () => {
-  it('文案按配置显示，内置文案不再出现', () => {
-    const after = render(
-      '01',
-      config({
-        'trip.destination_status': asPublished('trip.destination_status', {
-          CONFIRMED: '已经定死了',
-        }),
-      }),
-    );
-    expect(after).toContain('>已经定死了</button>');
-    /*
-     * 收窄到按钮文本：「已经确定」也出现在这个字段的问句里
-     * （「目的地是否已经确定？」），而问句来自 `PLANNER_FIELDS`，
-     * 不是选项文案 —— 拿整份标记做 `not.toContain` 会把问句一起算进去。
-     */
-    expect(after).not.toContain('>已经确定</button>');
-  });
-
   it('排序按配置的顺序渲染', () => {
     const values = [...builtIn('trip.date_flexibility')].reverse();
     const after = render(
@@ -287,20 +237,20 @@ describe('新增的能力边界', () => {
   it('枚举列表里配置多出来的值被丢弃', () => {
     /*
      * 渲染它只会得到一个「点了提交被 Zod 拒」的按钮，而错误指向
-     * `planner_profile.trip.destination_status` —— 运营看不懂。
+     * `planner_profile.trip.date_flexibility` —— 运营看不懂。
      * 因此解析器取「配置 ∩ 内置」，并在控制台留一条说明。
      */
     const after = render(
       '01',
       config({
-        'trip.destination_status': [
-          ...asPublished('trip.destination_status'),
+        'trip.date_flexibility': [
+          ...asPublished('trip.date_flexibility'),
           option('MAYBE', '大概吧'),
         ],
       }),
     );
     expect(after).not.toContain('大概吧');
-    expect(after).toContain('内置-CONFIRMED');
+    expect(after).toContain('内置-FIXED');
   });
 });
 
@@ -351,6 +301,6 @@ describe('没有配置时逐字节等价于内置', () => {
      */
     const empty = render('01', config({}));
     expect(empty).toBe(render('01', undefined));
-    expect(empty).toContain('已经确定');
+    expect(empty).toContain('日期固定');
   });
 });

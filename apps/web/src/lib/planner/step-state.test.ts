@@ -25,7 +25,6 @@ function answer(
 
 const SKELETON: readonly [PlannerFieldId, PlannerAnswerPatch][] = [
   ['PV2-01-001', { trip: { origin: { text: '上海', country: '中国' } } }],
-  ['PV2-01-002', { trip: { destination_status: 'CONFIRMED' } }],
   ['PV2-01-003', { trip: { destinations: [{ text: '杭州', country: '中国' }] } }],
   ['PV2-01-004', { trip: { dates: { start_date: '2026-09-01', end_date: '2026-09-04' } } }],
   ['PV2-02-001', { travelers: { count: 2 } }],

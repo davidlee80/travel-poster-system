@@ -35,7 +35,6 @@ function stateWith(answers: PlannerProfileInput): PlannerState {
 const COMPLETE: PlannerProfileInput = {
   trip: {
     origin: { text: '上海', country: '中国' },
-    destination_status: 'CONFIRMED',
     destinations: [
       { text: '东京', country: '日本' },
       { text: '京都', country: '日本' },

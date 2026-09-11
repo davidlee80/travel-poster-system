@@ -885,9 +885,9 @@
   margin: 4px 0 6px;
   color: var(--primary-dark);
   font-family: var(--tps-font-serif, Georgia, serif);
-  font-size: 24px;
+  font-size: clamp(26px, 3.2vw, 34px);
   font-weight: 700;
-  line-height: 1.28;
+  line-height: 1.18;
 }
 
 .planner-page-head__desc {
@@ -3509,12 +3509,6 @@
 .planner-step-page[data-step='01'] .planner-page-head__eyebrow {
   font-size: 12px;
   letter-spacing: 0.09em;
-}
-
-.planner-step-page[data-step='01'] .planner-page-head__title {
-  margin-top: 7px;
-  font-size: clamp(26px, 3.2vw, 34px);
-  line-height: 1.18;
 }
 
 .planner-step-page[data-step='01'] .planner-page-head__desc {

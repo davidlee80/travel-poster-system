@@ -222,8 +222,6 @@ export type LockedOrder = z.infer<typeof LockedOrderSchema>;
 export const PlannerTripSchema = z.object({
   /** PV2-01-001 */
   origin: PlannerPlaceSchema.optional(),
-  /** PV2-01-002 */
-  destination_status: DestinationStatusSchema.optional(),
   /** PV2-01-003。1～5 个；顺序即用户的排序（可拖拽）。多目的地时可填抵达日期/天数/交通 */
   destinations: z.array(DestinationSchema).max(5).optional(),
   /** PV2-01-004 */

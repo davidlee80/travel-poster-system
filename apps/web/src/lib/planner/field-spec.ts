@@ -26,10 +26,6 @@ import { plannerField, type PlannerFieldId } from '@tps/schemas';
 /** api_key → 该字段的选项文案 */
 export const OPTION_LABEL: Record<string, Record<string, string>> = {
   // ── 01 旅行轮廓 ──
-  'trip.destination_status': {
-    CONFIRMED: '已经确定',
-    SHORTLISTED: '有几个备选',
-  },
   'trip.date_flexibility': {
     FIXED: '日期固定',
     PLUS_MINUS_1: '前后可差 1 天',

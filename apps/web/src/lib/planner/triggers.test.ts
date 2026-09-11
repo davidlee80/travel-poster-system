@@ -31,7 +31,6 @@ function answer(
 
 const DOMESTIC_TWO_ADULTS = answer(INITIAL_PLANNER_STATE, [
   ['PV2-01-001', { trip: { origin: { text: '上海', city: '上海', country: '中国' } } }],
-  ['PV2-01-002', { trip: { destination_status: 'CONFIRMED' } }],
   ['PV2-01-003', { trip: { destinations: [{ text: '杭州', city: '杭州', country: '中国' }] } }],
   ['PV2-01-004', { trip: { dates: { start_date: '2026-09-01', end_date: '2026-09-04' } } }],
   ['PV2-02-001', { travelers: { count: 2 } }],
@@ -180,7 +179,7 @@ describe('S1 普通国内双人（规范 24）', () => {
 
 describe('旧草稿里的目的地未定值', () => {
   const undecided = answer(INITIAL_PLANNER_STATE, [
-    ['PV2-01-002', { trip: { destination_status: 'UNDECIDED' } }],
+    ['PV2-01-001', { trip: { origin: { text: '上海', country: '中国' } } }],
   ]);
 
   it('不能绕过目的地必填：具体目的地仍显示并阻塞', () => {

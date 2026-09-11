@@ -46,7 +46,6 @@ describe('Planner 草稿版本迁移', () => {
     );
 
     const restored = loadDraft();
-    expect(restored?.answers.trip?.destination_status).toBeUndefined();
     expect(restored?.answers.trip?.destinations).toEqual([{ text: '东京', country: '日本' }]);
     expect(restored?.answers.travelers?.count).toBe(2);
   });
