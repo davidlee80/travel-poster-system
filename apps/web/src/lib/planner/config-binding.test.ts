@@ -154,7 +154,10 @@ describe('0012 与描述符表一致', () => {
   it('注册的 field_key 集合 == 62 个派生键 + 投影专用键', () => {
     const expected = [...OPTION_LISTS.map((l) => l.fieldKey), PROJECTED_CODES_FIELD_KEY].sort();
     const actual = [...new Set(ROWS.map((row) => row.fieldKey))].sort();
-    expect(actual).toEqual(expected);
+    /* 忽略已删除的字段(如 trip.destination_status,由 0021 迁移删除) */
+    const RETIRED_FIELD_KEYS = new Set(['trip.destination_status']);
+    const filtered = actual.filter((key) => !RETIRED_FIELD_KEYS.has(key));
+    expect(filtered).toEqual(expected);
   });
 
   it('每个 field_key 的选项值与内置值逐个相同（含顺序）', () => {

@@ -954,7 +954,7 @@
 .planner-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 800;
 }
 
@@ -1046,7 +1046,7 @@
 
 .planner-block__title {
   margin: 0 0 4px;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 800;
   letter-spacing: 0.02em;
   display: flex;
@@ -1200,7 +1200,7 @@
   border-radius: 11px;
   background: #fff;
   color: var(--ink);
-  font-size: 12px;
+  font-size: 14px;
   text-align: left;
 }
 
@@ -1492,7 +1492,7 @@
 
 /* 字段标签不参与垂直居中(只在视觉上显示,不影响布局) */
 .planner-destination__label {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--planner-text-secondary, #666);
   font-weight: 500;
   white-space: nowrap;
@@ -2687,7 +2687,23 @@
   }
 
   .planner-page-head__title {
-    font-size: 21px;
+    font-size: clamp(22px, 3.2vw, 28px);
+  }
+
+  .planner-block__title {
+    font-size: 15px;
+  }
+
+  .planner-section__title {
+    font-size: 13px;
+  }
+
+  .planner-choice {
+    font-size: 13px;
+  }
+
+  .planner-label {
+    font-size: 13px;
   }
 
   .planner-page-head__badge {
