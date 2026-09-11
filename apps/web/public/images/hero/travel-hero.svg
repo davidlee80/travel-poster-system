@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none">
+  <!-- 山景背景 -->
+  <path d="M0 300 L100 150 L200 220 L300 120 L400 200 L400 300 Z" fill="#e8f0fe" opacity="0.6"/>
+  <path d="M0 300 L150 180 L250 250 L350 150 L400 220 L400 300 Z" fill="#d4e4fd" opacity="0.5"/>
+  
+  <!-- 行李箱 -->
+  <rect x="280" y="180" width="80" height="100" rx="8" fill="#fbbf24" stroke="#f59e0b" stroke-width="2"/>
+  <rect x="280" y="180" width="80" height="15" rx="8" fill="#f59e0b"/>
+  <rect x="295" y="170" width="10" height="10" fill="#92400e"/>
+  <rect x="335" y="170" width="10" height="10" fill="#92400e"/>
+  <line x1="300" y1="180" x2="300" y2="280" stroke="#f59e0b" stroke-width="2"/>
+  <line x1="340" y1="180" x2="340" y2="280" stroke="#f59e0b" stroke-width="2"/>
+  <circle cx="295" cy="285" r="5" fill="#92400e"/>
+  <circle cx="345" cy="285" r="5" fill="#92400e"/>
+  
+  <!-- 装饰元素 -->
+  <circle cx="80" cy="60" r="20" fill="#fbbf24" opacity="0.3"/>
+  <circle cx="340" cy="80" r="15" fill="#fbbf24" opacity="0.2"/>
+</svg>

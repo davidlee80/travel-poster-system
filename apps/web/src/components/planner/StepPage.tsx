@@ -86,7 +86,7 @@ export function StepPage({
        */
     >
       <header className="planner-page-head">
-        <div>
+        <div className="planner-page-head__content">
           <div className="planner-page-head__eyebrow">
             {step} · {meta?.nav ?? ''}
           </div>
@@ -94,6 +94,14 @@ export function StepPage({
             {meta?.title ?? ''}
           </h1>
           <p className="planner-page-head__desc">{meta?.intro ?? ''}</p>
+        </div>
+        <div className="planner-page-head__hero">
+          <img
+            src="/images/hero/travel-hero.svg"
+            alt=""
+            className="planner-page-head__hero-img"
+            aria-hidden="true"
+          />
         </div>
         <span className="planner-page-head__badge">第 {Number(step)} 步 / 9</span>
       </header>

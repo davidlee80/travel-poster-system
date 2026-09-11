@@ -872,6 +872,35 @@
   align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 20px;
+  position: relative;
+  padding: 20px 24px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f8fafc 0%, #e8f0fe 100%);
+  overflow: hidden;
+}
+
+.planner-page-head__content {
+  flex: 1;
+  position: relative;
+  z-index: 1;
+}
+
+.planner-page-head__hero {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 40%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.planner-page-head__hero-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: right bottom;
+  opacity: 0.9;
 }
 
 .planner-page-head__eyebrow {
