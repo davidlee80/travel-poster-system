@@ -71,6 +71,8 @@ services:
       - ../.env.deploy
     environment:
       PORT: '3001'
+      NODE_ENV: 'development'
+      SMS_MODE: 'local'
     ports:
       - '127.0.0.1:3001:3001'
     # 22.3.3：必须大于应用侧的停机预算（SHUTDOWN_TIMEOUT_MS=25000）

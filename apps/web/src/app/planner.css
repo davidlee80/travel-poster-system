@@ -1086,6 +1086,8 @@
 .planner-block__icon {
   flex-shrink: 0;
   color: var(--primary);
+  width: 24px;
+  height: 24px;
 }
 
 .planner-block__intro {
