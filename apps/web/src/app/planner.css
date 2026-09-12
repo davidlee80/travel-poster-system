@@ -4181,12 +4181,6 @@
   background: radial-gradient(ellipse at 91% 1%, #f1f6fd 0, transparent 28%), #f8fafc;
 }
 
-.planner-step-page[data-step='04'] .planner-page-head {
-  position: relative;
-  padding: 0 2px;
-  margin-bottom: 8px;
-}
-
 .planner-step-page[data-step='04'] .planner-page-head__eyebrow {
   margin-bottom: 5px;
   color: #2876ff;
@@ -4225,15 +4219,6 @@
   line-height: 1.6;
   color: #65718d;
   letter-spacing: 0.15px;
-}
-
-.planner-step-page[data-step='04'] .planner-page-head__hero {
-  position: absolute;
-  top: -1px;
-  right: -25px;
-  width: 203px;
-  height: 86px;
-  pointer-events: none;
 }
 
 .planner-step-page[data-step='04'] .planner-required-legend {
