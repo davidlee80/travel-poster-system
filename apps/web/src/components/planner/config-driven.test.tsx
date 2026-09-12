@@ -1,8 +1,4 @@
-import {
-  PLANNER_FIELD_REQUIREMENTS,
-  type PlannerFieldId,
-  type PlannerStepId,
-} from '@tps/schemas';
+import { PLANNER_FIELD_REQUIREMENTS, type PlannerFieldId, type PlannerStepId } from '@tps/schemas';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
@@ -153,15 +149,14 @@ describe('必填项来自后台配置', () => {
     );
     const renderProbe = (fieldRequirements: typeof changed) =>
       renderToStaticMarkup(
-        <PlannerConfigProvider
-          value={{ ...config({}), field_requirements: fieldRequirements }}
-        >
+        <PlannerConfigProvider value={{ ...config({}), field_requirements: fieldRequirements }}>
           <StructuredRequirementProbe />
         </PlannerConfigProvider>,
       );
 
-    expect(renderProbe(changed)).toBe('<output>75:BASE_REQUIRED</output>');
-    expect(renderProbe(changed.slice(1))).toBe('<output>75:OPTIONAL</output>');
+    const total = PLANNER_FIELD_REQUIREMENTS.length;
+    expect(renderProbe(changed)).toBe(`<output>${total}:BASE_REQUIRED</output>`);
+    expect(renderProbe(changed.slice(1))).toBe(`<output>${total}:OPTIONAL</output>`);
   });
 });
 

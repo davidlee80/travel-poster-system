@@ -29,7 +29,7 @@ import { STEP_SECTIONS } from './sections';
  *
  * ## 为什么需要多个场景
  *
- * 76 个字段里 36 个是条件触发的，而其中若干**互斥**：预算模式选「总预算」
+ * 当前字段里有一部分是条件触发的，而其中若干**互斥**：预算模式选「总预算」
  * 时不问档次，选「旅行档次」时不问金额区间。一个场景不可能触发全部字段，
  * 因此断言的是「若干场景的并集 ≡ 全部字段」。用一个「全部触发」的假状态
  * 绕过这件事是错的：那会让互斥分支的渲染永远不被测到。
@@ -136,7 +136,7 @@ function renderScenario(state: PlannerState): readonly string[] {
  * 渲染行前准备中心，返回出现过的 field_id。
  *
  * 六张卡全部收起 —— 收起状态用 `hidden` 而不是不渲染，因此 `data_field`
- * 仍在 DOM 里。这正是那个设计的理由：规范 21.1 要求 76 个绑定**可被识别**，
+ * 仍在 DOM 里。这正是那个设计的理由：规范 21.1 要求每个绑定**可被识别**，
  * 而一个折叠起来就消失的绑定过不了那道门槛。
  */
 function prepMarkup(): string {
@@ -158,6 +158,58 @@ function renderPrepCenter(): readonly string[] {
     match[1] === undefined ? [] : [match[1]],
   );
 }
+
+function renderStep4(state: PlannerState = EMPTY): string {
+  return renderToStaticMarkup(
+    <StepPage
+      step="04"
+      active
+      state={state}
+      snapshot={buildSnapshot(state)}
+      dispatch={() => undefined}
+      onPrev={null}
+      onNext={null}
+      nextLabel={null}
+      registerField={() => undefined}
+    />,
+  );
+}
+
+describe('第 4 步参考稿布局', () => {
+  it('中间内容按参考稿排成两组两列，且不再有固定午休问题', () => {
+    const html = renderStep4();
+    const schedule = html.indexOf('planner-layout--schedule');
+    const dailyWindow = html.indexOf('data-field="PV2-04-002"');
+    const walking = html.indexOf('data-field="PV2-04-003"');
+    const preference = html.indexOf('planner-layout--preference');
+    const activities = html.indexOf('data-field="PV2-04-004"');
+    const freeTime = html.indexOf('data-field="PV2-04-005"');
+    const hotel = html.indexOf('data-field="PV2-04-007"');
+
+    expect(schedule).toBeGreaterThanOrEqual(0);
+    expect(schedule).toBeLessThan(dailyWindow);
+    expect(dailyWindow).toBeLessThan(walking);
+    expect(walking).toBeLessThan(preference);
+    expect(preference).toBeLessThan(activities);
+    expect(activities).toBeLessThan(freeTime);
+    expect(freeTime).toBeLessThan(hotel);
+    expect(html.match(/planner-layout--schedule/g)).toHaveLength(1);
+    expect(html.match(/planner-layout--preference/g)).toHaveLength(1);
+    expect(html).not.toContain('planner-block--two-column');
+    expect(html).not.toContain('planner-block--three-column');
+    expect(html).not.toContain('PV2-04-006');
+  });
+
+  it('沿用现有数据控件，同时提供参考稿的滑块、时间框与装饰', () => {
+    const html = renderStep4();
+
+    expect(html).toContain('--planner-slider-percent:50%');
+    expect(html).toContain('最早出门');
+    expect(html).toContain('最晚结束');
+    expect(html).toContain('data-step4-art="footprints"');
+    expect(html).toContain('data-step4-art="hotel"');
+  });
+});
 
 describe('区块表与元数据表一致', () => {
   it('每一步的各区块拼起来逐个等于该步的字段（顺序、数量、内容都不许差）', () => {
@@ -225,14 +277,14 @@ describe('九步渲染出全部主问卷字段', () => {
     }
   });
 
-  it('加上行前准备中心之后，76 个 Field ID 全部可被识别（规范 21.1）', () => {
+  it('加上行前准备中心之后，当前 Field ID 全部可被识别（规范 21.1）', () => {
     /*
      * 这是规范 21.1 那条**阻塞发布**门槛的完整落点：
-     * 「V2.1 必须能识别 76 个唯一 Field ID」。
+     * 「每个唯一 Field ID 必须可识别」。
      *
-     * 九步覆盖 70 个（非 POST_PLAN），行前准备中心覆盖余下 6 个。
+     * 九步覆盖非 POST_PLAN 字段，行前准备中心覆盖余下 6 个。
      * 分两处渲染是规范 16 的要求（不把用户拖回主问卷），因此断言也分两段 ——
-     * 但**并集必须是 76**，且不能有任何一个 id 出现在两边。
+     * 但**并集必须等于字段总数**，且不能有任何一个 id 出现在两边。
      */
     const inSteps = new Set<string>();
     for (const scenario of SCENARIOS) {

@@ -56,14 +56,14 @@ import {
 } from '@tps/schemas';
 
 /**
- * 76 个字段的控件描述符。
+ * 当前字段的控件描述符。
  *
- * ## 为什么是一张描述符表而不是 76 个手写控件
+ * ## 为什么是一张描述符表而不是逐字段手写控件
  *
- * 规范 21.1 把「必须能识别 76 个唯一 Field ID」列为**阻塞发布**的门槛，而
- * 76 个 bespoke 控件让这件事只能靠逐个核对 —— 而逐个核对在下一次改版时
- * 又要重做一遍。一张 `Record<PlannerFieldId, FieldDescriptor>` 让「76 个字段
- * 都渲染出来」在**结构上**成立：`Record` 少一个键是编译错误，
+ * 规范 21.1 要求每个 Field ID 唯一且可识别；逐字段手写控件让这件事只能靠
+ * 逐个核对 —— 而逐个核对在下一次改版时又要重做一遍。一张
+ * `Record<PlannerFieldId, FieldDescriptor>` 让「每个字段都能渲染」在**结构上**
+ * 成立：`Record` 少一个键是编译错误，
  * 而通用渲染器保证每个键都产出一个带 `data-field` 的容器。
  *
  * ## 描述符描述的是「值的形状」，不是「长什么样」
@@ -421,11 +421,6 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   'PV2-04-003': one('choice', { options: WALKING_TOLERANCE_VALUES }),
   'PV2-04-004': one('choice', { options: CORE_ACTIVITIES_VALUES }),
   'PV2-04-005': one('choice', { options: FREE_TIME_VALUES }),
-  'PV2-04-006': {
-    kind: 'parts',
-    toggle: '需要固定午休或午睡',
-    parts: [{ key: 'window', primitive: 'time-range', label: '午休时间' }],
-  },
   'PV2-04-007': one('choice', { options: HOTEL_CHANGE_TOLERANCE_VALUES }),
   'PV2-04-008': one('check', { options: RISK_EXCLUSION_VALUES }),
 

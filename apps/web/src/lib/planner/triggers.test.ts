@@ -59,16 +59,12 @@ describe('触发表的完整性', () => {
   });
 
   it('场景必填读取自己的触发条件，而不是复用页面显隐', () => {
-    const money = answer(DOMESTIC_TWO_ADULTS, [
-      ['PV2-03-001', { budget: { mode: 'TOTAL' } }],
-    ]);
+    const money = answer(DOMESTIC_TWO_ADULTS, [['PV2-03-001', { budget: { mode: 'TOTAL' } }]]);
     expect(unresolvedBlockers(money)).toContain('PV2-03-002');
     expect(unresolvedBlockers(money)).toContain('PV2-03-003');
     expect(unresolvedBlockers(money)).toContain('PV2-03-006');
 
-    const unknown = answer(DOMESTIC_TWO_ADULTS, [
-      ['PV2-03-001', { budget: { mode: 'UNKNOWN' } }],
-    ]);
+    const unknown = answer(DOMESTIC_TWO_ADULTS, [['PV2-03-001', { budget: { mode: 'UNKNOWN' } }]]);
     expect(unresolvedBlockers(unknown)).not.toContain('PV2-03-002');
     expect(unresolvedBlockers(unknown)).not.toContain('PV2-03-004');
 
@@ -216,17 +212,12 @@ describe('S3 带儿童家庭（D-01 同行人链）', () => {
     expect(isTriggered(family, 'PV2-02-006')).toBe(true);
   });
 
-  it('儿童需求含固定午睡后，第 4 步的午休窗口才出现', () => {
-    expect(isTriggered(family, 'PV2-04-006')).toBe(false);
+  it('固定午休字段已移除，儿童午睡不再触发第 4 步额外问题', () => {
     const withNap = answer(family, [
       ['PV2-02-005', { travelers: { child_needs: { values: ['FIXED_NAP'] } } }],
     ]);
-    expect(isTriggered(withNap, 'PV2-04-006')).toBe(true);
-  });
 
-  it('用户主动开启也能展开午休窗口', () => {
-    const optedIn = plannerReducer(family, { type: 'toggleOptIn', fieldId: 'PV2-04-006' });
-    expect(isTriggered(optedIn, 'PV2-04-006')).toBe(true);
+    expect(triggeredFields(withNap).map(String)).not.toContain('PV2-04-006');
   });
 
   it('少年（TEEN）算未成年人但不算儿童', () => {

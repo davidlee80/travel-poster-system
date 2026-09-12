@@ -18,7 +18,7 @@ import { DateStringSchema, NonEmptyStringSchema, TimeStringSchema } from './prim
  *
  * 新块把这件事变成一条可断言的规则：
  *
- *     76 个字段的载荷路径 === `planner_profile.` + api_key
+ *     当前字段的载荷路径 === `planner_profile.` + api_key
  *
  * 由 `planner-profile.test.ts` 逐个 api_key 走 schema 验证。子块名与
  * api_key 的第一段逐字相同，因此 `planner_profile.profile.trip_purposes`
@@ -30,7 +30,7 @@ import { DateStringSchema, NonEmptyStringSchema, TimeStringSchema } from './prim
  * `pace` / `conditions` 是**投影**，喂给 P1～P8 已有的生成链路。前端两者都发：
  *
  *   - 投影让 V-30/V-32 硬约束校验、N-01～N-12、Prompt 一行不改仍然工作；
- *   - 逐字记录让 76 个 field_id 各自有独立 binding（规范 21.1 的阻塞发布门槛），
+ *   - 逐字记录让每个 field_id 各自有独立 binding（规范 21.1 的阻塞发布门槛），
  *     并让 21.2 的 `source_field_id` 能指回具体字段。
  *
  * 三态标签（`transport.intercity_modes` 等 4 个字段）在两处都出现：这里保留
@@ -484,8 +484,6 @@ export const PlannerPaceSchema = z.object({
   core_activities_per_day: CoreActivitiesSchema.optional(),
   /** PV2-04-005 */
   free_time: FreeTimeSchema.optional(),
-  /** PV2-04-006。`enabled` 的理由同 `budget.hard_cap` */
-  rest_window: z.object({ enabled: z.boolean(), window: TimeRangeSchema.optional() }).optional(),
   /** PV2-04-007。规范 10：这是「换几次酒店」，由后台推导路线结构，不要求用户懂术语 */
   hotel_change_tolerance: HotelChangeToleranceSchema.optional(),
 });

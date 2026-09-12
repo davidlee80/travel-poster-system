@@ -28,6 +28,14 @@ function textsOf(profile: PlannerProfile, field: PlannerFieldId): readonly strin
 }
 
 describe('空答案不产出任何东西', () => {
+  it('固定午休字段已移除，旧画像残留不再派生约束', () => {
+    const legacy = {
+      pace: { rest_window: { enabled: true, window: { start: '13:00', end: '14:30' } } },
+    } as PlannerProfile;
+
+    expect(derive(legacy)).toEqual({ constraints: [], verify_items: [] });
+  });
+
   it('undefined 与空对象都返回两个空数组', () => {
     /*
      * P8 及之前的客户端没有 `planner_profile`。返回空数组让 `normalize` 据此

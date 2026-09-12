@@ -54,16 +54,30 @@ describe('Planner 字段元数据（规范 21.1 硬门槛）', () => {
     }
   });
 
-  it('步内序号从 001 连续递增无缺号', () => {
-    const seen = new Map<PlannerStepId, number>();
-    for (const field of PLANNER_FIELDS) {
-      const ordinal = Number(field.field_id.slice(7));
-      const previous = seen.get(field.step);
-      expect(ordinal, `${field.field_id} 与前一个字段不连续`).toBe(
-        previous === undefined ? 1 : previous + 1,
+  it('步内序号只允许落在已退役字段上的缺口，后续字段不改名', () => {
+    const retired = new Set(['PV2-01-002', 'PV2-04-006']);
+    for (const step of PLANNER_STEP_IDS) {
+      const ordinals = new Set(
+        plannerFieldsOfStep(step).map((field) => Number(field.field_id.slice(7))),
       );
-      seen.set(field.step, ordinal);
+      const max = Math.max(...ordinals);
+      for (let ordinal = 1; ordinal <= max; ordinal += 1) {
+        if (ordinals.has(ordinal)) continue;
+        expect(retired.has(`PV2-${step}-${String(ordinal).padStart(3, '0')}`)).toBe(true);
+      }
     }
+  });
+
+  it('固定午休字段已退役，第 4 步其余字段保留原 Field ID', () => {
+    expect(plannerFieldsOfStep('04').map((field) => field.field_id)).toEqual([
+      'PV2-04-001',
+      'PV2-04-002',
+      'PV2-04-003',
+      'PV2-04-004',
+      'PV2-04-005',
+      'PV2-04-007',
+      'PV2-04-008',
+    ]);
   });
 
   it('api_key 形如 <块>.<字段>，两段且小写', () => {
@@ -80,10 +94,10 @@ describe('Planner 字段元数据（规范 21.1 硬门槛）', () => {
    */
   it('每步字段数与规范 2.2 的分布表一致', () => {
     const expected: Record<PlannerStepId, number> = {
-      '01': 9,
+      '01': 8,
       '02': 6,
       '03': 6,
-      '04': 8,
+      '04': 7,
       '05': 7,
       '06': 8,
       '07': 10,
@@ -99,17 +113,17 @@ describe('Planner 字段元数据（规范 21.1 硬门槛）', () => {
     expect(sum).toBe(PLANNER_FIELD_COUNT);
   });
 
-  it('字段层级分布与字段表一致（主流程 51 / 条件触发 19 / 方案后补充 6）', () => {
+  it('字段层级分布与字段表一致（主流程 50 / 条件触发 18 / 方案后补充 6）', () => {
     const count = (level: string) => PLANNER_FIELDS.filter((f) => f.level === level).length;
-    expect(count('MAIN')).toBe(51);
-    expect(count('CONDITIONAL')).toBe(19);
+    expect(count('MAIN')).toBe(50);
+    expect(count('CONDITIONAL')).toBe(18);
     expect(count('POST_PLAN')).toBe(6);
   });
 
-  it('优先级分布与规范 23 章的交付边界一致（P0 52 / P1 20 / P2 4）', () => {
+  it('优先级分布与规范 23 章的交付边界一致（P0 50 / P1 20 / P2 4）', () => {
     const count = (priority: string) =>
       PLANNER_FIELDS.filter((f) => f.priority === priority).length;
-    expect(count('P0')).toBe(52);
+    expect(count('P0')).toBe(50);
     expect(count('P1')).toBe(20);
     expect(count('P2')).toBe(4);
   });
@@ -146,7 +160,7 @@ describe('Planner 字段元数据（规范 21.1 硬门槛）', () => {
   });
 
   it('后台生成必填清单由 required + blocking 配置生成，并排除补答元字段', () => {
-    expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).toHaveLength(35);
+    expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).toHaveLength(33);
     expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).toContain('PV2-01-001');
     expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).toContain('PV2-02-004');
     expect(PLANNER_GENERATION_REQUIRED_FIELD_IDS).toContain('PV2-03-001');
@@ -158,21 +172,19 @@ describe('Planner 字段元数据（规范 21.1 硬门槛）', () => {
     );
   });
 
-  it('目标字段分类覆盖全部76个字段且数量与评审文档一致', () => {
-    expect(PLANNER_FIELD_REQUIREMENTS).toHaveLength(76);
-    expect(new Set(PLANNER_FIELD_REQUIREMENTS.map((item) => item.field_id)).size).toBe(76);
+  it('目标字段分类覆盖全部74个字段且数量与评审文档一致', () => {
+    expect(PLANNER_FIELD_REQUIREMENTS).toHaveLength(74);
+    expect(new Set(PLANNER_FIELD_REQUIREMENTS.map((item) => item.field_id)).size).toBe(74);
     expect(
       Object.fromEntries(
-        ['BASE_REQUIRED', 'CONDITIONAL_REQUIRED', 'OPTIONAL', 'POST_PLAN', 'SYSTEM'].map(
-          (mode) => [
-            mode,
-            PLANNER_FIELD_REQUIREMENTS.filter((item) => item.requirement_mode === mode).length,
-          ],
-        ),
+        ['BASE_REQUIRED', 'CONDITIONAL_REQUIRED', 'OPTIONAL', 'POST_PLAN', 'SYSTEM'].map((mode) => [
+          mode,
+          PLANNER_FIELD_REQUIREMENTS.filter((item) => item.requirement_mode === mode).length,
+        ]),
       ),
     ).toEqual({
-      BASE_REQUIRED: 16,
-      CONDITIONAL_REQUIRED: 19,
+      BASE_REQUIRED: 15,
+      CONDITIONAL_REQUIRED: 18,
       OPTIONAL: 34,
       POST_PLAN: 6,
       SYSTEM: 1,

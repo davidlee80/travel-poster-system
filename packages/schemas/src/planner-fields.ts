@@ -1,12 +1,12 @@
 import { z } from 'zod';
 
 /**
- * 76 个产品字段的元数据（Planner V2.1，`docs/design/Planner_V2_产品字段表.xlsx`
+ * 当前 74 个产品字段的元数据（Planner V2.1，`docs/design/Planner_V2_产品字段表.xlsx`
  * 与《Planner V2.1 页面交互规范》附录 A）。
  *
  * ## 为什么放在 schemas 包而不是 apps/web
  *
- * 规范 21.1 的硬门槛是「V2.1 必须能识别 76 个唯一 Field ID」，而 21.2 要求
+ * 规范 21.1 的硬门槛是每个 Field ID 唯一且可识别，而 21.2 要求
  * 生成结果保存 `source_field_id` 使推荐可追溯。也就是说**后端**也要按
  * field_id 溯源，而不只是前端渲染需要它。放在 apps/web 会让后端再抄一份，
  * 而两份必然漂移 —— 漂移的表现是「推荐解释指向一个不存在的字段」。
@@ -299,10 +299,10 @@ export const PLANNER_STEPS = [
 ] as const satisfies readonly PlannerStepSpec[];
 
 /**
- * 76 条字段元数据，按页面区块顺序排列。
+ * 当前字段元数据，按页面区块顺序排列。
  *
  * `as const satisfies` 而不是 `: readonly PlannerFieldSpec[]`：前者保留字面量
- * 类型，因此 `PlannerFieldId` 能派生成 76 个字面量的联合 —— 那是
+ * 类型，因此 `PlannerFieldId` 能派生成字面量联合 —— 那是
  * `source_field_id` 拼错在编译期就报错的唯一途径。后者会把它退化成 `string`。
  */
 export const PLANNER_FIELDS = [
@@ -733,23 +733,6 @@ export const PLANNER_FIELDS = [
     control: '单选',
     trigger: '始终显示',
     validation: '默认“1小时左右”或根据节奏推导',
-  },
-  {
-    field_id: 'PV2-04-006',
-    step: '04',
-    api_key: 'pace.rest_window',
-    level: 'CONDITIONAL',
-    runtime_type: 'HARD',
-    priority: 'P0',
-    required: 'CONDITIONAL',
-    blocking: 'NEVER',
-    summary_group: 'MUST',
-    sensitivity: 'NORMAL',
-    data_type: 'time_range',
-    question: '是否需要固定午休或午睡？',
-    control: '开关+时间范围',
-    trigger: '儿童需求含固定午睡/用户主动开启',
-    validation: '开始<结束；仅在相关旅行者适用',
   },
   {
     field_id: 'PV2-04-007',
@@ -1596,14 +1579,15 @@ export const PLANNER_FIELDS = [
  * 字段总数。写成常量供测试断言 —— 规范 21.1 与附录 C 都把它列为**阻塞发布**
  * 的硬门槛，而「视觉复合控件不改变这一数量」意味着重构 UI 时最容易破的正是它。
  *
- * 删除了「目的地是否已经确定」(PV2-01-002)之后,数量从 76 减少到 75。
+ * 删除了「目的地是否已经确定」(PV2-01-002)与「固定午休/午睡」(PV2-04-006)之后，
+ * 数量从 76 减少到 74。退役 ID 不复用，后续字段不改名。
  */
-export const PLANNER_FIELD_COUNT = 75;
+export const PLANNER_FIELD_COUNT = 74;
 
-/** 76 个字面量的联合。`source_field_id` 用它，拼错是编译错误 */
+/** 当前字段 ID 的字面量联合。`source_field_id` 用它，拼错是编译错误 */
 export type PlannerFieldId = (typeof PLANNER_FIELDS)[number]['field_id'];
 
-/** 76 个 API Key 的联合。契约绑定用它 */
+/** 当前 API Key 的联合。契约绑定用它 */
 export type PlannerApiKey = (typeof PLANNER_FIELDS)[number]['api_key'];
 
 /**
@@ -1628,7 +1612,6 @@ export const PLANNER_REQUIREMENT_TRIGGER_VALUES = [
   'BUDGET_MONEY_MODE',
   'BUDGET_TIER_MODE',
   'HARD_CAP_ENABLED',
-  'FIXED_REST_ENABLED',
   'SELF_DRIVE_SELECTED',
   'ROOM_COUNT_SET',
   'ALLERGY_YES',
@@ -1693,7 +1676,11 @@ const CONDITIONAL_REQUIREMENTS = new Map<
 >([
   [
     'PV2-01-009',
-    { trigger_code: 'LOCKED_ORDER_SELECTED', blocking_scope: 'BRANCH', reason_code: 'LOCKED_ORDER' },
+    {
+      trigger_code: 'LOCKED_ORDER_SELECTED',
+      blocking_scope: 'BRANCH',
+      reason_code: 'LOCKED_ORDER',
+    },
   ],
   [
     'PV2-02-003',
@@ -1724,16 +1711,20 @@ const CONDITIONAL_REQUIREMENTS = new Map<
     { trigger_code: 'BUDGET_MONEY_MODE', blocking_scope: 'BRANCH', reason_code: 'BUDGET_MEANING' },
   ],
   [
-    'PV2-04-006',
-    { trigger_code: 'FIXED_REST_ENABLED', blocking_scope: 'BRANCH', reason_code: 'TRAVELER_SAFETY' },
-  ],
-  [
     'PV2-05-006',
-    { trigger_code: 'SELF_DRIVE_SELECTED', blocking_scope: 'BRANCH', reason_code: 'LEGAL_FEASIBILITY' },
+    {
+      trigger_code: 'SELF_DRIVE_SELECTED',
+      blocking_scope: 'BRANCH',
+      reason_code: 'LEGAL_FEASIBILITY',
+    },
   ],
   [
     'PV2-06-003',
-    { trigger_code: 'ROOM_COUNT_SET', blocking_scope: 'BRANCH', reason_code: 'CUSTOM_CONFIGURATION' },
+    {
+      trigger_code: 'ROOM_COUNT_SET',
+      blocking_scope: 'BRANCH',
+      reason_code: 'CUSTOM_CONFIGURATION',
+    },
   ],
   [
     'PV2-07-004',
@@ -1769,14 +1760,22 @@ const CONDITIONAL_REQUIREMENTS = new Map<
   ],
   [
     'PV2-08-010',
-    { trigger_code: 'WORK_CONSTRAINT_ENABLED', blocking_scope: 'BRANCH', reason_code: 'CUSTOM_CONFIGURATION' },
+    {
+      trigger_code: 'WORK_CONSTRAINT_ENABLED',
+      blocking_scope: 'BRANCH',
+      reason_code: 'CUSTOM_CONFIGURATION',
+    },
   ],
 ]);
 
 function baseReason(fieldId: PlannerFieldId): PlannerRequirementReason {
   if (fieldId === 'PV2-09-005') return 'CONSENT';
   if (fieldId === 'PV2-01-008') return 'LOCKED_ORDER';
-  if (fieldId.startsWith('PV2-02') || fieldId.startsWith('PV2-07') || fieldId.startsWith('PV2-08')) {
+  if (
+    fieldId.startsWith('PV2-02') ||
+    fieldId.startsWith('PV2-07') ||
+    fieldId.startsWith('PV2-08')
+  ) {
     return 'TRAVELER_SAFETY';
   }
   if (fieldId === 'PV2-03-001') return 'BUDGET_MEANING';
@@ -1784,7 +1783,7 @@ function baseReason(fieldId: PlannerFieldId): PlannerRequirementReason {
 }
 
 /**
- * 76个字段的完整目标分类。数组顺序与 `PLANNER_FIELDS` 一致，因此配置响应、
+ * 当前字段的完整目标分类。数组顺序与 `PLANNER_FIELDS` 一致，因此配置响应、
  * 页面与评审文档都能按同一顺序展示。
  */
 export const PLANNER_FIELD_REQUIREMENTS: readonly PlannerFieldRequirement[] = PLANNER_FIELDS.map(
@@ -1862,7 +1861,7 @@ export const PlannerFieldRequirementsSchema = z
     if (ids.size !== PLANNER_FIELDS.length) {
       context.addIssue({
         code: 'custom',
-        message: '字段分类必须完整覆盖 76 个唯一 Field ID',
+        message: '字段分类必须完整覆盖当前唯一 Field ID',
       });
     }
   });
@@ -1896,7 +1895,7 @@ export const PLANNER_GENERATION_REQUIRED_FIELD_IDS: readonly PlannerFieldId[] =
 /**
  * field_id → 元数据。
  *
- * 用 `Map` 而不是对象字面量：键是 76 个运行期字符串，`Object.fromEntries` 的
+ * 用 `Map` 而不是对象字面量：键是运行期字符串，`Object.fromEntries` 的
  * 返回类型是 `{ [k: string]: … }`，要拿到 `Record<PlannerFieldId, …>` 必须
  * 断言一次；而 `Map` 的 `get` 本来就返回 `T | undefined`，在
  * `noUncheckedIndexedAccess` 之下与索引访问的行为一致，却不需要断言。

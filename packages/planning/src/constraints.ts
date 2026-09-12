@@ -542,14 +542,6 @@ export function deriveConstraints(profile: PlannerProfile | undefined): DerivedC
   if (pace?.free_time !== undefined) {
     push('PREFER', 'PV2-04-005', phrase('PV2-04-005', pace.free_time));
   }
-  const rest = pace?.rest_window;
-  if (rest?.enabled === true && rest.window !== undefined) {
-    push(
-      'HARD',
-      'PV2-04-006',
-      `每天 ${rest.window.start} 到 ${rest.window.end} 是固定午休，这段时间不安排任何行程`,
-    );
-  }
   if (pace?.hotel_change_tolerance !== undefined) {
     push('HARD', 'PV2-04-007', phrase('PV2-04-007', pace.hotel_change_tolerance));
   }

@@ -24,7 +24,7 @@ import type { PlannerState } from './state';
  * 建好的生成链路（N-01～N-12、V-30/V-32、Prompt 渲染）。两者都发：
  *
  *   - 投影让既有链路一行不改仍然工作；
- *   - 逐字记录让 76 个 field_id 各自有独立 binding，且 `source_field_id`
+ *   - 逐字记录让每个 field_id 各自有独立 binding，且 `source_field_id`
  *     能指回具体字段。
  *
  * ## 投影是有损的，而每一处损失都写在注释里
@@ -343,11 +343,6 @@ export function projectConditions(answers: PlannerProfileInput): readonly Projec
    */
   if (answers.pace?.hotel_change_tolerance === 'ZERO') {
     out.push(conditionToContract('accommodation.single_base', 'REQUIRE'));
-  }
-
-  /* 固定午休 */
-  if (answers.pace?.rest_window?.enabled === true) {
-    out.push(conditionToContract('schedule.daily_rest', 'REQUIRE'));
   }
 
   /* 避免深夜抵达 */

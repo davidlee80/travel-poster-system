@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 
 import { asStringList } from '@/lib/planner/field-io';
 
@@ -118,11 +118,13 @@ export function RangeSlider({
   const max = part.max ?? 5;
   /* 默认 3（字段表：「1~5；默认3」）。显示默认值但不写入答案 —— 未写入才算未回答 */
   const current = typeof value === 'number' ? value : Math.round((min + max) / 2);
+  const percent = max === min ? 0 : ((current - min) / (max - min)) * 100;
 
   return (
     <div className="planner-slider">
       <input
         className="planner-slider__input"
+        style={{ '--planner-slider-percent': `${percent}%` } as CSSProperties}
         type="range"
         id={id}
         {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}
@@ -282,24 +284,34 @@ export function DualTime({ value, onChange, id, describedBy }: ControlProps): Re
 
   return (
     <div id={id} {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}>
-      <div className="planner-range">
-        <input
-          className="planner-input planner-input--time"
-          type="time"
-          aria-label="开始时间"
-          value={draft.start}
-          onChange={(event) => write(event.target.value, draft.end)}
-        />
+      <div className="planner-range planner-range--daily-window">
+        <label className="planner-time-box">
+          <span className="planner-time-box__label">
+            <span aria-hidden="true">☀️</span>最早出门
+          </span>
+          <input
+            className="planner-input planner-input--time"
+            type="time"
+            aria-label="最早出门时间"
+            value={draft.start}
+            onChange={(event) => write(event.target.value, draft.end)}
+          />
+        </label>
         <span className="planner-range__sep" aria-hidden="true">
-          –
+          -
         </span>
-        <input
-          className="planner-input planner-input--time"
-          type="time"
-          aria-label="结束时间"
-          value={draft.end}
-          onChange={(event) => write(draft.start, event.target.value)}
-        />
+        <label className="planner-time-box">
+          <span className="planner-time-box__label">
+            <span aria-hidden="true">🌙</span>最晚结束
+          </span>
+          <input
+            className="planner-input planner-input--time"
+            type="time"
+            aria-label="最晚结束时间"
+            value={draft.end}
+            onChange={(event) => write(draft.start, event.target.value)}
+          />
+        </label>
       </div>
       {crossesMidnight ? (
         <p className="planner-hint">这段时间跨过午夜，我们会按夜间活动安排。</p>

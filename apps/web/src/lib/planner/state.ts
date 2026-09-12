@@ -40,7 +40,7 @@ export type PlannerAnswerPatch = {
 };
 
 export interface PlannerState {
-  /** 76 字段的答案。形状与契约的 `planner_profile` 逐字相同 */
+  /** 当前字段的答案。形状与契约的 `planner_profile` 逐字相同 */
   readonly answers: PlannerProfileInput;
   /**
    * 用户主动编辑过的字段。
@@ -53,7 +53,7 @@ export interface PlannerState {
   /**
    * 用户主动展开的分支。
    *
-   * 字段表里有四个字段的触发条件写着「或用户主动开启」（午休、购物、
+   * 字段表里有三个字段的触发条件写着「或用户主动开启」（购物、
    * 工作安排、会员权益）。它们不由上游答案决定，只能显式记账。
    */
   readonly optIns: readonly PlannerFieldId[];
@@ -64,10 +64,10 @@ export interface PlannerState {
    *
    * **不在 `answers` 里。** `answers` 的形状与契约的 `planner_profile` 逐字相同，
    * 而模板不属于旅行画像 —— 它在请求里走 `output_preferences`，
-   * 是输出偏好而不是行程输入。塞进 `answers` 会让它跟着 76 字段一起
+   * 是输出偏好而不是行程输入。塞进 `answers` 会让它跟着问卷字段一起
    * 发到 `planner_profile` 里，而那个字段后端不认。
    *
-   * 也不进 `touched`：那张表的元素是 76 个 `PlannerFieldId` 字面量，
+   * 也不进 `touched`：那张表的元素是 `PlannerFieldId` 字面量，
    * 而「没选」与「选了默认那一个」在这里本来就可区分（`null` vs 字符串）。
    */
   readonly templateId: TemplateId | null;

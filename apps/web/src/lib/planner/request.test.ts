@@ -82,7 +82,6 @@ const COMPLETE: PlannerProfileInput = {
     daily_window: { start: '09:00', end: '21:00' },
     walking_tolerance: 'KM_8_TO_12',
     core_activities_per_day: 'TWO_TO_THREE',
-    rest_window: { enabled: true, window: { start: '13:00', end: '14:30' } },
     hotel_change_tolerance: 'ONE',
   },
   risk: { exclusions: ['MULTI_TRANSFER'] },
@@ -441,6 +440,14 @@ describe('节奏投影', () => {
 });
 
 describe('条件投影', () => {
+  it('固定午休字段已移除，旧草稿残留不再生成日程约束', () => {
+    const legacy = {
+      pace: { rest_window: { enabled: true, window: { start: '13:00', end: '14:30' } } },
+    } as PlannerProfileInput;
+
+    expect(projectConditions(legacy)).toEqual([]);
+  });
+
   it('三态标签原样带 mode 与 value', () => {
     const result = projectConditions({
       transport: {

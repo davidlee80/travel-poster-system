@@ -132,16 +132,6 @@ const VALIDATORS: Partial<Record<PlannerFieldId, Validator>> = {
     return null;
   },
 
-  'PV2-04-006': (s) => {
-    const rest = asRecord(readAnswer(s.answers, 'pace.rest_window'));
-    if (rest['enabled'] !== true) return null;
-    const window = asRecord(rest['window']);
-    const start = str(window['start']);
-    const end = str(window['end']);
-    if (start.length === 0 || end.length === 0) return '需要填写午休的开始与结束时间。';
-    return end <= start ? '午休结束时间需要晚于开始时间。' : null;
-  },
-
   'PV2-06-003': (s) => {
     /* 规范 12：房间配置必须覆盖全部旅行者，错误文案要说「尚有 N 人未分配」 */
     const rooms = asArray(readAnswer(s.answers, 'lodging.room_configuration'));

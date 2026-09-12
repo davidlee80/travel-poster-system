@@ -7,7 +7,7 @@ import type { PlannerAction, PlannerState } from '@/lib/planner/state';
 import type { PlannerSnapshot } from '@/lib/planner/step-state';
 
 import { FieldControl } from './controls/FieldControl';
-import { STEP_SECTIONS } from './steps/sections';
+import { STEP_SECTIONS, type PlannerSection } from './steps/sections';
 
 /**
  * 一个步骤页（规范 3.2 的 Main Header + Main Sections + Sticky Action）。
@@ -111,17 +111,39 @@ export function StepPage({
         <span>“当前必填”会随你的选择出现；其他问题可以跳过。</span>
       </div>
 
-      {sections.map((section) => {
-        const fields = section.fields.filter(
-          (fieldId) => triggered.has(fieldId) && !hidden.has(fieldId),
-        );
-        if (fields.length === 0) return null;
-        const layout = section.layout ?? 'single';
-        return (
-          <div
-            className={`planner-block${layout !== 'single' ? ` planner-block--${layout}` : ''}`}
-            key={section.title}
-          >
+      {(() => {
+        const visibleSections = sections.flatMap((section) => {
+          const fields = section.fields.filter(
+            (fieldId) => triggered.has(fieldId) && !hidden.has(fieldId),
+          );
+          return fields.length === 0 ? [] : [{ section, fields }];
+        });
+        const groups: {
+          key: string;
+          layoutGroup?: PlannerSection['layoutGroup'];
+          sections: typeof visibleSections;
+        }[] = [];
+        for (const item of visibleSections) {
+          const last = groups[groups.length - 1];
+          if (
+            item.section.layoutGroup !== undefined &&
+            last?.layoutGroup === item.section.layoutGroup
+          ) {
+            last.sections.push(item);
+          } else {
+            groups.push({
+              key: item.section.title,
+              layoutGroup: item.section.layoutGroup,
+              sections: [item],
+            });
+          }
+        }
+
+        const renderSection = ({
+          section,
+          fields,
+        }: (typeof visibleSections)[number]): React.ReactElement => (
+          <div className="planner-block" key={section.title}>
             <h2 className="planner-block__title">
               {section.icon ? (
                 <Icon
@@ -148,9 +170,20 @@ export function StepPage({
                 {...(slots?.[fieldId] === undefined ? {} : { slot: slots[fieldId] })}
               />
             ))}
+            {step === '04' ? <Step4Decoration section={section} /> : null}
           </div>
         );
-      })}
+
+        return groups.map((group) =>
+          group.layoutGroup === undefined ? (
+            group.sections.map(renderSection)
+          ) : (
+            <div className={`planner-layout planner-layout--${group.layoutGroup}`} key={group.key}>
+              {group.sections.map(renderSection)}
+            </div>
+          ),
+        );
+      })()}
 
       {beforeActions}
 
@@ -182,4 +215,52 @@ export function StepPage({
       </div>
     </section>
   );
+}
+
+function Step4Decoration({
+  section,
+}: {
+  readonly section: PlannerSection;
+}): React.ReactElement | null {
+  if (section.fields.includes('PV2-04-003')) {
+    return (
+      <svg
+        className="planner-step4-art planner-step4-art--footprints"
+        data-step4-art="footprints"
+        viewBox="0 0 50 70"
+        aria-hidden="true"
+      >
+        <path
+          d="M28 3c-8-2-12 5-7 11 4 4 10 4 11 12 1 8 10 12 13 4 3-9-7-24-17-27Z"
+          fill="#bddff9"
+        />
+        <ellipse cx="37" cy="40" rx="4" ry="5" fill="#c4e6fb" />
+        <path
+          d="M16 21c-8-1-13 10-12 21 1 11 6 17 12 15 6-2 6-8 2-13-3-5 7-20-2-23Z"
+          fill="#c9e9fc"
+        />
+        <ellipse cx="12" cy="64" rx="4" ry="3" fill="#c4e6fb" />
+        <ellipse cx="21" cy="61" rx="3" ry="4" fill="#c4e6fb" />
+      </svg>
+    );
+  }
+  if (section.fields.includes('PV2-04-007')) {
+    return (
+      <svg
+        className="planner-step4-art planner-step4-art--hotel"
+        data-step4-art="hotel"
+        viewBox="0 0 32 43"
+        aria-hidden="true"
+      >
+        <path d="M11 13V3h9v10" fill="none" stroke="#8585bc" strokeWidth="2" />
+        <path d="M12 3h7" stroke="#b7b8e8" strokeWidth="3" strokeLinecap="round" />
+        <rect x="5" y="12" width="23" height="25" rx="4" fill="#a09bf4" />
+        <rect x="5" y="12" width="13" height="25" rx="4" fill="#c4c0ff" />
+        <path d="M12 17v15m10-15v15" stroke="#e2ddff" strokeWidth="1.3" />
+        <circle cx="10" cy="39" r="2" fill="#7774aa" />
+        <circle cx="24" cy="39" r="2" fill="#7774aa" />
+      </svg>
+    );
+  }
+  return null;
 }

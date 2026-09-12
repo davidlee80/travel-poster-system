@@ -1501,7 +1501,7 @@
 }
 
 /* 日期字段固定宽度 */
-.planner-destination__field:has(input[type="date"]) {
+.planner-destination__field:has(input[type='date']) {
   flex: 0 0 140px;
 }
 
@@ -3584,8 +3584,14 @@
   border-top: 0;
 }
 
-.planner-step-page[data-step='01'] .planner-required-legend + .planner-block > .planner-block__title,
-.planner-step-page[data-step='01'] .planner-required-legend + .planner-block > .planner-block__intro,
+.planner-step-page[data-step='01']
+  .planner-required-legend
+  + .planner-block
+  > .planner-block__title,
+.planner-step-page[data-step='01']
+  .planner-required-legend
+  + .planner-block
+  > .planner-block__intro,
 .planner-step-page[data-step='01'] [data-field='PV2-01-001'],
 .planner-step-page[data-step='01'] [data-field='PV2-01-002'],
 .planner-step-page[data-step='01'] [data-field='PV2-01-003'],
@@ -3852,7 +3858,7 @@
 }
 
 /* 隐藏数字输入框的默认上下箭头(Firefox) */
-.planner-number-stepper__input[type="number"] {
+.planner-number-stepper__input[type='number'] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
@@ -4172,9 +4178,7 @@
 /* ── 第 4 步「旅行节奏」样式(按 step4.html,保留大字号)────────────────────────── */
 
 .planner-step-page[data-step='04'] {
-  background:
-    radial-gradient(ellipse at 91% 1%, #f1f6fd 0, transparent 28%),
-    #f8fafc;
+  background: radial-gradient(ellipse at 91% 1%, #f1f6fd 0, transparent 28%), #f8fafc;
 }
 
 .planner-step-page[data-step='04'] .planner-page-head {
@@ -4199,7 +4203,7 @@
   font-size: clamp(26px, 3.2vw, 34px);
   font-weight: 700;
   line-height: 1.18;
-  letter-spacing: .6px;
+  letter-spacing: 0.6px;
 }
 
 .planner-step-page[data-step='04'] .planner-page-head__title::after {
@@ -4209,7 +4213,7 @@
   width: 51px;
   height: 2px;
   background: #ffd477;
-  content: "";
+  content: '';
   transform: rotate(-3deg);
 }
 
@@ -4220,7 +4224,7 @@
   font-size: 14px;
   line-height: 1.6;
   color: #65718d;
-  letter-spacing: .15px;
+  letter-spacing: 0.15px;
 }
 
 .planner-step-page[data-step='04'] .planner-page-head__hero {
@@ -4301,7 +4305,9 @@
   font-size: 14px;
   line-height: 1.3;
   white-space: nowrap;
-  transition: background .15s, border-color .15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 
 .planner-step-page[data-step='04'] .planner-choice:hover {
@@ -4315,38 +4321,174 @@
   box-shadow: inset 0 0 0 2px #ffffffaa;
 }
 
-/* 第 4 步的两列布局(一天怎么过 + 步行量) */
-.planner-step-page[data-step='04'] .planner-block:has([data-field='PV2-04-002']) {
+/* 参考稿的两组两列：容器包住相邻卡片，而不是把标题和字段拆成两列 */
+.planner-layout {
   display: grid;
+  gap: 12px;
+  margin-top: 26px;
+}
+
+.planner-layout .planner-block {
+  margin-top: 0;
+}
+
+.planner-layout--schedule {
   grid-template-columns: 1fr 1.05fr;
-  gap: 12px;
 }
 
-/* 第 4 步的三列布局(核心项目 + 自由时间 + 换住) */
-.planner-step-page[data-step='04'] .planner-block:has([data-field='PV2-04-004']) {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 12px;
+.planner-layout--preference {
+  grid-template-columns: 1fr 1fr;
 }
 
-/* 两列布局(一天怎么过 + 步行量) */
-.planner-block--two-column {
-  display: grid;
-  grid-template-columns: 1fr 1.05fr;
-  gap: 12px;
+.planner-step-page[data-step='04'] .planner-layout {
+  gap: 6px;
+  margin-top: 0;
+  margin-bottom: 6px;
 }
 
-/* 三列布局(核心项目 + 自由时间 + 换住) */
-.planner-block--three-column {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 12px;
+.planner-step-page[data-step='04'] .planner-block {
+  margin-top: 0;
+}
+
+/* 强度卡的装饰角线与参考稿的渐变滑块 */
+.planner-step-page[data-step='04'] .planner-block:has([data-field='PV2-04-001'])::after {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  width: 59px;
+  height: 4px;
+  border-top: 1px solid #acd3c7;
+  border-right: 2px solid #75a798;
+  border-radius: 0 9px 0 0;
+  content: '';
+}
+
+.planner-step-page[data-step='04']
+  .planner-block:has([data-field='PV2-04-001'])
+  .planner-badge--required {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.planner-step-page[data-step='04'] .planner-slider__input {
+  height: 6px;
+  border-radius: 9px;
+  outline: none;
+  background: linear-gradient(
+    to right,
+    #2876ff var(--planner-slider-percent, 50%),
+    #e2e6ec var(--planner-slider-percent, 50%)
+  );
+  appearance: none;
+}
+
+.planner-step-page[data-step='04'] .planner-slider__input::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #2876ff;
+  box-shadow: 0 1px 4px #2876ff55;
+  appearance: none;
+}
+
+.planner-step-page[data-step='04'] .planner-slider__input::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #2876ff;
+  box-shadow: 0 1px 4px #2876ff55;
+}
+
+/* 参考稿的时间框 */
+.planner-step-page[data-step='04'] .planner-range--daily-window {
+  gap: 8px;
+}
+
+.planner-step-page[data-step='04'] .planner-time-box {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #e8edf5;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.planner-step-page[data-step='04'] .planner-time-box__label {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 4px;
+  color: #8791a6;
+  font-size: 12px;
+}
+
+.planner-step-page[data-step='04'] .planner-time-box .planner-input--time {
+  width: 100%;
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+/* 卡片装饰图 */
+.planner-step4-art {
+  position: absolute;
+  pointer-events: none;
+}
+
+.planner-step4-art--footprints {
+  top: 16px;
+  right: 10px;
+  width: 48px;
+  height: 62px;
+  opacity: 0.5;
+  transform: rotate(-15deg);
+}
+
+.planner-step4-art--hotel {
+  right: 14px;
+  bottom: 8px;
+  width: 34px;
+  height: 44px;
+  transform: rotate(12deg);
+}
+
+.planner-step-page[data-step='04'] .planner-block:has([data-field='PV2-04-003']) .planner-choices {
+  max-width: calc(100% - 58px);
+}
+
+.planner-step-page[data-step='04'] .planner-block:has([data-field='PV2-04-007']) .planner-choices {
+  padding-right: 52px;
+}
+
+.planner-step-page[data-step='04']
+  .planner-block:has([data-field='PV2-04-007'])
+  .planner-choice--on {
+  color: #7777e7;
+  border-color: #bbb9ff;
+  background: #f2f1ff;
+}
+
+.planner-step-page[data-step='04'] .planner-block:has([data-field='PV2-04-008']) {
+  border-color: transparent;
+  background: transparent;
+  padding-right: 0;
+  padding-left: 0;
 }
 
 /* 移动端改为单列 */
 @media (max-width: 768px) {
-  .planner-block--two-column,
-  .planner-block--three-column {
+  .planner-layout--schedule,
+  .planner-layout--preference {
     grid-template-columns: 1fr;
+  }
+
+  .planner-step-page[data-step='04']
+    .planner-block:has([data-field='PV2-04-003'])
+    .planner-choices {
+    max-width: calc(100% - 50px);
   }
 }

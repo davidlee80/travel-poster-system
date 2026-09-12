@@ -16,7 +16,7 @@ import { validateField } from './validation';
  *
  * ## 一张表 + 一个默认值
  *
- * 76 个字段里只有非「始终显示」的字段进入触发表，其余字段恒显示。
+ * 只有非「始终显示」的字段进入触发表，其余字段恒显示。
  * 表里只写条件字段，默认恒显示 —— 反过来把恒显示字段也写进表会让
  * 这张表大部分是 `() => true` 的噪声。
  *
@@ -229,10 +229,6 @@ const TRIGGERS: Partial<Record<PlannerFieldId, TriggerFn>> = {
   'PV2-03-004': (ctx) => ctx.budgetMode === 'TIER' || ctx.budgetMode === 'UNKNOWN',
   'PV2-03-005': (ctx) => ctx.budgetMode !== undefined && ctx.budgetMode !== 'UNKNOWN',
 
-  // ── 节奏 ──
-  /** 儿童需求含固定午睡，或用户主动开启 */
-  'PV2-04-006': (ctx, state) => ctx.childNeedsFixedNap || isOptedIn(state, 'PV2-04-006'),
-
   // ── 交通 ──
   'PV2-05-001': (ctx) => ctx.involvesLongHaul || ctx.isMultiCity,
   'PV2-05-002': (ctx) => ctx.involvesAir,
@@ -264,7 +260,7 @@ const TRIGGERS: Partial<Record<PlannerFieldId, TriggerFn>> = {
 
   // ── 确认旅程 ──
   /*
-   * 只在真有未完成的阻塞项时出现。`unresolvedBlockers` 会遍历其余 75 个字段，
+   * 只在真有未完成的阻塞项时出现。`unresolvedBlockers` 会遍历其余字段，
    * 因此这一条**必须**跳过自己 —— 见 `unresolvedBlockers` 的实现。
    */
   'PV2-09-002': (_ctx, state) => unresolvedBlockers(state).length > 0,
@@ -327,8 +323,6 @@ export function isRequirementActive(
       return ctx.budgetMode === 'TIER';
     case 'HARD_CAP_ENABLED':
       return ctx.hardCapEnabled;
-    case 'FIXED_REST_ENABLED':
-      return ctx.childNeedsFixedNap || isOptedIn(state, 'PV2-04-006');
     case 'SELF_DRIVE_SELECTED':
       return ctx.selfDriveChosen;
     case 'ROOM_COUNT_SET':
@@ -399,7 +393,6 @@ export const TRIGGER_REASON: Partial<Record<PlannerFieldId, string>> = {
   'PV2-02-003': '因为同行中有未成年人，部分航空公司与目的地会要求监护证明。',
   'PV2-02-005': '因为有孩子同行，住宿、交通与每日节奏都需要相应安排。',
   'PV2-02-006': '因为你们有三人以上，我们需要知道要不要分房、分车或分头活动。',
-  'PV2-04-006': '因为需要固定午休，这段时间我们不会安排任何行程。',
   'PV2-05-002': '因为这趟旅行会用到飞机，转机与过境规则需要提前确认。',
   'PV2-05-003': '因为涉及航班，舱等与座位会影响长途舒适度和票价。',
   'PV2-05-006': '因为你选择了自驾，我们需要确认目的地是否认可你的证件组合。',
