@@ -4328,3 +4328,25 @@
   grid-template-columns: 1fr 1fr 1fr;
   gap: 12px;
 }
+
+/* 两列布局(一天怎么过 + 步行量) */
+.planner-block--two-column {
+  display: grid;
+  grid-template-columns: 1fr 1.05fr;
+  gap: 12px;
+}
+
+/* 三列布局(核心项目 + 自由时间 + 换住) */
+.planner-block--three-column {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+
+/* 移动端改为单列 */
+@media (max-width: 768px) {
+  .planner-block--two-column,
+  .planner-block--three-column {
+    grid-template-columns: 1fr;
+  }
+}

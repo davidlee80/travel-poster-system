@@ -116,8 +116,12 @@ export function StepPage({
           (fieldId) => triggered.has(fieldId) && !hidden.has(fieldId),
         );
         if (fields.length === 0) return null;
+        const layout = section.layout ?? 'single';
         return (
-          <div className="planner-block" key={section.title}>
+          <div
+            className={`planner-block${layout !== 'single' ? ` planner-block--${layout}` : ''}`}
+            key={section.title}
+          >
             <h2 className="planner-block__title">
               {section.icon ? (
                 <Icon

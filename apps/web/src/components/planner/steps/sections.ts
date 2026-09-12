@@ -32,6 +32,8 @@ export interface PlannerSection {
   readonly icon?: string;
   /** 区块图标颜色（可选）。'blue' / 'yellow' / 'brown' / 'purple' / 'red' */
   readonly iconColor?: 'blue' | 'yellow' | 'brown' | 'purple' | 'red';
+  /** 布局（可选）。'single' / 'two-column' / 'three-column'，默认 'single' */
+  readonly layout?: 'single' | 'two-column' | 'three-column';
 }
 
 export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
@@ -88,30 +90,35 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       fields: ['PV2-04-002'],
       icon: 'clock',
       iconColor: 'blue',
+      layout: 'two-column',
     },
     {
       title: '每天可接受步行量',
       fields: ['PV2-04-003'],
       icon: 'walk',
       iconColor: 'blue',
+      layout: 'two-column',
     },
     {
       title: '每天希望安排几个核心项目?',
       fields: ['PV2-04-004'],
       icon: 'star',
       iconColor: 'yellow',
+      layout: 'three-column',
     },
     {
       title: '每天希望留多少自由时间?',
       fields: ['PV2-04-005'],
       icon: 'clock',
       iconColor: 'blue',
+      layout: 'three-column',
     },
     {
       title: '是否需要固定午休或午睡?',
       fields: ['PV2-04-006'],
       icon: 'clock',
       iconColor: 'blue',
+      layout: 'three-column',
     },
     {
       title: '最多愿意换几次住宿?',
