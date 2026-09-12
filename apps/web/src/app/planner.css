@@ -4314,3 +4314,17 @@
   background: #f0f5ff;
   box-shadow: inset 0 0 0 2px #ffffffaa;
 }
+
+/* 第 4 步的两列布局(一天怎么过 + 步行量) */
+.planner-step-page[data-step='04'] .planner-block:has([data-field='PV2-04-002']) {
+  display: grid;
+  grid-template-columns: 1fr 1.05fr;
+  gap: 12px;
+}
+
+/* 第 4 步的三列布局(核心项目 + 自由时间 + 换住) */
+.planner-step-page[data-step='04'] .planner-block:has([data-field='PV2-04-004']) {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
