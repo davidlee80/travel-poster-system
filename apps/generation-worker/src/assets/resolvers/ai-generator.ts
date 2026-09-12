@@ -145,6 +145,7 @@ export async function resolveByAi(
     return NO_RESULT;
   }
 
+  await deps.checkActive?.();
   const decision = await deps.budget.reserve(item.role);
   if (!decision.allowed) {
     /*
@@ -178,7 +179,33 @@ export async function resolveByAi(
     return { resolved: cachedAsset(item, waited), warnings: [] };
   }
 
+  let leaseLost = false;
+  let renewing: Promise<void> | undefined;
+  const renewal = setInterval(() => {
+    if (renewing !== undefined || leaseLost) return;
+    renewing = deps.assetLock
+      .renew(cacheKey, acquired)
+      .then((ok) => {
+        if (!ok) leaseLost = true;
+      })
+      .catch(() => {
+        leaseLost = true;
+      })
+      .finally(() => {
+        renewing = undefined;
+      });
+  }, 10_000);
+  renewal.unref();
+  const assertLease = async (): Promise<void> => {
+    await deps.checkActive?.();
+    if (leaseLost || !(await deps.assetLock.renew(cacheKey, acquired))) {
+      leaseLost = true;
+      throw new Error('素材执行租约已失效');
+    }
+  };
+
   try {
+    await assertLease();
     const size = imageSizeFor(
       item.visual_constraints.aspect_ratio,
       item.visual_constraints.min_width,
@@ -232,6 +259,7 @@ export async function resolveByAi(
       cache_key: cacheKey,
     });
 
+    await assertLease();
     const ingested = await ingestAsset(deps, {
       bytes: generated.bytes,
       entityName: item.role === 'HERO_BACKGROUND' ? null : brief.theme,
@@ -295,6 +323,7 @@ export async function resolveByAi(
     };
   } catch (error) {
     deps.budget.recordFailure(item.role);
+    await deps.checkActive?.();
     const code = imageWarningCode(error);
     deps.logger.warn({ role: item.role, error_code: code }, `AI 生成失败：${String(error)}`);
     aiImageTotal.inc({
@@ -308,7 +337,9 @@ export async function resolveByAi(
      * 无论成败都释放锁。不释放的话等待方要空等 30 秒的 TTL ——
      * 而生成失败时它们本该立刻走占位图。
      */
-    await deps.assetLock.release(cacheKey).catch(() => undefined);
+    clearInterval(renewal);
+    await renewing;
+    await deps.assetLock.release(cacheKey, acquired).catch(() => undefined);
   }
 }
 
@@ -321,6 +352,7 @@ async function waitForCacheKey(
   const deadline = now() + aiWaitTimeoutMs(deps.imageTimeoutMs);
 
   for (;;) {
+    await deps.checkActive?.();
     const row = await deps.assets.findByCacheKey(cacheKey);
     if (row !== null) return row;
     if (now() >= deadline) return null;

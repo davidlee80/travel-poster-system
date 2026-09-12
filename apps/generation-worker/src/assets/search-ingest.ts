@@ -136,6 +136,7 @@ export async function ingestSearchResult(
     return { assetId: null, created: false, searched: false, rejections: [] };
   }
 
+  await deps.checkActive?.();
   const candidates = await deps.search.search(
     {
       text: queryText,
@@ -148,9 +149,11 @@ export async function ingestSearchResult(
     deps.searchTimeoutMs,
   );
 
+  await deps.checkActive?.();
   const rejections: SearchRejectionReason[] = [];
 
   for (const candidate of candidates.slice(0, SEARCH_CANDIDATE_LIMIT)) {
+    await deps.checkActive?.();
     const outcome = await tryCandidate(deps, item, cacheKey, queryText, candidate);
     if (outcome.kind === 'rejected') {
       rejections.push(outcome.reason);
@@ -206,6 +209,7 @@ async function tryCandidate(
   try {
     bytes = await deps.search.download(candidate, deps.searchTimeoutMs);
   } catch (error) {
+    await deps.checkActive?.();
     deps.logger.warn(
       { role: item.role, reason_code: 'DOWNLOAD_FAILED' },
       `搜索候选下载失败：${String(error)}`,
@@ -213,6 +217,7 @@ async function tryCandidate(
     return { kind: 'rejected', reason: 'DOWNLOAD_FAILED' };
   }
 
+  await deps.checkActive?.();
   const contentHash = createHash('sha256').update(bytes).digest('hex');
   const tags = styleTagsFor(item, candidate);
 

@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { chromiumArgs, checkDevShm, DEVICE_SCALE_FACTOR, RENDER_VIEWPORT } from './browser.js';
+import { chromium, type Browser } from 'playwright-core';
+import {
+  chromiumArgs,
+  checkDevShm,
+  DEVICE_SCALE_FACTOR,
+  RENDER_VIEWPORT,
+  launchBrowser,
+} from './browser.js';
 
 describe('Chromium 启动参数（TP-1-19）', () => {
   const noFallback = { availableBytes: null, needsFallback: false, reason: '测试' } as const;
@@ -9,6 +16,16 @@ describe('Chromium 启动参数（TP-1-19）', () => {
     needsFallback: true,
     reason: '测试',
   } as const;
+
+  it('实际启动显式启用 Playwright 沙箱', async () => {
+    const launch = vi.spyOn(chromium, 'launch').mockResolvedValue({} as Browser);
+    try {
+      await launchBrowser({ devShm: noFallback });
+      expect(launch).toHaveBeenCalledWith(expect.objectContaining({ chromiumSandbox: true }));
+    } finally {
+      launch.mockRestore();
+    }
+  });
 
   it('不使用 --no-sandbox', () => {
     /*

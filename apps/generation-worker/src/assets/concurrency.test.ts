@@ -77,6 +77,33 @@ describe('mapWithConcurrency', () => {
     await expect(mapWithConcurrency([1], 0, () => Promise.resolve(1))).rejects.toThrow(/并发上限/);
   });
 
+  it('取消异常后停止领新项，等待已开始的项结束再返回', async () => {
+    let unblock!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    const calls: number[] = [];
+    let completed = false;
+    const work = mapWithConcurrency([0, 1, 2], 2, async (value) => {
+      calls.push(value);
+      if (value === 0) throw new Error('任务已取消');
+      await barrier;
+      return value;
+    }).catch((error: unknown) => {
+      completed = true;
+      return error;
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(completed).toBe(false);
+    } finally {
+      unblock();
+      await work;
+    }
+    expect(calls).toEqual([0, 1]);
+    expect(await work).toMatchObject({ message: '任务已取消' });
+  });
+
   it('异常不被吞掉', async () => {
     await expect(
       mapWithConcurrency([1, 2], 2, (value) =>

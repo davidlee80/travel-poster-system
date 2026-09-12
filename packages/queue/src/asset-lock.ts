@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Redis } from 'ioredis';
 
 /**
@@ -28,9 +29,10 @@ import type { Redis } from 'ioredis';
  */
 
 export interface AssetLock {
-  /** 返回 true 表示由本次调用负责生成。TTL 缺省为 `ASSET_LOCK_TTL_SECONDS` */
-  acquire(cacheKey: string, ttlSeconds?: number): Promise<boolean>;
-  release(cacheKey: string): Promise<void>;
+  /** 返回本次持有者的 token；未领取返回 null。 */
+  acquire(cacheKey: string, ttlSeconds?: number): Promise<string | null>;
+  renew(cacheKey: string, token: string, ttlSeconds?: number): Promise<boolean>;
+  release(cacheKey: string, token: string): Promise<void>;
 }
 
 /**
@@ -60,14 +62,36 @@ export class RedisAssetLock implements AssetLock {
     return `lock:asset:${cacheKey}`;
   }
 
-  async acquire(cacheKey: string, ttlSeconds = ASSET_LOCK_TTL_SECONDS): Promise<boolean> {
+  async acquire(cacheKey: string, ttlSeconds = ASSET_LOCK_TTL_SECONDS): Promise<string | null> {
     // 与 RedisIdempotencyLock 同一处理：SET NX EX 一条命令，不用 SETNX + EXPIRE
-    const result = await this.redis.set(this.key(cacheKey), '1', 'EX', ttlSeconds, 'NX');
-    return result === 'OK';
+    const token = randomUUID();
+    const result = await this.redis.set(this.key(cacheKey), token, 'EX', ttlSeconds, 'NX');
+    return result === 'OK' ? token : null;
   }
 
-  async release(cacheKey: string): Promise<void> {
-    await this.redis.del(this.key(cacheKey));
+  async renew(
+    cacheKey: string,
+    token: string,
+    ttlSeconds = ASSET_LOCK_TTL_SECONDS,
+  ): Promise<boolean> {
+    return (
+      (await this.redis.eval(
+        "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('EXPIRE', KEYS[1], ARGV[2]) end return 0",
+        1,
+        this.key(cacheKey),
+        token,
+        ttlSeconds,
+      )) === 1
+    );
+  }
+
+  async release(cacheKey: string, token: string): Promise<void> {
+    await this.redis.eval(
+      "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0",
+      1,
+      this.key(cacheKey),
+      token,
+    );
   }
 }
 
@@ -79,16 +103,24 @@ export class RedisAssetLock implements AssetLock {
  * 表现是 AI 调用量与副本数成正比。
  */
 export class InMemoryAssetLock implements AssetLock {
-  private readonly held = new Set<string>();
+  private readonly held = new Map<string, { token: string; expiresAt: number }>();
 
-  acquire(cacheKey: string): Promise<boolean> {
-    if (this.held.has(cacheKey)) return Promise.resolve(false);
-    this.held.add(cacheKey);
+  acquire(cacheKey: string, ttlSeconds = ASSET_LOCK_TTL_SECONDS): Promise<string | null> {
+    if ((this.held.get(cacheKey)?.expiresAt ?? 0) > Date.now()) return Promise.resolve(null);
+    const token = randomUUID();
+    this.held.set(cacheKey, { token, expiresAt: Date.now() + ttlSeconds * 1000 });
+    return Promise.resolve(token);
+  }
+
+  renew(cacheKey: string, token: string, ttlSeconds = ASSET_LOCK_TTL_SECONDS): Promise<boolean> {
+    const current = this.held.get(cacheKey);
+    if (current?.token !== token || current.expiresAt <= Date.now()) return Promise.resolve(false);
+    current.expiresAt = Date.now() + ttlSeconds * 1000;
     return Promise.resolve(true);
   }
 
-  release(cacheKey: string): Promise<void> {
-    this.held.delete(cacheKey);
+  release(cacheKey: string, token: string): Promise<void> {
+    if (this.held.get(cacheKey)?.token === token) this.held.delete(cacheKey);
     return Promise.resolve();
   }
 }

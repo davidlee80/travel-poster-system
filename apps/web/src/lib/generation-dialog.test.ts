@@ -1,6 +1,32 @@
 import { describe, expect, it } from 'vitest';
 
 import { dialogViewFor, type GenerationPhase } from './generation-dialog.js';
+import * as generationDialog from './generation-dialog.js';
+
+describe('可读里程碑', () => {
+  it.each([
+    ['SAVING_PLAN', false, false],
+    ['COMPLETED', false, false],
+    ['QUEUED', true, true],
+    ['SAVING_PLAN', true, true],
+    ['CANCELLED', true, false],
+    ['FAILED', true, false],
+    ['SAVING_PLAN', undefined, false],
+    ['BUILDING_PRESENTATION', undefined, true],
+    ['COMPLETED', undefined, true],
+  ] as const)('%s / T1=%s 的可读判断为 %s', (status, readable, expected) => {
+    expect(
+      generationDialog.isPlanReadable({
+        status,
+        ...(readable === undefined
+          ? {}
+          : {
+              milestones: { plan_readable: readable, page_viewable: false },
+            }),
+      }),
+    ).toBe(expected);
+  });
+});
 
 /**
  * 生成等待弹层的视图推导。

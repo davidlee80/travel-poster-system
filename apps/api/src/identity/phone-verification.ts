@@ -21,6 +21,17 @@ interface StoredCode {
   readonly attempts: number;
 }
 
+// 比较快照后原子核销或增加错误次数；不延长有效期，不复活已失效的码。
+const UPDATE_CODE = `
+  if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+  if ARGV[2] == '' then
+    redis.call('DEL', KEYS[1])
+  else
+    redis.call('SET', KEYS[1], ARGV[2], 'KEEPTTL')
+  end
+  return 1
+`;
+
 export class PhoneVerificationService {
   constructor(
     private readonly redis: Redis,
@@ -89,34 +100,38 @@ export class PhoneVerificationService {
     code: string,
   ): Promise<VerifyCodeResult> {
     const key = this.codeKey(phone, purpose);
-    const raw = await this.redis.get(key);
-    if (raw === null) return 'expired';
-
-    let stored: StoredCode;
-    try {
-      stored = JSON.parse(raw) as StoredCode;
-    } catch {
-      await this.redis.del(key);
-      return 'expired';
-    }
-
-    const maxAttempts = this.options.maxAttempts ?? 5;
-    if (stored.attempts >= maxAttempts) {
-      await this.redis.del(key);
-      return 'too_many_attempts';
-    }
-
-    const expected = Buffer.from(stored.digest, 'hex');
     const supplied = Buffer.from(this.digest(phone, purpose, code), 'hex');
-    if (expected.length === supplied.length && timingSafeEqual(expected, supplied)) {
-      await this.redis.del(key);
-      return 'valid';
+    const maxAttempts = this.options.maxAttempts ?? 5;
+    for (;;) {
+      const raw = await this.redis.get(key);
+      if (raw === null) return 'expired';
+      let next = '';
+      let result: VerifyCodeResult = 'expired';
+      try {
+        const stored = JSON.parse(raw) as StoredCode;
+        if (
+          !/^[a-f0-9]{64}$/.test(stored.digest) ||
+          !Number.isInteger(stored.attempts) ||
+          stored.attempts < 0
+        ) {
+          throw new Error('验证码记录无效');
+        }
+        if (stored.attempts >= maxAttempts) {
+          result = 'too_many_attempts';
+        } else if (timingSafeEqual(Buffer.from(stored.digest, 'hex'), supplied)) {
+          result = 'valid';
+        } else if (stored.attempts + 1 >= maxAttempts) {
+          result = 'too_many_attempts';
+        } else {
+          result = 'invalid';
+          next = JSON.stringify({ ...stored, attempts: stored.attempts + 1 });
+        }
+      } catch {
+        result = 'expired';
+      }
+      if ((await this.redis.eval(UPDATE_CODE, 1, key, raw, next)) === 1) return result;
+      // 并发更新、过期或换码后重新判断，不能沿用旧的比较结果。
     }
-
-    const ttl = await this.redis.ttl(key);
-    const next = JSON.stringify({ ...stored, attempts: stored.attempts + 1 });
-    if (ttl > 0) await this.redis.set(key, next, 'EX', ttl);
-    return stored.attempts + 1 >= maxAttempts ? 'too_many_attempts' : 'invalid';
   }
 }
 

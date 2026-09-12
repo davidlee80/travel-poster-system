@@ -192,10 +192,17 @@ export type ViewBookingTip = z.infer<typeof ViewBookingTipSchema>;
 
 // ── 完整 ViewModel ──────────────────────────────────────────
 
+// 仅兼容持久展示数据；0016 未改写 FULL_PLAN.days 内的旧 ID，新请求仍使用严格枚举。
+const StoredTemplateIdSchema = z.preprocess(
+  (value) =>
+    value === 'travel_infographic_v1' || value === 'travel_full_plan_v1' ? 'ink_paper_v1' : value,
+  TemplateIdSchema,
+);
+
 export const TravelPosterViewModelSchema = z
   .object({
     schema_version: z.literal(SCHEMA_VERSIONS.travelPosterViewModel),
-    template_id: TemplateIdSchema,
+    template_id: StoredTemplateIdSchema,
     page_type: PageTypeSchema,
     plan_id: NonEmptyStringSchema,
     plan_version_id: NonEmptyStringSchema,
@@ -215,6 +222,8 @@ export const TravelPosterViewModelSchema = z
     booking_tips: z.array(ViewBookingTipSchema),
     daily_summary: z.string(),
     daily_summary_compact: z.string(),
+    /** 已使用素材的许可署名快照；历史数据没有该字段，读取时保持兼容。 */
+    attributions: z.array(NonEmptyStringSchema).optional(),
 
     icons: ModuleIconsSchema,
   })
@@ -258,7 +267,7 @@ export type TravelPosterViewModel = z.infer<typeof TravelPosterViewModelSchema>;
  */
 export const FullPlanViewModelSchema = z.object({
   schema_version: z.literal(SCHEMA_VERSIONS.travelPosterViewModel),
-  template_id: TemplateIdSchema,
+  template_id: StoredTemplateIdSchema,
   page_type: z.literal('FULL_PLAN'),
   plan_id: NonEmptyStringSchema,
   plan_version_id: NonEmptyStringSchema,

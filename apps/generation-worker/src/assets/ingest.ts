@@ -75,6 +75,7 @@ export interface IngestAssetInput {
 }
 
 export interface IngestDeps {
+  readonly checkActive?: () => Promise<void>;
   readonly assets: AssetsRepository;
   readonly storage: ObjectStorage;
   readonly embedding: EmbeddingClient;
@@ -103,6 +104,7 @@ export async function ingestAsset(
   deps: IngestDeps,
   input: IngestAssetInput,
 ): Promise<IngestResult> {
+  await deps.checkActive?.();
   const processed = await processImage(input.bytes, {
     aspectRatio: input.aspectRatio,
     minWidth: input.minWidth,
@@ -128,6 +130,8 @@ export async function ingestAsset(
   const originalKey = assetObjectKey(input.role, assetId, '.webp');
   const thumbnailKey = assetObjectKey(input.role, assetId, '-thumb.webp');
 
+  // 发布开始前确认任务仍有效；一旦开始上传，完成共享素材登记以免留下半份产物。
+  await deps.checkActive?.();
   const storageUrl = await deps.storage.put({
     key: originalKey,
     body: image.webp,
@@ -148,6 +152,7 @@ export async function ingestAsset(
 
   let embedding: number[] | null = null;
   try {
+    await deps.checkActive?.();
     const [vector] = await deps.embedding.embed([
       semanticQueryText({
         role: input.role,

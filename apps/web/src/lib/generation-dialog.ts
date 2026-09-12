@@ -22,6 +22,26 @@
  * 反过来两行都动态也不行：一句每两秒重写一次的提示读不完。
  */
 
+/** T1 明确为 false 时不得用阶段名覆盖；旧服务端仅在保存后续阶段降级判断。 */
+export function isPlanReadable(job: {
+  readonly status: string;
+  readonly milestones?: { readonly plan_readable: boolean; readonly page_viewable: boolean };
+}): boolean {
+  if (job.status === 'FAILED' || job.status === 'CANCELLED') return false;
+  return (
+    job.milestones?.plan_readable ??
+    [
+      'BUILDING_PRESENTATION',
+      'RESOLVING_ASSETS',
+      'GENERATING_ASSETS',
+      'RENDERING_HTML',
+      'EXPORTING_PNG',
+      'EXPORTING_PDF',
+      'COMPLETED',
+    ].includes(job.status)
+  );
+}
+
 export type GenerationPhase =
   | { readonly kind: 'idle' }
   | { readonly kind: 'submitting' }

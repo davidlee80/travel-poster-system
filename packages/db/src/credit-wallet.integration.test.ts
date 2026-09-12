@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
 
 import { createCreditWalletRepository, type CreditWalletRepository } from './credit-wallet.js';
+import { InMemoryCreditWalletRepository } from './in-memory-credit-wallet.js';
 import { migrate } from './migrate.js';
 import { migrationsDirectory } from './migrations-dir.js';
 import { createPool } from './pool.js';
@@ -338,6 +339,44 @@ describeIntegration('CR 钱包（集成，需 PostgreSQL）', () => {
         hold_cr: 600,
         refunded_cr: 350,
       });
+    });
+  });
+
+  describe.each(['database', 'memory'] as const)('实际收支守恒：%s', (backend) => {
+    it.each(['failed', 'expired', 'settled'] as const)('%s 不把解冻计作收入', async (outcome) => {
+      const repo = backend === 'database' ? wallet : new InMemoryCreditWalletRepository();
+      await repo.credit({
+        userId,
+        amountCr: 1000,
+        kind: 'GRANT',
+        idempotencyKey: 'cashflow-grant',
+      });
+      const jobId = crypto.randomUUID();
+      await repo.reserve({ userId, jobId, amountCr: 600, priceVersion: 1, expiresAt: new Date(0) });
+      // 另一笔冻结保留到最后，防止只验证 held=0 的特例。
+      await repo.reserve({
+        userId,
+        jobId: crypto.randomUUID(),
+        amountCr: 100,
+        priceVersion: 1,
+        expiresAt: future(),
+      });
+      expect(await repo.balance(userId)).toEqual({ balanceCr: 300, heldCr: 700 });
+      for (let repeat = 0; repeat < 2; repeat++) {
+        if (outcome === 'failed') await repo.releaseFailed({ jobId, burnedCr: 180, lines: [] });
+        else if (outcome === 'expired') await repo.expireHolds({ limit: 10 });
+        else await repo.settle({ jobId, actualCr: 250, lines: [], unpriced: [] });
+      }
+      const entries = await repo.history({ userId, limit: 50 });
+      const balance = await repo.balance(userId);
+      expect(entries.reduce((sum, entry) => sum + entry.amountCr, 0)).toBe(
+        outcome === 'settled' ? 750 : 1000,
+      );
+      expect(balance).toEqual({ balanceCr: outcome === 'settled' ? 650 : 900, heldCr: 100 });
+      expect(entries.filter((entry) => entry.kind === 'REFUND')).toHaveLength(0);
+      expect((await repo.findHold(jobId))?.status).toBe(
+        outcome === 'failed' ? 'RELEASED' : outcome === 'expired' ? 'EXPIRED' : 'SETTLED',
+      );
     });
   });
 

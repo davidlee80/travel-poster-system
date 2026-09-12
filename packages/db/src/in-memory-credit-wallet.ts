@@ -215,14 +215,7 @@ export class InMemoryCreditWalletRepository implements CreditWalletRepository {
     const wallet = this.wallet(hold.userId);
     wallet.heldCr -= hold.amountCr;
     wallet.balanceCr += hold.amountCr;
-    this.append({
-      userId: hold.userId,
-      kind: 'REFUND',
-      amountCr: hold.amountCr,
-      idempotencyKey: `refund:${input.jobId}`,
-      refType: 'JOB',
-      refId: input.jobId,
-    });
+    // 释放只解冻，不产生实际收支流水。
     /* 与真实实现一致：坏账单独一条，金额恒 0（金额本身在 metadata 里） */
     if (input.burnedCr > 0) {
       this.append({
@@ -254,17 +247,7 @@ export class InMemoryCreditWalletRepository implements CreditWalletRepository {
       const wallet = this.wallet(hold.userId);
       wallet.heldCr -= hold.amountCr;
       wallet.balanceCr += hold.amountCr;
-      /* 键与真实实现同形：`expire:<hold_id>`，不与 `refund:<job_id>` 撞 */
-      this.append({
-        userId: hold.userId,
-        kind: 'REFUND',
-        amountCr: hold.amountCr,
-        idempotencyKey: `expire:${hold.holdId}`,
-        refType: 'JOB',
-        refId: jobId,
-        priceVersion: hold.priceVersion,
-        metadata: { reason: 'HOLD_EXPIRED' },
-      });
+      // 过期解冻由预留状态记录，不能伪装为退款收入。
       outcomes.push({
         holdId: hold.holdId,
         userId: hold.userId,

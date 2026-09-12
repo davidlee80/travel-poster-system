@@ -204,6 +204,37 @@ describe('对象存储清理（TP-6-14，门禁 #38）', () => {
     expect(summary).toMatchObject({ scanned: 1, purged: 0, failed: 1 });
   });
 
+  it('部分对象已删除后失败，保留整份键清单供下轮重试', async () => {
+    const keys = ['anon/a/first.png', 'anon/a/second.png'];
+    const { repository, purged } = fake({ users: ['u1'], objectKeys: { u1: keys } });
+    const storage = new InMemoryExportStorage();
+    for (const key of [...keys, 'users/keep/other.png']) {
+      storage.objects.set(key, { body: new Uint8Array(), contentType: 'image/png' });
+    }
+    let first = true;
+    const deps = {
+      retention: repository,
+      logger: createSilentLogger(),
+      exportStorage: {
+        delete: async (input: readonly string[]) => {
+          if (first) {
+            first = false;
+            await storage.delete([input[0]!]);
+            throw new Error('对象级删除失败：AccessDenied');
+          }
+          await storage.delete(input);
+        },
+      },
+    };
+    expect(await runPurgeRound(deps)).toMatchObject({ purged: 0, failed: 1 });
+    expect(purged).toEqual([]);
+    expect(storage.objects.has(keys[0]!)).toBe(false);
+    expect(storage.objects.has(keys[1]!)).toBe(true);
+    expect(await runPurgeRound(deps)).toMatchObject({ purged: 1, failed: 0 });
+    expect(purged).toEqual(['u1']);
+    expect([...storage.objects.keys()]).toEqual(['users/keep/other.png']);
+  });
+
   it('没有产物的用户照常清理，不调用 delete', async () => {
     const { repository, purged } = fake({ users: ['u1'] });
     const storage = new InMemoryExportStorage();

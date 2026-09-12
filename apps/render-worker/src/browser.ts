@@ -158,6 +158,7 @@ export async function launchBrowser(options: LaunchOptions = {}): Promise<Launch
 
   const browser = await chromium.launch({
     headless: options.headless ?? true,
+    chromiumSandbox: true,
     args: chromiumArgs(devShm),
   });
 

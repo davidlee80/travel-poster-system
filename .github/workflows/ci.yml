@@ -400,6 +400,11 @@ jobs:
       - name: L-10 优雅停机（三条）
         run: pnpm --filter @tps/generation-worker exec vitest run shutdown.integration
 
+      - name: P2 验证码与素材锁原子性
+        run: |
+          pnpm --filter @tps/queue exec vitest run redis.integration --no-file-parallelism
+          pnpm --filter @tps/api exec vitest run phone-verification --no-file-parallelism
+
       - name: P1 生成与导出真实队列恢复
         run: |
           pnpm --filter @tps/generation-worker exec vitest run generation-queue.integration generation-recovery.integration pipeline.integration acceptance.integration --no-file-parallelism

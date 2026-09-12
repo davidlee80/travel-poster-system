@@ -389,6 +389,17 @@ describeIntegration('保留期清理（集成，需 PostgreSQL）', () => {
         [seeded.userId],
       );
       expect(rows[0]!.count).toBe('1');
+      expect(await retention.listExportObjectKeys(seeded.userId)).toEqual(['anon/a/x.png']);
+      expect(await retention.countKnowledgeRows()).toBe(0);
+      expect(await retention.findExpiredAnonymous({ limit: 100, graceDays: 30 })).toEqual([
+        expect.objectContaining({ userId: seeded.userId }),
+      ]);
+      await retention.purgeUser(seeded.userId, () => Promise.resolve());
+      expect(await retention.listExportObjectKeys(seeded.userId)).toEqual([]);
+      expect(await retention.countKnowledgeRows()).toBe(1);
+      expect((await pool.query('SELECT 1 FROM users WHERE id = $1', [seeded.userId])).rows).toEqual(
+        [],
+      );
     });
 
     it('beforeDelete 成功时行被删除，且钩子能读到键（顺序正确）', async () => {

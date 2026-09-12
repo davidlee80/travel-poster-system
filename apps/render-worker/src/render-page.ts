@@ -100,9 +100,34 @@ export async function renderPage(request: RenderPageRequest): Promise<RenderPage
    * 令牌是页面级的（17.1：`day:3` 的令牌取不到 `day:4`），因此设在 page 上
    * 而不是 context 上 —— ALL_DAYS 导出要在同一个 context 里访问 N 天。
    */
-  await page.setExtraHTTPHeaders({ 'x-render-token': request.renderToken });
-
   try {
+    const expected = new URL(request.path, request.baseUrl);
+    await page.route('**/*', async (route) => {
+      const resource = route.request();
+      const url = new URL(resource.url());
+      const headers = { ...resource.headers() };
+      for (const name of Object.keys(headers)) {
+        if (name.toLowerCase() === 'x-render-token') delete headers[name];
+      }
+      if (
+        url.origin === expected.origin &&
+        url.pathname === expected.pathname &&
+        resource.method() === 'GET' &&
+        resource.isNavigationRequest() &&
+        resource.resourceType() === 'document' &&
+        resource.frame() === page.mainFrame()
+      ) {
+        // continue 的覆盖头会跨重定向传播；fetch 禁止自动跟随，再交还浏览器。
+        const response = await route.fetch({
+          headers: { ...headers, 'x-render-token': request.renderToken },
+          maxRedirects: 0,
+          timeout: SINGLE_RENDER_BUDGET_MS,
+        });
+        await route.fulfill({ response });
+      } else {
+        await route.continue({ headers });
+      }
+    });
     let last: { readonly variant: RenderVariant; readonly overflow: OverflowReport } | null = null;
     let missingIcons = 0;
     let images: BrokenImageReport = { total: 0, broken: 0 };

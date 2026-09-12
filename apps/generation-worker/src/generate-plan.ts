@@ -124,6 +124,8 @@ export interface JobModelContext {
 }
 
 export interface GeneratePlanDeps {
+  /** 每次外部调用前检查执行是否仍被允许；由任务入口装配。 */
+  readonly checkActive?: () => Promise<void>;
   readonly execution?: {
     readonly repository: GenerationExecutionRepository;
     readonly lease: GenerationLease;
@@ -304,6 +306,7 @@ async function callModel(
    * 请求 —— 它一定在 300 秒边界之后才返回，而那时任务已经算超时，
    * 这次调用的钱白花。
    */
+  await deps.checkActive?.();
   const timeoutMs = deadline.remainingFor(deps.llmTimeoutMs);
   if (timeoutMs <= 0) throw new LlmTimeoutError(0);
 
@@ -372,6 +375,7 @@ async function callModel(
    * 拿主候选的名字计费会让「主候选挂了、由更贵的备选顶上」被按主候选的价收。
    */
   meter.addLlm(result.model, result.usage.inputTokens, result.usage.outputTokens);
+  await deps.checkActive?.();
 
   /*
    * strict 不允许可选属性，所以 `total_budget` 的两个可选金额被改成了可空必填 ——
@@ -471,6 +475,16 @@ async function runJob(
     return { outcome: 'skipped', reason: 'already_terminal' };
   }
 
+  const parentCheck = deps.checkActive;
+  const checkActive = async (): Promise<void> => {
+    await parentCheck?.();
+    const current = await deps.plans.findJobContext(payload.jobId);
+    if (current?.status === 'CANCELLED') throw new GenerationCancelledError();
+    if (current === null || ['COMPLETED', 'FAILED'].includes(current.status)) {
+      throw new GenerationLeaseLostError();
+    }
+  };
+  deps = { ...deps, checkActive };
   const log = deps.logger.child({ job_id: context.jobId, user_id: context.userId });
   const now = deps.now ?? Date.now;
 
@@ -535,6 +549,7 @@ async function runJob(
     to: JobStatus,
     extra: { readonly errorCode?: string; readonly planVersionId?: string } = {},
   ): Promise<boolean> => {
+    await checkActive();
     const updated = await advance(deps, context.jobId, to, {
       ...extra,
       stageTimings: timer.enter(to),
@@ -658,13 +673,16 @@ async function runJob(
         meter,
       );
     } catch (error) {
+      if (error instanceof GenerationCancelledError || error instanceof GenerationLeaseLostError)
+        throw error;
+      await checkActive();
       const code = errorCodeFor(error);
       log.error({ stage: 'GENERATING_PLAN', error_code: code }, '计划生成失败');
       return failJob(code);
     }
 
     // ── VALIDATING_PLAN ⇄ REPAIRING_PLAN（3.2.1、3.2.2）──
-    await step('VALIDATING_PLAN');
+    if (!(await step('VALIDATING_PLAN'))) return cancelled('VALIDATING_PLAN');
 
     const injected: TravelPlanContent = {
       ...generated.output,
@@ -673,16 +691,16 @@ async function runJob(
       status: 'READY',
     };
 
-    let repairing = false;
+    let repairCancelled = false;
     const resolved = await resolvePlan(
       injected,
       { normalized },
       {
         observer: createPlanValidationObserver(),
         regenerate: async ({ violations, plan, attempt }) => {
-          if (!repairing) {
-            repairing = true;
-            await step('REPAIRING_PLAN');
+          if (repairCancelled || !(await step('REPAIRING_PLAN'))) {
+            repairCancelled = true;
+            throw new GenerationCancelledError();
           }
           const messages = buildRepairPrompt({
             normalized,
@@ -723,6 +741,8 @@ async function runJob(
       addAssumption(resolved.plan, assumption.code, assumption.text, null);
     }
 
+    if (repairCancelled) return cancelled('REPAIRING_PLAN');
+    await checkActive();
     const finalStatus = resolved.status;
     const planContent = TravelPlanContentSchema.parse({ ...resolved.plan, status: finalStatus });
 
@@ -733,7 +753,7 @@ async function runJob(
      * 等待一起扔掉，而重试要从零开始再花一遍。超时的意义是「别再启动新的
      * 昂贵工作」，不是「把做好的东西扔掉」。
      */
-    await step('SAVING_PLAN');
+    if (!(await step('SAVING_PLAN'))) return cancelled('SAVING_PLAN');
 
     /*
      * 版本 ID 在这里生成，而不是交给数据库默认值：`plan_json` 里必须含
@@ -768,6 +788,7 @@ async function runJob(
       log.warn({ stage: 'SAVING_PLAN' }, `向量化失败，该版本不参与历史检索：${String(error)}`);
     }
 
+    await checkActive();
     let saved;
     try {
       saved = await deps.plans.savePlanVersion({
@@ -907,11 +928,13 @@ async function runJob(
       ai = deps.aiAssets === undefined ? undefined : await deps.aiAssets(modelContext);
       licensedSource = deps.searchAssets?.();
     }
+    await checkActive();
     const result =
       resumedPresentation ??
       (await buildAndSavePresentations(
         {
           ...presentation,
+          checkActive,
           logger: log,
           ...(ai === undefined ? {} : { ai }),
           ...(licensedSource === undefined ? {} : { licensedSource }),
@@ -945,6 +968,7 @@ async function runJob(
       ));
 
     savedPages = resumedPresentation == null ? result.pages : 0;
+    await checkActive();
 
     log.info(
       {
@@ -1058,6 +1082,9 @@ async function runJob(
       },
     };
   } catch (error) {
+    if (error instanceof GenerationCancelledError || error instanceof GenerationLeaseLostError)
+      throw error;
+    await checkActive();
     log.error(
       { stage: 'RESOLVING_ASSETS', plan_version_id: saved.versionId },
       `展示编排失败，计划仍可通过 13.3 读取：${String(error)}`,
@@ -1254,6 +1281,22 @@ export async function consumeGeneration(
   }
 }
 
+class GenerationCancelledError extends Error {}
+
+async function runCancellableJob(
+  deps: GeneratePlanDeps,
+  payload: GenerationJobPayload,
+  meter: UsageMeter,
+): Promise<GenerateOutcome> {
+  try {
+    return await runJob(deps, payload, meter);
+  } catch (error) {
+    if (error instanceof GenerationCancelledError)
+      return { outcome: 'skipped', reason: 'cancelled' };
+    throw error;
+  }
+}
+
 export async function generatePlan(
   deps: GeneratePlanDeps,
   payload: GenerationJobPayload,
@@ -1278,7 +1321,7 @@ export async function generatePlan(
     }
     let outcome: GenerateOutcome;
     try {
-      outcome = await runJob(
+      outcome = await runCancellableJob(
         { ...deps, execution: { ...execution, checkpoint: state?.checkpoint ?? null } },
         payload,
         meter,
@@ -1335,7 +1378,7 @@ export async function generatePlan(
     await finalizeGenerationBilling(execution.repository, deps.billing, payload.jobId);
     return outcome;
   }
-  const outcome = await runJob(deps, payload, meter);
+  const outcome = await runCancellableJob(deps, payload, meter);
   /*
    * `runJob` 抛异常时**不**结算：那时任务不在终态，BullMQ 会重试，
    * 而预留正是要留给那次重试的（与「可重试的失败」同一条口径）。

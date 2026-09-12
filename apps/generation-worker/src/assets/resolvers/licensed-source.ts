@@ -78,6 +78,7 @@ export async function resolveByLicensedSource(
   item: AssetRequirementItem,
   cacheKey: string | null,
 ): Promise<LicensedSourceOutcome> {
+  await deps.checkActive?.();
   const decision = await deps.searchBudget.reserve(item.role);
   if (!decision.allowed) {
     if (decision.reason === 'ROLE_NOT_ELIGIBLE') {
@@ -110,6 +111,7 @@ export async function resolveByLicensedSource(
       cacheKey,
     );
   } catch (error) {
+    await deps.checkActive?.();
     /*
      * 图源本身失败（超时 / 不可用）。**不重试** —— 9.6 明确「超时即降入
      * AI 层，不重试」：重试会把 5 秒变成 10 秒，而下一层（AI）本身要 20 秒。

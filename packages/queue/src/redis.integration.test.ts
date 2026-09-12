@@ -186,6 +186,28 @@ describeIntegration('Redis 基础设施（集成，需 Redis）', () => {
   });
 
   describe('lock:asset（TP-4-06，13.8）', () => {
+    it('旧持有者释放不能删除新租约，同实例重新领取也隔离', async () => {
+      const lock = new RedisAssetLock(redis);
+      const old = await lock.acquire('ownership');
+      await redis.del('lock:asset:ownership');
+      const current = await lock.acquire('ownership');
+      expect(current).toBeTruthy();
+      await lock.release('ownership', old!);
+      expect(await lock.acquire('ownership')).toBeFalsy();
+      await lock.release('ownership', current!);
+    });
+
+    it('只允许有效 token 续期，过期后不能复活', async () => {
+      const lock = new RedisAssetLock(redis);
+      const token = await lock.acquire('renewable');
+      await redis.pexpire('lock:asset:renewable', 1000);
+      expect(await lock.renew('renewable', token!)).toBe(true);
+      expect(await redis.pttl('lock:asset:renewable')).toBeGreaterThan(1000);
+      expect(await lock.renew('renewable', 'not-owner')).toBe(false);
+      await lock.release('renewable', token!);
+      expect(await lock.renew('renewable', token!)).toBe(false);
+    });
+
     it('同键 10 并发只有 1 个拿到锁', async () => {
       const lock = new RedisAssetLock(redis);
       const key = 'hero:v1:cn_hangzhou:canal_culture:chinese_travel_editorial:16x6';
@@ -199,9 +221,13 @@ describeIntegration('Redis 基础设施（集成，需 Redis）', () => {
        * 进程内实现测的是我们自己写的 Set，而 14 天并发解析里同键重复生成的
        * 成本正是 13.8 说的「对成本影响最大」的那一项。
        */
-      await lock.release(key);
-      expect(await lock.acquire(key)).toBe(true);
-      await lock.release(key);
+      await lock.release(
+        key,
+        results.find((result) => result !== null)!,
+      );
+      const next = await lock.acquire(key);
+      expect(next).toBeTruthy();
+      await lock.release(key, next!);
     });
 
     it('TTL 一次设定，不会留下永不过期的锁', async () => {
@@ -209,11 +235,11 @@ describeIntegration('Redis 基础设施（集成，需 Redis）', () => {
       const key = 'food:v1:x:cn_hangzhou:realistic_food_photography';
       await redis.del(`lock:asset:${key}`);
 
-      await lock.acquire(key);
+      const token = await lock.acquire(key);
       const ttl = await redis.ttl(`lock:asset:${key}`);
       expect(ttl).toBeGreaterThan(0);
       expect(ttl).toBeLessThanOrEqual(ASSET_LOCK_TTL_SECONDS);
-      await lock.release(key);
+      await lock.release(key, token!);
     });
 
     it('TTL 比 AI 生成超时长 —— 短了等于这把锁没起作用', () => {

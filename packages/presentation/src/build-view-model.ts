@@ -45,6 +45,8 @@ export interface SlotResolution {
   readonly hero?: HeroAsset | null;
   /** ROUTE_MAP 槽位专用；降级为文字路线时为 null（设计稿 8.2） */
   readonly svgUrl?: string | null;
+  /** 必须展示的许可署名，独立于 AI「示意图」标识。 */
+  readonly attribution?: string | null;
 }
 
 /** 按槽位 ID 查询素材。返回 undefined 与返回 null 等价，均视为未解析。 */
@@ -139,10 +141,18 @@ export function buildDailyPoster(input: BuildDailyPosterInput): BuildResult {
     plan,
     dayNumber,
     templateId = TEMPLATE_ID_VALUES[0],
-    assets = EMPTY_ASSET_LOOKUP,
+    assets: lookup = EMPTY_ASSET_LOOKUP,
     limits = DAILY_CONTENT_LIMITS,
   } = input;
 
+  const attributions = new Set<string>();
+  const assets: AssetLookup = (slotId) => {
+    const result = lookup(slotId);
+    if (result?.attribution && (result.image || result.hero || result.svgUrl)) {
+      attributions.add(result.attribution);
+    }
+    return result;
+  };
   const day = findDay(plan, dayNumber);
   const { budget, budgetMismatch } = buildBudget(day);
 
@@ -252,6 +262,7 @@ export function buildDailyPoster(input: BuildDailyPosterInput): BuildResult {
     daily_summary: day.daily_summary,
     daily_summary_compact: toCompact(day.daily_summary, COMPACT_LIMITS.dailySummary),
 
+    attributions: [...attributions],
     icons: moduleIcons(),
   };
 

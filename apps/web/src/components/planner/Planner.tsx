@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 
 import { generatePlan, getJobStatus } from '@/lib/api-client';
 import { CreditHint, useCreditQuote } from './CreditHint';
-import type { GenerationPhase } from '@/lib/generation-dialog';
+import { isPlanReadable, type GenerationPhase } from '@/lib/generation-dialog';
 import { buildPlannerRequest } from '@/lib/planner/request';
 import { buildSnapshot, generateButtonLabel } from '@/lib/planner/step-state';
 import {
@@ -67,23 +67,6 @@ const POLL_INTERVAL_MS = 2_000;
 /** 16.3：整个生成任务上限 300 秒。轮询上限略高于它，避免比服务端先放弃 */
 const POLL_TIMEOUT_MS = 320_000;
 
-/**
- * 计划已可读的状态。
- *
- * 判断依据是「到达 SAVING_PLAN」而不是 COMPLETED：后者要等渲染与导出走完，
- * 而文字版计划在存库那一刻就能看了 —— 让用户多等 40 秒没有收益。
- */
-const READABLE_STATUSES = new Set([
-  'SAVING_PLAN',
-  'BUILDING_PRESENTATION',
-  'RESOLVING_ASSETS',
-  'GENERATING_ASSETS',
-  'RENDERING_HTML',
-  'EXPORTING_PNG',
-  'EXPORTING_PDF',
-  'COMPLETED',
-]);
-
 export function Planner(): React.ReactElement {
   const { status, refresh } = useSession();
   /*
@@ -99,8 +82,7 @@ export function Planner(): React.ReactElement {
    * 「不会被长期保存」提示，但点不动「生成」按钮 —— 必须把流程
    * 引导到注册。这一判断**只在生成入口做**，不影响其它页面的可读性。
    */
-  const signedIn =
-    status.kind === 'ready' && status.session.user_type !== 'ANONYMOUS';
+  const signedIn = status.kind === 'ready' && status.session.user_type !== 'ANONYMOUS';
 
   /**
    * 任何 401 都意味着服务端已经不认这个会话了 —— 重新解析一次身份。
@@ -284,7 +266,7 @@ export function Planner(): React.ReactElement {
         });
         return;
       }
-      if (result.data.status === 'FAILED') {
+      if (result.data.status === 'FAILED' || result.data.status === 'CANCELLED') {
         /*
          * 13.2 的 message 在 FAILED 时就是错误码对应的用户文案，直接展示 ——
          * 前端自己拼一句「生成失败」会盖掉「请放宽部分条件后重试」这种
@@ -293,7 +275,7 @@ export function Planner(): React.ReactElement {
         setPhase({ kind: 'error', message: result.data.message, retryable: false });
         return;
       }
-      if (READABLE_STATUSES.has(result.data.status)) {
+      if (isPlanReadable(result.data)) {
         setPhase({ kind: 'ready', planId: generatedPlanId });
         /* 计划可读之后开放行前准备中心（规范 16）*/
         setPlanId(generatedPlanId);
@@ -474,9 +456,7 @@ export function Planner(): React.ReactElement {
               snapshot={snapshot}
               dispatch={dispatch}
               onPrev={prevStep === undefined ? null : () => goToStep(prevStep)}
-              onNext={
-                nextStep === undefined ? null : () => advanceFromStep(step, nextStep)
-              }
+              onNext={nextStep === undefined ? null : () => advanceFromStep(step, nextStep)}
               nextLabel={nextMeta === undefined ? null : `下一步 · ${nextMeta.nav} →`}
               registerField={registerField}
               {...(step === '02'

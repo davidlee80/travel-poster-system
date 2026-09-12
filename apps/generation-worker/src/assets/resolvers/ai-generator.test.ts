@@ -18,7 +18,7 @@ import {
 import { InMemoryObjectStorage } from '@tps/storage';
 import { InMemoryCounterStore, createSilentLogger } from '@tps/shared';
 import sharp from 'sharp';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { AiImageBudget, aiImageDailyKey } from '../ai-budget.js';
 import { aiWaitTimeoutMs, resolveByAi, seedForCacheKey } from './ai-generator.js';
@@ -220,7 +220,7 @@ describe('生成成功', () => {
     const h = harness({ lock });
     await resolveByAi({ ...h.deps, assetLock: lock }, heroItem(), HERO_KEY);
     // 锁已释放，可以再次获得
-    expect(await lock.acquire(HERO_KEY)).toBe(true);
+    expect(await lock.acquire(HERO_KEY)).toBeTruthy();
   });
 });
 
@@ -288,15 +288,48 @@ describe('16.3 失败不阻断', () => {
     const lock = new InMemoryAssetLock();
     const h = harness({ lock, fail: new Error('x') });
     await resolveByAi({ ...h.deps, assetLock: lock }, heroItem(), HERO_KEY);
-    expect(await lock.acquire(HERO_KEY)).toBe(true);
+    expect(await lock.acquire(HERO_KEY)).toBeTruthy();
   });
 });
 
 describe('13.8 同键并发去重（TP-4-06）', () => {
+  it('超过原 TTL 的模型及入库过程持续续租，并在完成后释放', async () => {
+    const bytes = await gradient(1600, 600);
+    const lock = new InMemoryAssetLock();
+    let unblock!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    const h = harness({
+      lock,
+      renderer: async () => {
+        entered();
+        await barrier;
+        return bytes;
+      },
+    });
+    vi.useFakeTimers();
+    const running = resolveByAi(h.deps, heroItem(), HERO_KEY);
+    try {
+      await started;
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(await lock.acquire(HERO_KEY)).toBeNull();
+    } finally {
+      unblock();
+      await running;
+      vi.useRealTimers();
+    }
+    expect(await lock.acquire(HERO_KEY)).toBeTruthy();
+  });
+
   it('未拿到锁时等待对方结果，返回 CACHE_HIT 而不是降级', async () => {
     const lock = new InMemoryAssetLock();
     // 先把锁占住，模拟「别人正在生成」
-    expect(await lock.acquire(HERO_KEY)).toBe(true);
+    expect(await lock.acquire(HERO_KEY)).toBeTruthy();
 
     const h = harness({
       lock,

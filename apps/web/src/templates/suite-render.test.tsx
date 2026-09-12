@@ -1,4 +1,10 @@
-import { TEMPLATE_ID_VALUES, TRAVEL_PLAN_FIXTURES, type TemplateId } from '@tps/schemas';
+import {
+  TEMPLATE_ID_VALUES,
+  TRAVEL_PLAN_FIXTURES,
+  TravelPosterViewModelSchema,
+  FullPlanViewModelSchema,
+  type TemplateId,
+} from '@tps/schemas';
 import { buildDailyPoster, buildFullPlan } from '@tps/presentation';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -54,6 +60,38 @@ function fullMarkup(templateId: TemplateId): string {
 }
 
 describe('套件渲染产物', () => {
+  it.each([...TEMPLATE_ID_VALUES])(
+    '%s 的日页和全览页保留许可署名，压缩降级不隐藏且转义 HTML',
+    (templateId) => {
+      const assets = () => ({
+        image: { asset_id: 'photo', url: 'https://cdn.invalid/photo.png', source_note: '示意图' },
+        hero: {
+          asset_id: 'hero',
+          url: 'https://cdn.invalid/hero.png',
+          source_type: 'LICENSED_SOURCE' as const,
+        },
+        attribution: '作者 <script>alert(1)</script> / CC BY 4.0',
+      });
+      const daily = TravelPosterViewModelSchema.parse(
+        buildDailyPoster({ plan, dayNumber: 1, templateId, assets }).viewModel,
+      );
+      const full = FullPlanViewModelSchema.parse(
+        buildFullPlan({ plan, templateId, assets }).viewModel,
+      );
+      expect(daily).toMatchObject({ attributions: ['作者 <script>alert(1)</script> / CC BY 4.0'] });
+      for (const [pageType, viewModel] of [
+        ['DAILY_POSTER', daily],
+        ['FULL_PLAN', full],
+      ] as const) {
+        const Component = componentOf(templateId, pageType);
+        const html = renderToStaticMarkup(
+          <Component viewModel={viewModel} compact hideBelowPriority={100} />,
+        );
+        expect(html).toContain('作者 &lt;script&gt;alert(1)&lt;/script&gt; / CC BY 4.0');
+        expect(html).not.toContain('<script>alert(1)</script>');
+      }
+    },
+  );
   it.each([...TEMPLATE_ID_VALUES])('%s 的每日页渲出全部区块的内容', (templateId) => {
     const { viewModel } = buildDailyPoster({ plan, dayNumber: 1, templateId });
     const html = dailyMarkup(templateId);

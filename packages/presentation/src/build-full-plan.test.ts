@@ -1,12 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import {
   TEMPLATE_ID_VALUES,
+  FullPlanViewModelSchema,
+  OutputPreferencesSchema,
   TravelPosterViewModelSchema,
   makeTravelPlanFixture,
 } from '@tps/schemas';
 import { buildFullPlan } from './build-full-plan.js';
 
 describe('buildFullPlan（3.3.1 FULL_PLAN）', () => {
+  it('历史全览页嵌套的旧模板只在读展示数据时归一化，不放宽新请求', () => {
+    const { viewModel } = buildFullPlan({ plan: makeTravelPlanFixture({ totalDays: 2 }) });
+    const historical = {
+      ...viewModel,
+      template_id: 'travel_full_plan_v1',
+      days: viewModel.days.map((day) => ({ ...day, template_id: 'travel_infographic_v1' })),
+    };
+    const parsed = FullPlanViewModelSchema.parse(historical);
+    expect(parsed.template_id).toBe('ink_paper_v1');
+    expect(parsed.days.map((day) => day.template_id)).toEqual(['ink_paper_v1', 'ink_paper_v1']);
+    expect(historical.days[0]!.template_id).toBe('travel_infographic_v1');
+    expect(
+      OutputPreferencesSchema.safeParse({ template_id: 'travel_infographic_v1' }).success,
+    ).toBe(false);
+    expect(
+      FullPlanViewModelSchema.safeParse({ ...historical, template_id: 'unknown' }).success,
+    ).toBe(false);
+  });
   it('page_type 为 FULL_PLAN 且 day_number 为 null（数据库同名约束）', () => {
     const { viewModel } = buildFullPlan({ plan: makeTravelPlanFixture({ totalDays: 7 }) });
 

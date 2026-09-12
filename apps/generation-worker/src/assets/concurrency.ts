@@ -31,6 +31,7 @@ export async function mapWithConcurrency<T, R>(
 
   const results = new Array<R>(items.length);
   let next = 0;
+  let stopped = false;
 
   /*
    * 工人模型而不是「切成 N 批、批内 Promise.all」：
@@ -41,13 +42,21 @@ export async function mapWithConcurrency<T, R>(
     for (;;) {
       const index = next;
       next += 1;
-      if (index >= items.length) return;
-      results[index] = await fn(items[index]!, index);
+      if (stopped || index >= items.length) return;
+      try {
+        results[index] = await fn(items[index]!, index);
+      } catch (error) {
+        stopped = true;
+        throw error;
+      }
     }
   }
 
   const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
-  await Promise.all(workers);
+  // 取消后不领取新项，但必须排空在途项，避免计量与账务先于外部调用收尾。
+  const settled = await Promise.allSettled(workers);
+  const failed = settled.find((result) => result.status === 'rejected');
+  if (failed?.status === 'rejected') throw failed.reason;
 
   return results;
 }

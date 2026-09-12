@@ -245,6 +245,13 @@ export function BlueprintDaily({
         {vm.daily_summary.length > 0 && (
           <p className="bp-note">{text(vm.daily_summary, vm.daily_summary_compact)}</p>
         )}
+        {(vm.attributions?.length ?? 0) > 0 && (
+          <section aria-label="素材署名" style={{ fontSize: 14, overflowWrap: 'anywhere' }}>
+            {vm.attributions!.map((credit) => (
+              <p key={credit}>{credit}</p>
+            ))}
+          </section>
+        )}
       </div>
 
       {/* 图纸的修订栏：把元信息压在底边一条细带里 */}

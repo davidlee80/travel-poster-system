@@ -92,21 +92,16 @@ describe('过期预留回收', () => {
     expect(await wallet.balance(USER)).toEqual(afterFirst);
   });
 
-  it('回收写一条 REFUND 流水，并标明原因是 HOLD_EXPIRED', async () => {
+  it('回收只解冻，流水净额保持实际收支且预留记录 EXPIRED', async () => {
     const { wallet, now } = await seed();
     await runHoldSweep({ wallet, logger: createSilentLogger(), now: () => now });
 
     const entries = await wallet.history({ userId: USER, limit: 10 });
-    const refund = entries.find((entry) => entry.kind === 'REFUND');
-
-    expect(refund?.amountCr).toBe(300);
-    expect(refund?.refId).toBe('job-expired');
-    /*
-     * `reason` 区分三种退款：任务失败（JOB_FAILED）、用户取消、预留过期。
-     * 没有它的话，「为什么这笔钱退了」在客诉时无法回答 ——
-     * 而过期退款意味着那次生成没经过正常结算，值得查因。
-     */
-    expect(refund?.metadata).toMatchObject({ reason: 'HOLD_EXPIRED' });
+    expect(entries.filter((entry) => entry.kind === 'REFUND')).toHaveLength(0);
+    expect(entries.reduce((sum, entry) => sum + entry.amountCr, 0)).toBe(10_000);
+    expect(await wallet.balance(USER)).toEqual({ balanceCr: 9_500, heldCr: 500 });
+    expect(await wallet.findHold('job-expired')).toMatchObject({ status: 'EXPIRED' });
+    expect(await wallet.findHold('job-active')).toMatchObject({ status: 'ACTIVE' });
   });
 
   it('过期后又结算的任务不会被扣第二次', async () => {

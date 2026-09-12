@@ -675,6 +675,70 @@ describe('16.3 超时（TP-4-10）', () => {
 });
 
 describe('16.1 用户取消（TP-4-08）', () => {
+  it.each(['VALIDATING_PLAN', 'REPAIRING_PLAN', 'SAVING_PLAN'] as const)(
+    '%s 边界取消不继续模型修复、向量化或保存',
+    async (stage) => {
+      const invalid = makeValidPlan();
+      invalid.days[0]!.schedule = [];
+      const { deps, plans, llm } = harness({
+        responses: [llmOutputOf(stage === 'REPAIRING_PLAN' ? invalid : makeValidPlan())],
+      });
+      const original = plans.updateJobState.bind(plans);
+      plans.updateJobState = (input) => {
+        if (input.to === stage) plans.cancelOnNextTransition = true;
+        return original(input);
+      };
+      let embeddings = 0;
+      const result = await generatePlan(
+        {
+          ...deps,
+          embedding: {
+            ...deps.embedding,
+            embed: () => {
+              embeddings += 1;
+              return Promise.resolve([]);
+            },
+          },
+        },
+        payload,
+      );
+      expect(result).toEqual({ outcome: 'skipped', reason: 'cancelled' });
+      expect(plans.context?.status).toBe('CANCELLED');
+      expect(llm.calls).toHaveLength(1);
+      expect(embeddings).toBe(0);
+      expect(plans.saved).toHaveLength(0);
+    },
+  );
+  it.each(['文本模型', '向量化'] as const)('%s 返回期间取消后不保存版本', async (point) => {
+    const { deps, plans, llm } = harness();
+    const cancel = () => {
+      plans.context = { ...plans.context!, status: 'CANCELLED' };
+    };
+    const result = await generatePlan(
+      {
+        ...deps,
+        llm: {
+          model: llm.model,
+          complete: async (input) => {
+            const output = await llm.complete(input);
+            if (point === '文本模型') cancel();
+            return output;
+          },
+        },
+        embedding: {
+          ...deps.embedding,
+          embed: () => {
+            if (point === '向量化') cancel();
+            return Promise.resolve([]);
+          },
+        },
+      },
+      payload,
+    );
+    expect(result).toEqual({ outcome: 'skipped', reason: 'cancelled' });
+    expect(plans.saved).toHaveLength(0);
+  });
+
   it('状态推进被终态挡住即停止后续处理，不调用模型', async () => {
     const { deps, plans, llm } = harness();
     // 第一次推进（NORMALIZING）就被挡住 —— 模拟用户在排队阶段点了取消
@@ -834,7 +898,8 @@ describe('CR 结算（C-4）', () => {
     });
 
     expect(await wallet.balance('user-1')).toEqual({ balanceCr: 100_000, heldCr: 0 });
-    expect(await kinds(wallet)).toContain('REFUND');
+    expect(await kinds(wallet)).not.toContain('REFUND');
+    expect(await wallet.findHold('job-1')).toMatchObject({ status: 'RELEASED' });
   });
 
   it('可重试的失败 → 预留保留给重试（否则重试成功就免费了）', async () => {
@@ -863,7 +928,8 @@ describe('CR 结算（C-4）', () => {
     expect(result).toMatchObject({ outcome: 'skipped', reason: 'cancelled' });
 
     expect(await wallet.balance('user-1')).toEqual({ balanceCr: 100_000, heldCr: 0 });
-    expect(await kinds(wallet)).toContain('REFUND');
+    expect(await kinds(wallet)).not.toContain('REFUND');
+    expect(await wallet.findHold('job-1')).toMatchObject({ status: 'RELEASED' });
   });
 
   it('未装配计费时一次都不读钱包', async () => {

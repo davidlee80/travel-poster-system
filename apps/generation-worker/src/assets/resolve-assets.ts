@@ -80,6 +80,8 @@ import { resolveRouteMap } from './resolvers/svg-map.js';
  */
 
 export interface ResolveAssetsDeps {
+  /** 取消或租约丢失时停止启动后续素材工作。 */
+  readonly checkActive?: () => Promise<void>;
   readonly assets: AssetsRepository;
   readonly storage: ObjectStorage;
   readonly embedding: EmbeddingClient;
@@ -237,11 +239,14 @@ async function resolveOne(
   // 预算按槽位独立计时（10.2 第 5 步）
   const deadline = startedAt + SELECTION_BUDGET_MS;
 
+  await deps.checkActive?.();
   try {
     const outcome = await resolveByRole(deps, item, deadline);
+    await deps.checkActive?.();
     record(item, outcome.resolved, (now() - startedAt) / 1000);
     return outcome;
   } catch (error) {
+    await deps.checkActive?.();
     /*
      * 16.3：素材类错误不阻断任务。这里兜住一切异常 ——
      * 数据库抖动、存储 5xx、嵌入服务超时都归到降级。
@@ -317,7 +322,9 @@ async function resolveByRole(
   }
 
   // ── 平台已审核素材（9.4/9.5 的第一层，9.3 的第二层）──
+  await deps.checkActive?.();
   const library = await resolveFromLocalLibrary(deps, item, { deadline });
+  await deps.checkActive?.();
   if (library.kind === 'hit') return { resolved: library.resolved, warnings: [] };
 
   const aiWarnings: AssetWarningCode[] = ['ASSET_LIBRARY_MISS'];
@@ -339,6 +346,7 @@ async function resolveByRole(
       item,
       cacheKey,
     );
+    await deps.checkActive?.();
     aiWarnings.push(...searched.warnings);
     if (searched.resolved !== null) {
       return { resolved: searched.resolved, warnings: searched.warnings };
@@ -353,6 +361,7 @@ async function resolveByRole(
    */
   const ai = deps.ai;
   if (ai !== undefined) {
+    await deps.checkActive?.();
     const generated = await resolveByAi({ ...deps, ...ai, budget: ai.budget }, item, cacheKey);
     aiWarnings.push(...generated.warnings);
     if (generated.resolved !== null) {
@@ -463,6 +472,9 @@ export function toAssetLookup(
         : null;
 
     return {
+      attribution: asset.license.attribution_required
+        ? (asset.license.attribution_text ?? null)
+        : null,
       image: { asset_id: asset.asset_id, url: asset.urls.original, source_note: note },
       hero: {
         asset_id: asset.asset_id,

@@ -37,6 +37,7 @@ export interface LedgerEntry {
   readonly entryId: string;
   readonly kind: LedgerKind;
   readonly amountCr: number;
+  /** 本笔之后的可用余额快照；流水净额对应可用余额与冻结额之和。 */
   readonly balanceAfterCr: number;
   readonly refType: string | null;
   readonly refId: string | null;
@@ -654,17 +655,7 @@ export function createCreditWalletRepository(pool: Pool): CreditWalletRepository
         );
         const balanceAfter = big(updated.rows[0]?.balance_cr ?? '0');
 
-        await appendLedger(client, {
-          userId: hold.user_id,
-          kind: 'REFUND',
-          amountCr: holdCr,
-          balanceAfterCr: balanceAfter,
-          idempotencyKey: `refund:${input.jobId}`,
-          refType: 'JOB',
-          refId: input.jobId,
-          priceVersion: big(hold.price_version),
-          metadata: { reason: 'JOB_FAILED' },
-        });
+        // 解冻不是收入；审计信息保留在 credit_holds 的终态与 settled_at。
 
         /*
          * 坏账：我们已经付给供应商但不向用户收的钱。
@@ -747,31 +738,13 @@ export function createCreditWalletRepository(pool: Pool): CreditWalletRepository
             if (hold.expires_at >= cutoff) return null;
 
             const holdCr = big(hold.amount_cr);
-            const updated = await client.query<WalletRow>(
+            await client.query(
               `UPDATE credit_wallets
                   SET held_cr = held_cr - $2, balance_cr = balance_cr + $2
-                WHERE user_id = $1 RETURNING balance_cr, held_cr`,
+                WHERE user_id = $1`,
               [hold.user_id, holdCr],
             );
-            const balanceAfter = big(updated.rows[0]?.balance_cr ?? '0');
-
-            /*
-             * 幂等键用 `expire:<hold_id>` 而不是 `refund:<job_id>`：
-             * 后者是 `releaseFailed` 的键，撞上它会让这条流水被
-             * `ON CONFLICT DO NOTHING` 默默吐掉 —— 钱退了而流水里没有记录，
-             * 「求和 = 余额」那条自校验从此失效。
-             */
-            await appendLedger(client, {
-              userId: hold.user_id,
-              kind: 'REFUND',
-              amountCr: holdCr,
-              balanceAfterCr: balanceAfter,
-              idempotencyKey: `expire:${hold.hold_id}`,
-              refType: 'JOB',
-              refId: hold.job_id,
-              priceVersion: big(hold.price_version),
-              metadata: { reason: 'HOLD_EXPIRED', expires_at: hold.expires_at.toISOString() },
-            });
+            // 过期与失败释放相同：只改变资金所在位置，不新增 REFUND 收入。
 
             await client.query(
               `UPDATE credit_holds SET status = 'EXPIRED', settled_at = NOW() WHERE hold_id = $1`,

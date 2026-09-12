@@ -38,6 +38,14 @@ describe('CI 镜像门禁', () => {
     expect(regression).toContain('pnpm --filter @tps/render-worker run test:integration');
   });
 
+  it('验证码与素材锁的 Redis 回归不能在 CI 中因缺少实例而跳过', () => {
+    const job = workflow.jobs.shutdown;
+    expect(job.env['REDIS_URL']).toBeTruthy();
+    const regression = job.steps.find((step) => step.name === 'P2 验证码与素材锁原子性')?.run;
+    expect(regression).toContain('pnpm --filter @tps/queue exec vitest run redis.integration');
+    expect(regression).toContain('pnpm --filter @tps/api exec vitest run phone-verification');
+  });
+
   it.each(['NODE_ENV', 'SMS_MODE'])('共享部署保留环境文件对 %s 的控制权', (key) => {
     const compose = parse(
       readFileSync(new URL('../../../deploy/mvp-apps.yml', import.meta.url), 'utf8'),

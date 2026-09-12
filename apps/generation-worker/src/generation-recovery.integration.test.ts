@@ -10,6 +10,8 @@ import {
   type GenerationLease,
 } from '@tps/db';
 import { LlmTimeoutError } from '@tps/llm';
+import { InMemoryCounterStore } from '@tps/shared';
+import { ImageSearchBudget } from './assets/search-budget.js';
 import { createJobBilling, finalizeGenerationBilling } from './billing.js';
 import * as billingModule from './billing.js';
 import * as generation from './generate-plan.js';
@@ -323,6 +325,101 @@ suite('生成恢复与用量（隔离 PostgreSQL，模型 fake）', () => {
       await work;
     }
   }, 20000);
+  it.each(['素材检索', '图源搜索', 'AI 图片'] as const)(
+    '%s 返回期间取消，不再外呼或发布展示，并释放预留',
+    async (point) => {
+      const payload = await submit();
+      const wallet = await reserve(payload);
+      let cancelled = false;
+      let callsAfterCancel = 0;
+      let downloads = 0;
+      let imageUploadsAfterCancel = 0;
+      const cancel = async () => {
+        await createTravelPlansRepository(pool).cancelJob(payload.jobId, payload.userId);
+        cancelled = true;
+      };
+      const result = await managed(payload, 1, (deps) => ({
+        ...deps,
+        presentation: {
+          ...deps.presentation!,
+          assets: {
+            ...deps.presentation!.assets,
+            findCandidates: async (input) => {
+              const rows = await deps.presentation!.assets.findCandidates(input);
+              if (point === '素材检索') await cancel();
+              return rows;
+            },
+          },
+          storage: {
+            put: (input) => {
+              if (cancelled && input.contentType === 'image/webp') imageUploadsAfterCancel += 1;
+              return deps.presentation!.storage.put(input);
+            },
+            delete: (keys) => deps.presentation!.storage.delete(keys),
+            urlFor: (key) => deps.presentation!.storage.urlFor(key),
+          },
+        },
+        searchAssets: () => ({
+          searchTimeoutMs: 5000,
+          searchBudget: new ImageSearchBudget({ counters: new InMemoryCounterStore() }),
+          search: {
+            providers: ['fake'],
+            search: async () => {
+              if (cancelled) callsAfterCancel += 1;
+              if (point === '图源搜索') {
+                await cancel();
+                return [
+                  {
+                    provider: 'fake',
+                    originalUrl: 'https://test.invalid/a',
+                    downloadUrl: 'https://test.invalid/a.png',
+                    licenseType: 'CC0',
+                    attributionText: null,
+                    licenseExpiresAt: null,
+                    mimeType: 'image/png',
+                  },
+                ];
+              }
+              return [];
+            },
+            download: () => {
+              downloads += 1;
+              return Promise.resolve(new Uint8Array());
+            },
+          },
+        }),
+        aiAssets: async (context) => {
+          const ai = await deps.aiAssets!(context);
+          return {
+            ...ai,
+            image: {
+              model: ai.image.model,
+              generate: async (request) => {
+                if (cancelled) callsAfterCancel += 1;
+                const image = await ai.image.generate(request);
+                if (point === 'AI 图片') await cancel();
+                return image;
+              },
+            },
+          };
+        },
+      }));
+      expect(cancelled).toBe(true);
+      expect(result).toMatchObject({ outcome: 'skipped' });
+      expect(callsAfterCancel).toBe(0);
+      expect(downloads).toBe(0);
+      expect(imageUploadsAfterCancel).toBe(0);
+      expect((await pool.query('SELECT 1 FROM plan_presentations')).rows).toEqual([]);
+      expect((await pool.query('SELECT 1 FROM plan_asset_bindings')).rows).toEqual([]);
+      expect(await wallet.balance(payload.userId)).toEqual({ balanceCr: 1000, heldCr: 0 });
+      expect(await wallet.findHold(payload.jobId)).toMatchObject({ status: 'RELEASED' });
+      expect(await createGenerationExecutionRepository(pool).read(payload.jobId)).toMatchObject({
+        status: 'CANCELLED',
+        finalizationPending: false,
+      });
+    },
+  );
+
   it('首败保留预留和待重试状态，第二次成功只结算一次', async () => {
     const payload = await submit();
     const wallet = await reserve(payload);

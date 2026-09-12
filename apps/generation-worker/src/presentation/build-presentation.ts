@@ -106,6 +106,7 @@ export async function buildAndSavePresentations(
 
   // ── RESOLVING_ASSETS：解析 + 绑定 ──
   const resolution = await resolveAssets(deps, envelope);
+  await deps.checkActive?.();
   await deps.presentations.saveBindings(resolution.bindings);
 
   const lookup: AssetLookup =
@@ -166,6 +167,7 @@ export async function buildAndSavePresentations(
     warnings: resolution.warnings,
   };
   const { resolved: _resolved, ...summary } = result;
+  await deps.checkActive?.();
   await deps.presentations.savePresentations(rows, deps.checkpoint?.(summary));
   return result;
 }

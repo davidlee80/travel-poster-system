@@ -133,7 +133,7 @@ export class S3ExportStorage implements ExportStorage {
      */
     for (let i = 0; i < keys.length; i += DELETE_BATCH_SIZE) {
       const batch = keys.slice(i, i + DELETE_BATCH_SIZE);
-      await this.client.send(
+      const result = await this.client.send(
         new DeleteObjectsCommand({
           Bucket: this.config.bucket,
           Delete: {
@@ -147,6 +147,11 @@ export class S3ExportStorage implements ExportStorage {
           },
         }),
       );
+      if (result.Errors !== undefined && result.Errors.length > 0) {
+        throw new Error(
+          `S3 对象删除失败：${result.Errors.map((error) => error.Code ?? 'UnknownError').join(', ')}`,
+        );
+      }
     }
   }
 

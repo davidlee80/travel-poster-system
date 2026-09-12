@@ -233,6 +233,13 @@ export function TravelInfographic({
         {vm.daily_summary.length > 0 && (
           <p className="summary">{text(vm.daily_summary, vm.daily_summary_compact)}</p>
         )}
+        {(vm.attributions?.length ?? 0) > 0 && (
+          <section aria-label="素材署名" style={{ fontSize: 14, overflowWrap: 'anywhere' }}>
+            {vm.attributions!.map((credit) => (
+              <p key={credit}>{credit}</p>
+            ))}
+          </section>
+        )}
       </div>
 
       <footer className="footer">

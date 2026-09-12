@@ -88,7 +88,9 @@ describe('createJobBilling', () => {
     /* 用户一分钱没花 */
     expect(await wallet.balance(USER)).toEqual({ balanceCr: 100_000, heldCr: 0 });
     const entries = await wallet.history({ userId: USER, limit: 10 });
-    expect(entries.find((entry) => entry.kind === 'REFUND')?.amountCr).toBe(5_000);
+    expect(entries.some((entry) => entry.kind === 'REFUND')).toBe(false);
+    expect(entries.reduce((total, entry) => total + entry.amountCr, 0)).toBe(0);
+    expect(await wallet.findHold(JOB)).toMatchObject({ status: 'RELEASED' });
     expect(entries.some((entry) => entry.kind === 'WRITE_OFF')).toBe(true);
   });
 
@@ -126,7 +128,8 @@ describe('createJobBilling', () => {
     expect(await wallet.balance(USER)).toEqual({ balanceCr: 100_000, heldCr: 0 });
     /* 坏账按 0 → 不写 WRITE_OFF（那一条恒 0，写了也读不出金额） */
     const kinds = (await wallet.history({ userId: USER, limit: 10 })).map((entry) => entry.kind);
-    expect(kinds).toContain('REFUND');
+    expect(kinds).not.toContain('REFUND');
+    expect(await wallet.findHold(JOB)).toMatchObject({ status: 'RELEASED' });
     expect(kinds).not.toContain('WRITE_OFF');
   });
 

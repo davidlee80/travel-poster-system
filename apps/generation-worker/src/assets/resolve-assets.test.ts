@@ -3,6 +3,7 @@ import type { AssetCandidateRow, AssetsRepository } from '@tps/db';
 import type { EmbeddingClient } from '@tps/llm';
 import {
   AssetResolveResponseSchema,
+  TravelPosterViewModelSchema,
   ResolvedAssetSchema,
   SCHEMA_VERSIONS,
   makeTravelPlanFixture,
@@ -10,6 +11,7 @@ import {
 } from '@tps/schemas';
 import {
   assetRequirementEnvelope,
+  buildDailyPoster,
   buildPresentationPlans,
   heroSlotId,
   mergeRequirements,
@@ -459,6 +461,37 @@ describe('schema 版本', () => {
     const { repo } = fakeRepo();
     const { all } = await resolveAssets(deps(repo), envelopeFor(1));
     expect(all[0]!.schema_version).toBe(SCHEMA_VERSIONS.resolvedAsset);
+  });
+});
+
+describe('素材署名快照', () => {
+  it('素材库许可署名经解析与 ViewModel 校验后仍保留且去重', async () => {
+    const envelope = envelopeFor(1);
+    const photo = envelope.requirements.find((r) => r.slot_id === photoSpotSlotId(1, 0))!;
+    const { repo } = fakeRepo({
+      candidates: [
+        row({
+          entityName: photo.subject?.entity_name ?? '',
+          aspectRatio: 16 / 9,
+          width: 1600,
+          height: 900,
+          cosine: 0.99,
+          qualityScore: 0.95,
+          licenseType: 'LICENSED',
+          attributionText: '摄影：测试作者 / CC BY 4.0',
+        }),
+      ],
+    });
+    const { all } = await resolveAssets(deps(repo), { ...envelope, requirements: [photo] });
+    expect(all[0]?.asset?.license.attribution_required).toBe(true);
+    const { viewModel } = buildDailyPoster({
+      plan: makeTravelPlanFixture({ totalDays: 1 }),
+      dayNumber: 1,
+      assets: toAssetLookup([photo], all),
+    });
+    expect(TravelPosterViewModelSchema.parse(viewModel)).toMatchObject({
+      attributions: ['摄影：测试作者 / CC BY 4.0'],
+    });
   });
 });
 
