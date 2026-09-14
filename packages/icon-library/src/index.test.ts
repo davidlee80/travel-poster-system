@@ -28,8 +28,18 @@ import {
  */
 
 describe('9.1 图标清单', () => {
-  it('恰好 19 个图标（8 模块 + 5 时段 + 6 交通）', () => {
-    expect(ALL_ICON_NAMES).toHaveLength(19);
+  it('映射表引用的图标恰好 19 个（8 模块 + 5 时段 + 6 交通）', () => {
+    /*
+     * 库里的图标总数早已超过 19 —— 问卷选项图标（OPTION_ICON_MAP，
+     * 如 seat/crown/transport-*）不参与 12.1/12.2 的派生映射。
+     * 因此「19」守住的是三张映射表的覆盖范围，不是文件总数。
+     */
+    const referenced = new Set<string>([
+      ...MODULE_ICON_KEYS.map((k) => MODULE_ICON_BY_KEY[k]),
+      ...PERIOD_VALUES.map((p) => PERIOD_ICON_BY_ENUM[p]),
+      ...TRANSPORT_MODE_VALUES.map((m) => TRANSPORT_ICON_BY_ENUM[m]),
+    ]);
+    expect(referenced.size).toBe(19);
   });
 
   it('每个图标都有非空内容', () => {
@@ -90,7 +100,7 @@ describe('跨模块一致性（9.1 ↔ 12.1 ↔ 12.2）', () => {
     expect(isIconName('period-morning')).toBe(true);
   });
 
-  it('19 个图标全部被三张映射表覆盖，无孤儿图标', () => {
+  it('三张映射表引用的 19 个图标都真实存在（其余图标供问卷选项直接使用）', () => {
     const referenced = new Set<string>([
       ...MODULE_ICON_KEYS.map((k) => MODULE_ICON_BY_KEY[k]),
       ...PERIOD_VALUES.map((p) => PERIOD_ICON_BY_ENUM[p]),
@@ -98,8 +108,8 @@ describe('跨模块一致性（9.1 ↔ 12.1 ↔ 12.2）', () => {
     ]);
 
     expect(referenced.size).toBe(19);
-    for (const name of ALL_ICON_NAMES) {
-      expect(referenced.has(name), `图标 ${name} 未被任何映射引用`).toBe(true);
+    for (const name of referenced) {
+      expect(isIconName(name), `映射引用的图标 ${name} 不存在`).toBe(true);
     }
   });
 });

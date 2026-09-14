@@ -227,6 +227,15 @@ export interface FieldPart {
    * 两者不能只靠选项数组长度区分，因此由描述符显式声明入口。
    */
   readonly empty_label?: string;
+  /**
+   * 三态标签的两段变体（第 5 步的两个交通字段）。
+   *
+   * 默认四段循环是「未选 → 偏好 → 必须 → 不要」；第 5 步参考稿只保留
+   * 「未选 ⇄ 偏好」两段 —— 不渲染 ★♥× 图例与状态图标，写入恒为 `PREFER`，
+   * 值形状仍是 `{code, stance}[]`（schema 契约不变，旧草稿里的
+   * `REQUIRE`/`EXCLUDE` 值按「已选」显示，点一次清空）。
+   */
+  readonly two_state?: true;
   /** 兄弟键选中某个值时才显示。为空时恒显示 */
   readonly requires?: { readonly key: string; readonly value: string };
   /** `object-list` 每行的部件 */
@@ -425,7 +434,7 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   'PV2-04-008': one('check', { options: RISK_EXCLUSION_VALUES }),
 
   // ── 05 路上怎么走 ────────────────────────────────────────
-  'PV2-05-001': one('tristate', { options: INTERCITY_MODE_CODES }),
+  'PV2-05-001': one('tristate', { options: INTERCITY_MODE_CODES, two_state: true }),
   'PV2-05-002': {
     kind: 'parts',
     parts: [
@@ -457,7 +466,7 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
       { key: 'avoid_late_night_arrival', primitive: 'bool', label: '避免深夜抵达' },
     ],
   },
-  'PV2-05-005': one('tristate', { options: LOCAL_MODE_CODES }),
+  'PV2-05-005': one('tristate', { options: LOCAL_MODE_CODES, two_state: true }),
   'PV2-05-006': {
     kind: 'parts',
     reported: true,

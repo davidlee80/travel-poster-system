@@ -72,7 +72,14 @@ const EXPECTED = {
   ],
 };
 
-const EXPECTED_ALL = [...EXPECTED.module, ...EXPECTED.period, ...EXPECTED.transport];
+/**
+ * 9.1 之后的增补图标：问卷选项图标（第 4、5 步的 OPTION_ICON_MAP）。
+ * 它们不参与 12.1/12.2 的派生映射，因此不进 EXPECTED 的三组分类，
+ * 但同样受「自包含、统一 viewBox」校验。
+ */
+const EXPECTED_EXTRA = ['seat', 'crown', 'gem', 'thumb-up', 'bus', 'van', 'window', 'aisle', 'repeat'];
+
+const EXPECTED_ALL = [...EXPECTED.module, ...EXPECTED.period, ...EXPECTED.transport, ...EXPECTED_EXTRA];
 
 /** 违反这些就不是「自包含」的图标，PDF 导出或离线渲染时会失效 */
 const FORBIDDEN_PATTERNS = [

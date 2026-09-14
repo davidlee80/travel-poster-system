@@ -28,16 +28,75 @@ import type { ControlProps } from './control-props';
 
 /** 单选卡片。再点一次已选项取消选择 —— 大多数字段可选，用户要有办法撤回 */
 
-/** 选项与图标的映射（风险排除项） */
-const OPTION_ICON_MAP: Record<string, string> = {
-  RED_EYE_FLIGHT: 'plane',
-  OVERNIGHT_GROUND: 'moon',
-  MULTI_TRANSFER: 'transfer',
-  REMOTE_AREA: 'mountain',
-  LAST_MINUTE_CHANGE: 'alert',
-  HIGH_RISK_ACTIVITY: 'shield',
-  LONG_QUEUE: 'users',
+/**
+ * 选项与图标（含语义色）的映射。
+ *
+ * ## 为什么按「值 → 图标」而不是按字段
+ *
+ * 同一个枚举值只在一个字段里出现（`ECONOMY` 只在舱等、`WINDOW` 只在座位），
+ * 按值查表就不用让控件知道自己在渲染哪个字段。条件码自带域前缀
+ * （`transport.flight`），值与枚举值不会撞名。
+ *
+ * ## 彩色方案（`tone`）
+ *
+ * 图标库契约是 `stroke="currentColor"`（自包含、随文字变色），彩色通过
+ * CSS 类 `--tone-*` 给 `currentColor` 赋一个语义色实现 —— 图标文件本身
+ * 不动。`--tone-*` 只在**未选中**的按钮上生效：选中后按钮整体变主题色，
+ * 图标必须跟着变，否则蓝底上留个琥珀色图标。
+ *
+ * 查不到映射的选项渲染纯文字 —— 图标是增强，不是信息的唯一载体（规范 20）。
+ */
+type OptionIconSpec = { readonly icon: string; readonly tone?: string };
+
+const OPTION_ICON_MAP: Record<string, OptionIconSpec> = {
+  // 风险排除项（PV2-04-008）
+  RED_EYE_FLIGHT: { icon: 'plane' },
+  OVERNIGHT_GROUND: { icon: 'moon' },
+  MULTI_TRANSFER: { icon: 'transfer' },
+  REMOTE_AREA: { icon: 'mountain' },
+  LAST_MINUTE_CHANGE: { icon: 'alert' },
+  HIGH_RISK_ACTIVITY: { icon: 'shield' },
+  LONG_QUEUE: { icon: 'users' },
+  // 跨城交通方式（PV2-05-001）
+  'transport.flight': { icon: 'transport-plane', tone: 'blue' },
+  'transport.rail': { icon: 'transport-train', tone: 'blue' },
+  'transport.coach': { icon: 'bus', tone: 'slate' },
+  'transport.ferry': { icon: 'transport-boat', tone: 'blue' },
+  'transport.self_drive': { icon: 'transport-drive', tone: 'slate' },
+  // 当地移动方式（PV2-05-005）
+  'transport.public_transit': { icon: 'transport-transit', tone: 'blue' },
+  'transport.walking_first': { icon: 'transport-walk', tone: 'green' },
+  'transport.ride_hailing': { icon: 'transport-taxi', tone: 'amber' },
+  'transport.private_car': { icon: 'van', tone: 'slate' },
+  'transport.cycling': { icon: 'transport-bike', tone: 'blue' },
+  // 直飞与转机（PV2-05-002）
+  DIRECT_ONLY: { icon: 'plane', tone: 'blue' },
+  DIRECT_PREFERRED: { icon: 'thumb-up', tone: 'green' },
+  MAX_ONE_TRANSFER: { icon: 'transfer', tone: 'amber' },
+  MULTI_TRANSFER_OK: { icon: 'repeat', tone: 'purple' },
+  // 舱等（PV2-05-003）
+  ECONOMY: { icon: 'seat', tone: 'blue' },
+  PREMIUM_ECONOMY: { icon: 'star', tone: 'green' },
+  BUSINESS: { icon: 'crown', tone: 'amber' },
+  FIRST: { icon: 'gem', tone: 'amber' },
+  // 座位（PV2-05-003）
+  WINDOW: { icon: 'window', tone: 'slate' },
+  AISLE: { icon: 'aisle', tone: 'slate' },
+  TOGETHER: { icon: 'users', tone: 'purple' },
+  // 出发 / 抵达时段（PV2-05-004）
+  EARLY_MORNING: { icon: 'period-morning', tone: 'blue' },
+  MORNING: { icon: 'period-noon', tone: 'amber' },
+  AFTERNOON: { icon: 'period-afternoon', tone: 'orange' },
+  EVENING: { icon: 'period-night', tone: 'purple' },
 };
+
+/** 选项图标。查不到时返回 null —— 调用方退化为纯文字按钮 */
+function optionIcon(option: string): React.ReactElement | null {
+  const spec = OPTION_ICON_MAP[option];
+  if (spec === undefined) return null;
+  const tone = spec.tone === undefined ? '' : ` planner-choice__icon--tone-${spec.tone}`;
+  return <Icon name={spec.icon} size={18} className={`planner-choice__icon${tone}`} />;
+}
 
 export function ChoiceRow({
   value,
@@ -66,6 +125,7 @@ export function ChoiceRow({
             aria-pressed={selected}
             onClick={() => onChange(selected ? undefined : option)}
           >
+            {optionIcon(option)}
             {labelOf(option)}
           </button>
         );
@@ -136,7 +196,6 @@ export function CheckGroup({
         )}
         {options.map((option) => {
           const on = selected.includes(option);
-          const icon = OPTION_ICON_MAP[option];
           return (
             <button
               key={option}
@@ -148,7 +207,7 @@ export function CheckGroup({
                 else if (!full) write([...selected, option]);
               }}
             >
-              {icon ? <Icon name={icon} size={18} className="planner-choice__icon" /> : null}
+              {optionIcon(option)}
               {labelOf(option)}
             </button>
           );
@@ -180,11 +239,17 @@ export function CheckGroup({
 /**
  * 三态标签（规范 4.2）。
  *
- * 一次点击在「未选 → 偏好 → 必须 → 不要 → 未选」之间循环，而当前态**写在
+ * 默认一次点击在「未选 → 偏好 → 必须 → 不要 → 未选」之间循环，而当前态**写在
  * 标签文字里**而不是只用颜色。规范 19 要求移动端改用 bottom sheet
  * （「不依赖连续点击或颜色记忆」）—— 那一层在 P9-8 加，本控件的
  * `aria-label` 已经把「现在是什么、下一次点会变成什么」都说出来了，
  * 因此屏读用户现在就不依赖循环记忆。
+ *
+ * ## 两段变体（`part.two_state`，第 5 步的两个交通字段）
+ *
+ * 参考稿只保留「未选 ⇄ 偏好」：不渲染 ★♥× 图例与状态图标，点击写入恒为
+ * `PREFER`（值形状不变，下游触发器与约束投影不受影响）。旧草稿里残留的
+ * `REQUIRE`/`EXCLUDE` 值按「已选」显示，点一次清空 —— 不写新的非 PREFER 值。
  *
  * 饮食与宗教要求**不用**这个控件（规范 4.2 明令禁止）：「偏好清真」不是一个
  * 有意义的表达。那些字段在描述符表里是 `check`。
@@ -210,8 +275,10 @@ export function TriStateTag({
   labelOf,
   id,
   describedBy,
+  part,
 }: ControlProps): React.ReactElement {
   const selections = asSelections(value);
+  const twoState = part.two_state === true;
 
   const nextStance = (current: PlannerStance | undefined): PlannerStance | undefined => {
     const index = STANCE_CYCLE.indexOf(current);
@@ -226,22 +293,42 @@ export function TriStateTag({
 
   return (
     <div id={id} {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}>
-      <div className="planner-stance-guide" aria-label="多状态按钮说明">
-        <span className="planner-stance-guide__require" aria-label="必须满足" title="必须满足">
-          ★
-        </span>
-        <span className="planner-stance-guide__prefer" aria-label="优先考虑" title="优先考虑">
-          ♥
-        </span>
-        <span className="planner-stance-guide__exclude" aria-label="明确排除" title="明确排除">
-          ×
-        </span>
-        <small>连续点击可切换状态，再点一次可取消。</small>
-      </div>
+      {twoState ? null : (
+        <div className="planner-stance-guide" aria-label="多状态按钮说明">
+          <span className="planner-stance-guide__require" aria-label="必须满足" title="必须满足">
+            ★
+          </span>
+          <span className="planner-stance-guide__prefer" aria-label="优先考虑" title="优先考虑">
+            ♥
+          </span>
+          <span className="planner-stance-guide__exclude" aria-label="明确排除" title="明确排除">
+            ×
+          </span>
+          <small>连续点击可切换状态，再点一次可取消。</small>
+        </div>
+      )}
       <div className="planner-tags" role="group">
         {options.map((code) => {
           const stance = selections.find((entry) => entry.code === code)?.stance;
           const label = labelOf(code);
+          if (twoState) {
+            /* 两段：未选 ⇄ 偏好。读取端把旧草稿的 REQUIRE/EXCLUDE 也当作已选 */
+            const selected = stance !== undefined;
+            return (
+              <button
+                type="button"
+                key={code}
+                className={`planner-tag${selected ? ' planner-tag--prefer' : ''}`}
+                aria-label={selected ? `${label}，已选。点击取消` : `${label}，未选择。点击选中`}
+                aria-pressed={selected}
+                data-stance={stance ?? 'NONE'}
+                onClick={() => write(code, selected ? undefined : 'PREFER')}
+              >
+                {optionIcon(code)}
+                <span className="planner-tag__label">{label}</span>
+              </button>
+            );
+          }
           const upcoming = nextStance(stance);
           const visual = stance === undefined ? undefined : STANCE_VISUAL[stance];
           return (

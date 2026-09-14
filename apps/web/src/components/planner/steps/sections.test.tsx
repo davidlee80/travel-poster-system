@@ -373,7 +373,7 @@ describe('控件真的渲染出来了', () => {
     expect(html).toContain('前后可差 3 天');
   });
 
-  it('三态标签只在选项文字前显示状态图标，并用 aria 属性表达具体含义', () => {
+  it('第 5 步的三态标签是两段变体：无图例、无状态图标，选中仅靠颜色与 aria 表达', () => {
     const snapshot = buildSnapshot(RICH);
     const html = renderToStaticMarkup(
       <StepPage
@@ -390,13 +390,34 @@ describe('控件真的渲染出来了', () => {
     );
     expect(html).toContain('data-stance="PREFER"');
     expect(html).toContain('aria-pressed="true"');
-    expect(html).toMatch(/planner-tag__mark[^>]*>♥<\/span><span class="planner-tag__label">/);
+    /* 两段变体没有 ★♥× 图例与「连续点击」提示，也没有 ♥ 状态图标 */
+    expect(html).not.toContain('planner-stance-guide');
+    expect(html).not.toContain('连续点击');
+    expect(html).not.toContain('planner-tag__mark');
+    expect(html).toMatch(/aria-label="[^"]*，已选。点击取消"/);
+  });
+
+  it('其他步骤的三态标签仍是四段循环：图例、状态图标与循环 aria 文案都在', () => {
+    const snapshot = buildSnapshot(RICH);
+    const html = renderToStaticMarkup(
+      <StepPage
+        step="06"
+        active
+        state={RICH}
+        snapshot={snapshot}
+        dispatch={() => undefined}
+        onPrev={null}
+        onNext={null}
+        nextLabel={null}
+        registerField={() => undefined}
+      />,
+    );
+    expect(html).toContain('planner-stance-guide');
+    expect(html).toContain('连续点击可切换状态，再点一次可取消。');
     expect(html).toMatch(/planner-stance-guide__require[^>]*>★<\/span>/);
     expect(html).toMatch(/planner-stance-guide__exclude[^>]*>×<\/span>/);
-    expect(html).not.toMatch(/>★ 必须满足<\/span>/);
-    expect(html).not.toMatch(/>× 明确排除<\/span>/);
-    expect(html).not.toContain('planner-tag__state');
-    expect(html).toMatch(/aria-label="[^"]*当前优先考虑/);
+    expect(html).toMatch(/planner-tag__mark[^>]*>★<\/span><span class="planner-tag__label">/);
+    expect(html).toMatch(/aria-label="[^"]*当前必须满足/);
   });
 
   it('条件分支首次展开时带触发原因（规范 6 的「触发解释」）', () => {
@@ -511,7 +532,7 @@ describe('可访问性的可自动化部分（附录 C）', () => {
 
   it('三态状态有可访问名称，字段头按后台配置显示“必填项”徽标', () => {
     const markup = allMarkup();
-    expect(markup).toMatch(/planner-tag--prefer[^>]*aria-label="[^"]*当前优先考虑/);
+    expect(markup).toMatch(/planner-tag--require[^>]*aria-label="[^"]*当前必须满足/);
     expect(markup).toContain('planner-badge planner-badge--required');
     expect(markup).toMatch(/planner-badge--required[^>]*>必填项<\/span>/);
     expect(markup).toMatch(/data-field="PV2-01-001"[^>]*data-generation-required="true"/);

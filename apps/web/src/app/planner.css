@@ -1226,6 +1226,9 @@
 }
 
 .planner-choice {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
   padding: 9px 13px;
   border: 1px solid #dce2eb;
   border-radius: 11px;
@@ -4143,15 +4146,60 @@
   }
 }
 
-/* 选项卡片中的图标 */
+/* 选项卡片与两段标签中的图标 */
 .planner-choice__icon {
   flex-shrink: 0;
-  margin-right: 6px;
   color: var(--primary);
 }
 
-.planner-choice--check .planner-choice__icon {
+.planner-choice--check .planner-choice__icon,
+.planner-tag .planner-choice__icon {
   color: inherit;
+}
+
+/*
+ * 选项图标的语义色（第 5 步参考稿：橙色下午、紫色晚间…）。
+ *
+ * 图标库契约是 stroke="currentColor"，彩色只能借 currentColor 实现。
+ * 关键约束：只在**未选中**时上色。选中态按钮整体变成主题色
+ * （`.planner-choice--on` / `.planner-tag--prefer`），图标必须跟着文字
+ * 一起变，否则蓝底上会留下一个琥珀色图标 —— 状态颜色与装饰颜色打架，
+ * 读不出「选中了」。
+ */
+.planner-choice:not(.planner-choice--on) .planner-choice__icon--tone-blue,
+.planner-tag:not(.planner-tag--prefer):not(.planner-tag--require):not(.planner-tag--exclude)
+  .planner-choice__icon--tone-blue {
+  color: #3b82f6;
+}
+
+.planner-choice:not(.planner-choice--on) .planner-choice__icon--tone-green,
+.planner-tag:not(.planner-tag--prefer):not(.planner-tag--require):not(.planner-tag--exclude)
+  .planner-choice__icon--tone-green {
+  color: #22c55e;
+}
+
+.planner-choice:not(.planner-choice--on) .planner-choice__icon--tone-amber,
+.planner-tag:not(.planner-tag--prefer):not(.planner-tag--require):not(.planner-tag--exclude)
+  .planner-choice__icon--tone-amber {
+  color: #d97706;
+}
+
+.planner-choice:not(.planner-choice--on) .planner-choice__icon--tone-orange,
+.planner-tag:not(.planner-tag--prefer):not(.planner-tag--require):not(.planner-tag--exclude)
+  .planner-choice__icon--tone-orange {
+  color: #f97316;
+}
+
+.planner-choice:not(.planner-choice--on) .planner-choice__icon--tone-purple,
+.planner-tag:not(.planner-tag--prefer):not(.planner-tag--require):not(.planner-tag--exclude)
+  .planner-choice__icon--tone-purple {
+  color: #8b5cf6;
+}
+
+.planner-choice:not(.planner-choice--on) .planner-choice__icon--tone-slate,
+.planner-tag:not(.planner-tag--prefer):not(.planner-tag--require):not(.planner-tag--exclude)
+  .planner-choice__icon--tone-slate {
+  color: #64748b;
 }
 
 /* 区块图标的颜色(按区块类型区分) */
@@ -4178,7 +4226,7 @@
 /* ── 第 4 步「旅行节奏」样式(按 step4.html,保留大字号)────────────────────────── */
 
 .planner-step-page[data-step='04'] {
-  background: radial-gradient(ellipse at 91% 1%, #f1f6fd 0, transparent 28%), #f8fafc;
+  background: #f8fafc;
 }
 
 .planner-step-page[data-step='04'] .planner-page-head__eyebrow {
@@ -4457,11 +4505,17 @@
   background: #f2f1ff;
 }
 
-.planner-step-page[data-step='04'] .planner-block:has([data-field='PV2-04-008']) {
-  border-color: transparent;
-  background: transparent;
-  padding-right: 0;
-  padding-left: 0;
+/*
+ * 「哪些方式你不能接受」（PV2-04-008）与其他子项一样享有卡片背景。
+ * 差异只保留在选中态：排除项选中用红色（与 ban 图标、--state-exclude 一致），
+ * 其他卡片选中是蓝色。
+ */
+.planner-step-page[data-step='04']
+  .planner-block:has([data-field='PV2-04-008'])
+  .planner-choice--on {
+  color: #e65d65;
+  border-color: #f5b7bb;
+  background: #fff0f1;
 }
 
 /* 移动端改为单列 */

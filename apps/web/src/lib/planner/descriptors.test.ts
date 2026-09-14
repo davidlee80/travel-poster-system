@@ -307,6 +307,18 @@ describe('三态标签只用在主观取舍上（规范 4.2）', () => {
       'transport.local_modes',
     ]);
   });
+
+  it('只有第 5 步的两个交通字段是两段变体（无图例、无四段循环）', () => {
+    /*
+     * 参考稿把「跨城怎么走 / 到了当地怎么移动」收敛成「未选 ⇄ 偏好」两段。
+     * 其余三态字段（预算、住宿）保留四段循环 —— 这张清单多一个或少一个
+     * 都说明描述符改错了地方。
+     */
+    const twoState = PLANNER_FIELDS.filter((spec) =>
+      allParts(spec.field_id).some((part) => part.two_state === true),
+    ).map((spec) => spec.api_key);
+    expect(twoState.sort()).toEqual(['transport.intercity_modes', 'transport.local_modes']);
+  });
 });
 
 describe('第 10 步的字段不参与主问卷', () => {
