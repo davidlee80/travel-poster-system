@@ -228,9 +228,9 @@ export interface FieldPart {
    */
   readonly empty_label?: string;
   /**
-   * 三态标签的两段变体（第 5 步的两个交通字段）。
+   * 三态标签的两段变体（预算优先项与第 5 步的两个交通字段）。
    *
-   * 默认四段循环是「未选 → 偏好 → 必须 → 不要」；第 5 步参考稿只保留
+   * 默认四段循环是「未选 → 偏好 → 必须 → 不要」；这些字段只保留
    * 「未选 ⇄ 偏好」两段 —— 不渲染 ★♥× 图例与状态图标，写入恒为 `PREFER`，
    * 值形状仍是 `{code, stance}[]`（schema 契约不变，旧草稿里的
    * `REQUIRE`/`EXCLUDE` 值按「已选」显示，点一次清空）。
@@ -260,6 +260,8 @@ export interface FieldPart {
 export type FieldDescriptor =
   | {
       readonly kind: 'parts';
+      /** 子项标题或选项已表达问题时，省略重复的字段标题。 */
+      readonly hide_question?: true;
       /** 整块包在 `user_reported` 里（规范 4.3）。部件的键相对于它 */
       readonly reported?: true;
       /** 前置开关的文案。绑 `enabled`；关掉时部件不渲染但值保留 */
@@ -393,7 +395,10 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   'PV2-02-006': one('check', { options: GROUPING_NEED_VALUES }),
 
   // ── 03 预算取舍 ──────────────────────────────────────────
-  'PV2-03-001': one('choice', { options: BUDGET_MODE_VALUES }),
+  'PV2-03-001': {
+    ...one('choice', { options: BUDGET_MODE_VALUES }),
+    hide_question: true,
+  },
   'PV2-03-002': one('choice', { options: CURRENCY_VALUES }),
   'PV2-03-003': one('money-range', { min: 0 }),
   'PV2-03-004': one('choice', { options: TRAVEL_TIER_VALUES }),
@@ -404,6 +409,7 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   },
   'PV2-03-006': {
     kind: 'parts',
+    hide_question: true,
     parts: [
       {
         key: 'included_items',
@@ -416,6 +422,7 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
         primitive: 'tristate',
         label: '哪些项目愿意多花',
         options: BUDGET_PRIORITY_CODES,
+        two_state: true,
       },
     ],
   },

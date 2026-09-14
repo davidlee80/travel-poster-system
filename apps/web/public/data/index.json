@@ -1,0 +1,334 @@
+{
+  "schema_version": 2,
+  "updated_at": "2026-09-10T14:53:19.027951+00:00",
+  "countries": [
+    {
+      "code": "AD",
+      "name": "安道尔",
+      "continent": "欧洲",
+      "city_count": 27,
+      "data_file": "Europe/安道尔.json",
+      "revision": "75ee6f5d6bf90d469558897c1eaff750068041096c88d98efe37184def66bef4"
+    },
+    {
+      "code": "AL",
+      "name": "阿尔巴尼亚",
+      "continent": "欧洲",
+      "city_count": 63,
+      "data_file": "Europe/阿尔巴尼亚.json",
+      "revision": "5fb4d1a286f294af284074e8ebda649e42ae24912295d445ae8e6eff522450ad"
+    },
+    {
+      "code": "AT",
+      "name": "奥地利",
+      "continent": "欧洲",
+      "city_count": 75,
+      "data_file": "Europe/奥地利.json",
+      "revision": "17b909a0c241c4bea9b1e839fab3ce239ff9d23a135ded7d36ff1c418c8ea54e"
+    },
+    {
+      "code": "BA",
+      "name": "波黑",
+      "continent": "欧洲",
+      "city_count": 49,
+      "data_file": "Europe/波黑.json",
+      "revision": "9cf804af3a48a7ba45c3e4b633b18b88af09603d28a63494b31d98169c512aa6"
+    },
+    {
+      "code": "BE",
+      "name": "比利时",
+      "continent": "欧洲",
+      "city_count": 45,
+      "data_file": "Europe/比利时.json",
+      "revision": "fab754d33e0da7b5b0296c045d6a16304c23a3a6246bb794233f0efb80df641a"
+    },
+    {
+      "code": "BG",
+      "name": "保加利亚",
+      "continent": "欧洲",
+      "city_count": 94,
+      "data_file": "Europe/保加利亚.json",
+      "revision": "710ba58ecd86a09b8f1a16faee4eb660fb1b992d61cb806b8e9222ecd3920d48"
+    },
+    {
+      "code": "BY",
+      "name": "白俄罗斯",
+      "continent": "欧洲",
+      "city_count": 47,
+      "data_file": "Europe/白俄罗斯.json",
+      "revision": "827e476190ba49dfb6c6c39205aa97df94bd97aa7dde3acb02d8ccb286505dfe"
+    },
+    {
+      "code": "CH",
+      "name": "瑞士",
+      "continent": "欧洲",
+      "city_count": 91,
+      "data_file": "Europe/瑞士.json",
+      "revision": "5f51162124b27d2cc88c0f5f3e0b09ef57cd77d53569dc20c959f34c56fb5ba2"
+    },
+    {
+      "code": "CY",
+      "name": "塞浦路斯",
+      "continent": "欧洲",
+      "city_count": 51,
+      "data_file": "Europe/塞浦路斯.json",
+      "revision": "76aa8ef6b4363c62f10dd6080bb147865d1eb3d175c3490bb2b56d49cb27c895"
+    },
+    {
+      "code": "CZ",
+      "name": "捷克",
+      "continent": "欧洲",
+      "city_count": 90,
+      "data_file": "Europe/捷克.json",
+      "revision": "42e1ed427a4afc08ccd70c248e58c14fe48f66869cecd6b3c913b5cf5c29ea81"
+    },
+    {
+      "code": "DE",
+      "name": "德国",
+      "continent": "欧洲",
+      "city_count": 70,
+      "data_file": "Europe/德国.json",
+      "revision": "50290b126435acb581dc3ce23bc756b178d32d425056c67a2d686f4e7fa47c73"
+    },
+    {
+      "code": "EE",
+      "name": "爱沙尼亚",
+      "continent": "欧洲",
+      "city_count": 57,
+      "data_file": "Europe/爱沙尼亚.json",
+      "revision": "d1b7dcfc2b867bc68e911c06e8bea6253e08f12bcf614a6188cf68af9770cebf"
+    },
+    {
+      "code": "ES",
+      "name": "西班牙",
+      "continent": "欧洲",
+      "city_count": 77,
+      "data_file": "Europe/西班牙.json",
+      "revision": "966de331f07ea584bb23e1ccd13af59b0b2ee0b7c833deb9157716a9adc49423"
+    },
+    {
+      "code": "FR",
+      "name": "法国",
+      "continent": "欧洲",
+      "city_count": 83,
+      "data_file": "Europe/法国.json",
+      "revision": "bd933adb7a96acfe09184c2926b1603b415ed1cf2d0797e5ba014d7b1228ad80"
+    },
+    {
+      "code": "GB",
+      "name": "英国",
+      "continent": "欧洲",
+      "city_count": 91,
+      "data_file": "Europe/英国.json",
+      "revision": "9698ddac5b2a7a365c7bd321c352f86c59d5d74fb93da45177cca28614a3324e"
+    },
+    {
+      "code": "GR",
+      "name": "希腊",
+      "continent": "欧洲",
+      "city_count": 83,
+      "data_file": "Europe/希腊.json",
+      "revision": "a441bc56bd1393f85aa3d62cfc76e695abeb3aaaff546413d5e920d0cc2ceb7e"
+    },
+    {
+      "code": "HR",
+      "name": "克罗地亚",
+      "continent": "欧洲",
+      "city_count": 73,
+      "data_file": "Europe/克罗地亚.json",
+      "revision": "66dbe2cead7e91a4a9bbb34d398f4c69e7ac9ccb64f4fe11a25cf00b3963f2ae"
+    },
+    {
+      "code": "HU",
+      "name": "匈牙利",
+      "continent": "欧洲",
+      "city_count": 61,
+      "data_file": "Europe/匈牙利.json",
+      "revision": "671174dcf3631aebe01848b4cc546dbd0f6b053d92bea00d301f59c07805c0c3"
+    },
+    {
+      "code": "IE",
+      "name": "爱尔兰",
+      "continent": "欧洲",
+      "city_count": 60,
+      "data_file": "Europe/爱尔兰.json",
+      "revision": "9eaa5f7960b005c9c461e79143d85281c0d533aa997ae2646d79a1733ae23614"
+    },
+    {
+      "code": "IS",
+      "name": "冰岛",
+      "continent": "欧洲",
+      "city_count": 70,
+      "data_file": "Europe/冰岛.json",
+      "revision": "a227c2b24c869d470c9d12fb02df32d2c078401d604baa143168d1af97ec357a"
+    },
+    {
+      "code": "IT",
+      "name": "意大利",
+      "continent": "欧洲",
+      "city_count": 95,
+      "data_file": "Europe/意大利.json",
+      "revision": "68d7d758c6e97622bf3a143806cf52234e62c0564b85a637ee4d19884b0a2ded"
+    },
+    {
+      "code": "LI",
+      "name": "列支敦士登",
+      "continent": "欧洲",
+      "city_count": 17,
+      "data_file": "Europe/列支敦士登.json",
+      "revision": "913f3ebd623604606bfd9bf7ea4e90951391d4d5cd758bde7bea0275df2fe722"
+    },
+    {
+      "code": "LT",
+      "name": "立陶宛",
+      "continent": "欧洲",
+      "city_count": 56,
+      "data_file": "Europe/立陶宛.json",
+      "revision": "758bd88afb2c12df8742a3eb771588af72290e772e007caba367da14ba0a4e00"
+    },
+    {
+      "code": "LU",
+      "name": "卢森堡",
+      "continent": "欧洲",
+      "city_count": 36,
+      "data_file": "Europe/卢森堡.json",
+      "revision": "dcd13029d53f0b96bd319d5c4a56b6e26d40fd225161aa5860b58b1839cf04cb"
+    },
+    {
+      "code": "LV",
+      "name": "拉脱维亚",
+      "continent": "欧洲",
+      "city_count": 57,
+      "data_file": "Europe/拉脱维亚.json",
+      "revision": "7ef228039191383177d3430d4cdba246d082a286d68277d6dae9bf8a327a79b9"
+    },
+    {
+      "code": "MC",
+      "name": "摩纳哥",
+      "continent": "欧洲",
+      "city_count": 6,
+      "data_file": "Europe/摩纳哥.json",
+      "revision": "3475f2279ff45bbf06b9e3e94e6a201ae98055765cedcc6f9f50e415da7041b3"
+    },
+    {
+      "code": "MD",
+      "name": "摩尔多瓦",
+      "continent": "欧洲",
+      "city_count": 40,
+      "data_file": "Europe/摩尔多瓦.json",
+      "revision": "bbc7dccd515c392cd15d58ae53fc1b5d818ea3505a7e37e01a78289510702a9b"
+    },
+    {
+      "code": "ME",
+      "name": "黑山",
+      "continent": "欧洲",
+      "city_count": 60,
+      "data_file": "Europe/黑山.json",
+      "revision": "2a38de9f6801b49ded3c0344dead553a54fe5687e76fe89f5801e167c917f77b"
+    },
+    {
+      "code": "MK",
+      "name": "北马其顿",
+      "continent": "欧洲",
+      "city_count": 46,
+      "data_file": "Europe/北马其顿.json",
+      "revision": "1f263af8dd8dff6052c091bb3b3640212c5c7bef31d60c38b4c7697e10bc138d"
+    },
+    {
+      "code": "MT",
+      "name": "马耳他",
+      "continent": "欧洲",
+      "city_count": 41,
+      "data_file": "Europe/马耳他.json",
+      "revision": "f8d0433830daad38ff66da4aeb86497305f09a62f4dc5f43b6a45d64eb986459"
+    },
+    {
+      "code": "NO",
+      "name": "挪威",
+      "continent": "欧洲",
+      "city_count": 64,
+      "data_file": "Europe/挪威.json",
+      "revision": "fc127666478f0748e07df3185535f0bdbcc117c3b05ec7a322ce45b6a30b56c2"
+    },
+    {
+      "code": "PL",
+      "name": "波兰",
+      "continent": "欧洲",
+      "city_count": 99,
+      "data_file": "Europe/波兰.json",
+      "revision": "0474bf813964819b2956f258c81663ff7eac224003a4494298f60f5121686231"
+    },
+    {
+      "code": "PT",
+      "name": "葡萄牙",
+      "continent": "欧洲",
+      "city_count": 51,
+      "data_file": "Europe/葡萄牙.json",
+      "revision": "7ba06d65efcad0b3d8fe1b474130362d6e8010a0a0382307ac753675468279e8"
+    },
+    {
+      "code": "RO",
+      "name": "罗马尼亚",
+      "continent": "欧洲",
+      "city_count": 84,
+      "data_file": "Europe/罗马尼亚.json",
+      "revision": "f3822d5cbf1b8989efa4621c4aab92169ce86959ea0804ad4c5b7ef8ad1382cf"
+    },
+    {
+      "code": "RS",
+      "name": "塞尔维亚",
+      "continent": "欧洲",
+      "city_count": 65,
+      "data_file": "Europe/塞尔维亚.json",
+      "revision": "84b896465a4b5f3a93878cbcaf3e9b1f79fbfddb93ef05b3b16b13db229d88e0"
+    },
+    {
+      "code": "SE",
+      "name": "瑞典",
+      "continent": "欧洲",
+      "city_count": 68,
+      "data_file": "Europe/瑞典.json",
+      "revision": "f32319ba503ac1e10f42e679c435b0a57421345ed5c06bf23a40055760b2bcdc"
+    },
+    {
+      "code": "SI",
+      "name": "斯洛文尼亚",
+      "continent": "欧洲",
+      "city_count": 65,
+      "data_file": "Europe/斯洛文尼亚.json",
+      "revision": "26abe9fed3c19683065117f369413543c3c52bf46f130116c8f77ef553abe40f"
+    },
+    {
+      "code": "SK",
+      "name": "斯洛伐克",
+      "continent": "欧洲",
+      "city_count": 78,
+      "data_file": "Europe/斯洛伐克.json",
+      "revision": "a58e2c962c78ccb470de41098efaa83c69eccba7f75f267c3a9f2f616de6e273"
+    },
+    {
+      "code": "SM",
+      "name": "圣马力诺",
+      "continent": "欧洲",
+      "city_count": 12,
+      "data_file": "Europe/圣马力诺.json",
+      "revision": "5aa20822642198742ad2b5632a047abcfc3249ab23733cf98dc0bdb8978ee029"
+    },
+    {
+      "code": "UA",
+      "name": "乌克兰",
+      "continent": "欧洲",
+      "city_count": 66,
+      "data_file": "Europe/乌克兰.json",
+      "revision": "035c5daf9a70e6aeae921b38e751e5892e90fe6309b2a14c4ea24600ebed4071"
+    },
+    {
+      "code": "VA",
+      "name": "梵蒂冈",
+      "continent": "欧洲",
+      "city_count": 1,
+      "data_file": "Europe/梵蒂冈.json",
+      "revision": "60985896b46a33b206e69125f6ad20e0ee25b3455f8f66e86ebd9bd904d8353d"
+    }
+  ]
+}

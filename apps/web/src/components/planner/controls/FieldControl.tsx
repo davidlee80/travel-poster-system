@@ -63,6 +63,7 @@ export function FieldControl({
 }: FieldControlProps): React.ReactElement {
   const spec = plannerField(fieldId);
   const descriptor = FIELD_DESCRIPTORS[fieldId];
+  const hideQuestion = descriptor.kind === 'parts' && descriptor.hide_question === true;
   const fieldState = snapshot.states.get(fieldId);
   const error = validateField(state, fieldId);
   const reason = TRIGGER_REASON[fieldId];
@@ -90,25 +91,29 @@ export function FieldControl({
       /* tabIndex -1：摘要 chip 回跳时要能 focus() 到这里，但它不该进 Tab 序 */
       tabIndex={-1}
     >
-      <div className="planner-section__head">
-        <strong className="planner-section__title" id={`${fieldId}-title`}>
-          {spec.question}
-        </strong>
-        <span className="planner-section__meta">
-          {requirementLabel === null ? null : (
-            <span
-              className="planner-badge planner-badge--required"
-              title={
-                requirement?.requirement_mode === 'BASE_REQUIRED'
-                  ? '生成行程所需的基础信息'
-                  : '根据你当前的选择，此项需要补充'
-              }
-            >
-              {requirementLabel}
-            </span>
+      {hideQuestion && requirementLabel === null ? null : (
+        <div className="planner-section__head">
+          {hideQuestion ? null : (
+            <strong className="planner-section__title" id={`${fieldId}-title`}>
+              {spec.question}
+            </strong>
           )}
-        </span>
-      </div>
+          <span className="planner-section__meta">
+            {requirementLabel === null ? null : (
+              <span
+                className="planner-badge planner-badge--required"
+                title={
+                  requirement?.requirement_mode === 'BASE_REQUIRED'
+                    ? '生成行程所需的基础信息'
+                    : '根据你当前的选择，此项需要补充'
+                }
+              >
+                {requirementLabel}
+              </span>
+            )}
+          </span>
+        </div>
+      )}
 
       {reason === undefined ? null : (
         <p className="planner-hint planner-hint--reason" id={hintId}>

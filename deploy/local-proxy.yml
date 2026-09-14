@@ -26,6 +26,12 @@
 # （与 mvp-apps.yml 的 `context: ..` 同一回事）。
 
 services:
+  render-worker:
+    # Chromium 沙箱需要用户命名空间；使用 Playwright v1.62.1 官方配置。
+    # 来源：https://github.com/microsoft/playwright/blob/v1.62.1/utils/docker/seccomp_profile.json
+    security_opt:
+      - seccomp=../deploy/playwright-seccomp.json
+
   local-proxy:
     # 用规范名而不是某个镜像站的地址，与 infrastructure/docker-compose.yml 一致。
     # 国内网络拉不动 Docker Hub 时，先经镜像站拉再打标（那三个基础设施镜像

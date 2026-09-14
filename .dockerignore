@@ -33,4 +33,6 @@ coverage
 .idea
 .DS_Store
 Thumbs.db
+# Local test browser profiles contain cache/cookies and must not enter image layers.
+/tmp/
 infrastructure/docker-compose.yml
