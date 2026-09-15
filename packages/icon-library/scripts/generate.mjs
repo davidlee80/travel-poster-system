@@ -79,7 +79,63 @@ const EXPECTED = {
  */
 const EXPECTED_EXTRA = ['seat', 'crown', 'gem', 'thumb-up', 'bus', 'van', 'window', 'aisle', 'repeat'];
 
-const EXPECTED_ALL = [...EXPECTED.module, ...EXPECTED.period, ...EXPECTED.transport, ...EXPECTED_EXTRA];
+/**
+ * 实心填充（fill）变体：第 5 步参考稿的选项按钮图标是实心风格，
+ * 与图标库的 stroke 描边契约不同。规则：
+ *   - 文件名必须以 -fill 结尾（与描边版同名加后缀）；
+ *   - 根标签必须 fill="currentColor"（靠文字色继承，允许 tone 上色）；
+ *   - validate() 对它们豁免 stroke="currentColor" 检查。
+ * 名称刻意不用「交通/时段」前缀 —— fill 版是风格变体，不是新域。
+ */
+const EXPECTED_FILL = [
+  // 选项按钮（第 5 步 OPTION_ICON_MAP）
+  'plane-fill',
+  'thumb-up-fill',
+  'repeat-fill',
+  'star-fill',
+  'crown-fill',
+  'gem-fill',
+  'seat-fill',
+  'window-fill',
+  'aisle-fill',
+  'users-fill',
+  'moon-fill',
+  'period-morning-fill',
+  'sun-fill',
+  'sunset-fill',
+  'sun-bright-fill',
+  'transport-train-fill',
+  'transport-boat-fill',
+  'transport-taxi-fill',
+  'transport-walk-fill',
+  // 区块标题（StepPage 给 section.icon 统一补 -fill 后缀）
+  'map-fill',
+  'map-pin-fill',
+  'calendar-fill',
+  'tips-fill',
+  'ticket-fill',
+  'shield-fill',
+  'budget-fill',
+  'chart-bar-fill',
+  'clock-fill',
+  'walk-fill',
+  'luggage-fill',
+  'ban-fill',
+  'bus-fill',
+  'briefcase-fill',
+  'alert-fill',
+  'food-fill',
+  'camera-fill',
+  'flag-fill',
+];
+
+const EXPECTED_ALL = [
+  ...EXPECTED.module,
+  ...EXPECTED.period,
+  ...EXPECTED.transport,
+  ...EXPECTED_EXTRA,
+  ...EXPECTED_FILL,
+];
 
 /** 违反这些就不是「自包含」的图标，PDF 导出或离线渲染时会失效 */
 const FORBIDDEN_PATTERNS = [
@@ -101,7 +157,15 @@ function validate(name, svg) {
   if (!svg.includes('viewBox="0 0 24 24"')) {
     fail(`${name}.svg 的 viewBox 必须为 "0 0 24 24"（9.1 交付要求）`);
   }
-  if (!svg.includes('stroke="currentColor"')) {
+  if (name.endsWith('-fill')) {
+    /*
+     * 实心变体用 fill="currentColor" 上色 —— 图标库的彩色（tone）依赖
+     * currentColor 这一契约不变，变的只是上色通道（fill 而非 stroke）。
+     */
+    if (!svg.includes('fill="currentColor"')) {
+      fail(`${name}.svg 是实心变体，必须使用 fill="currentColor"`);
+    }
+  } else if (!svg.includes('stroke="currentColor"')) {
     fail(`${name}.svg 必须使用 stroke="currentColor" 以继承文字颜色（9.1）`);
   }
   for (const [pattern, label] of FORBIDDEN_PATTERNS) {

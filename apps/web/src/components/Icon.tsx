@@ -49,17 +49,28 @@ export function Icon({ name, size = 20, title, className }: IconProps) {
     );
   }
 
+  /*
+   * `-fill` 后缀是实心变体（生成器约定）：图标内部元素已带
+   * fill="currentColor"，外层不能再套 fill="none" stroke=... 的描边壳，
+   * 否则 stroke 会沿着每个 fill 路径的轮廓再描一遍边，图标变糊。
+   */
+  const filled = resolved.endsWith('-fill');
+
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 24 24"
       width={size}
       height={size}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      {...(filled
+        ? { fill: 'currentColor' }
+        : {
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 1.6,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+          })}
       className={className}
       {...(title === undefined
         ? { 'aria-hidden': true, focusable: false }

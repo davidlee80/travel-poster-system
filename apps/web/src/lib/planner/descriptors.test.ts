@@ -308,16 +308,20 @@ describe('三态标签只用在主观取舍上（规范 4.2）', () => {
     ]);
   });
 
-  it('只有第 5 步的两个交通字段是两段变体（无图例、无四段循环）', () => {
+  it('两段变体只用在参考稿收敛过的三组上（预算优先级 + 第 5 步交通）', () => {
     /*
-     * 参考稿把「跨城怎么走 / 到了当地怎么移动」收敛成「未选 ⇄ 偏好」两段。
-     * 其余三态字段（预算、住宿）保留四段循环 —— 这张清单多一个或少一个
-     * 都说明描述符改错了地方。
+     * 参考稿把「哪些项目愿意多花」「跨城怎么走」「到了当地怎么移动」收敛成
+     * 「未选 ⇄ 偏好」两段。其余三态字段（住宿类型、住宿设施）保留四段循环
+     * —— 这张清单多一个或少一个都说明描述符改错了地方。
      */
     const twoState = PLANNER_FIELDS.filter((spec) =>
       allParts(spec.field_id).some((part) => part.two_state === true),
     ).map((spec) => spec.api_key);
-    expect(twoState.sort()).toEqual(['transport.intercity_modes', 'transport.local_modes']);
+    expect(twoState.sort()).toEqual([
+      'budget.scope_and_priorities',
+      'transport.intercity_modes',
+      'transport.local_modes',
+    ]);
   });
 });
 

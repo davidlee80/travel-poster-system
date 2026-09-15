@@ -49,7 +49,7 @@ import type { ControlProps } from './control-props';
 type OptionIconSpec = { readonly icon: string; readonly tone?: string };
 
 const OPTION_ICON_MAP: Record<string, OptionIconSpec> = {
-  // 风险排除项（PV2-04-008）
+  // 风险排除项（PV2-04-008）—— 第 4 步参考稿保留描边风格
   RED_EYE_FLIGHT: { icon: 'plane' },
   OVERNIGHT_GROUND: { icon: 'moon' },
   MULTI_TRANSFER: { icon: 'transfer' },
@@ -57,37 +57,38 @@ const OPTION_ICON_MAP: Record<string, OptionIconSpec> = {
   LAST_MINUTE_CHANGE: { icon: 'alert' },
   HIGH_RISK_ACTIVITY: { icon: 'shield' },
   LONG_QUEUE: { icon: 'users' },
+  // ── 第 5 步：参考稿为实心填充（-fill 变体）+ 语义色 ──
   // 跨城交通方式（PV2-05-001）
-  'transport.flight': { icon: 'transport-plane', tone: 'blue' },
-  'transport.rail': { icon: 'transport-train', tone: 'blue' },
+  'transport.flight': { icon: 'plane-fill', tone: 'blue' },
+  'transport.rail': { icon: 'transport-train-fill', tone: 'blue' },
   'transport.coach': { icon: 'bus', tone: 'slate' },
-  'transport.ferry': { icon: 'transport-boat', tone: 'blue' },
+  'transport.ferry': { icon: 'transport-boat-fill', tone: 'blue' },
   'transport.self_drive': { icon: 'transport-drive', tone: 'slate' },
   // 当地移动方式（PV2-05-005）
   'transport.public_transit': { icon: 'transport-transit', tone: 'blue' },
-  'transport.walking_first': { icon: 'transport-walk', tone: 'green' },
-  'transport.ride_hailing': { icon: 'transport-taxi', tone: 'amber' },
+  'transport.walking_first': { icon: 'transport-walk-fill', tone: 'green' },
+  'transport.ride_hailing': { icon: 'transport-taxi-fill', tone: 'amber' },
   'transport.private_car': { icon: 'van', tone: 'slate' },
   'transport.cycling': { icon: 'transport-bike', tone: 'blue' },
   // 直飞与转机（PV2-05-002）
-  DIRECT_ONLY: { icon: 'plane', tone: 'blue' },
-  DIRECT_PREFERRED: { icon: 'thumb-up', tone: 'green' },
+  DIRECT_ONLY: { icon: 'plane-fill', tone: 'blue' },
+  DIRECT_PREFERRED: { icon: 'thumb-up-fill', tone: 'green' },
   MAX_ONE_TRANSFER: { icon: 'transfer', tone: 'amber' },
-  MULTI_TRANSFER_OK: { icon: 'repeat', tone: 'purple' },
+  MULTI_TRANSFER_OK: { icon: 'repeat-fill', tone: 'purple' },
   // 舱等（PV2-05-003）
-  ECONOMY: { icon: 'seat', tone: 'blue' },
-  PREMIUM_ECONOMY: { icon: 'star', tone: 'green' },
-  BUSINESS: { icon: 'crown', tone: 'amber' },
-  FIRST: { icon: 'gem', tone: 'amber' },
+  ECONOMY: { icon: 'seat-fill', tone: 'blue' },
+  PREMIUM_ECONOMY: { icon: 'star-fill', tone: 'green' },
+  BUSINESS: { icon: 'crown-fill', tone: 'amber' },
+  FIRST: { icon: 'gem-fill', tone: 'amber' },
   // 座位（PV2-05-003）
-  WINDOW: { icon: 'window', tone: 'slate' },
-  AISLE: { icon: 'aisle', tone: 'slate' },
-  TOGETHER: { icon: 'users', tone: 'purple' },
+  WINDOW: { icon: 'window-fill', tone: 'slate' },
+  AISLE: { icon: 'aisle-fill', tone: 'slate' },
+  TOGETHER: { icon: 'users-fill', tone: 'purple' },
   // 出发 / 抵达时段（PV2-05-004）
-  EARLY_MORNING: { icon: 'period-morning', tone: 'blue' },
-  MORNING: { icon: 'period-noon', tone: 'amber' },
-  AFTERNOON: { icon: 'period-afternoon', tone: 'orange' },
-  EVENING: { icon: 'period-night', tone: 'purple' },
+  EARLY_MORNING: { icon: 'period-morning-fill', tone: 'blue' },
+  MORNING: { icon: 'sun-bright-fill', tone: 'amber' },
+  AFTERNOON: { icon: 'sunset-fill', tone: 'orange' },
+  EVENING: { icon: 'moon-fill', tone: 'purple' },
 };
 
 /** 选项图标。查不到时返回 null —— 调用方退化为纯文字按钮 */

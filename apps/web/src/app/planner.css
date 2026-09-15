@@ -1080,14 +1080,26 @@
   letter-spacing: 0.02em;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
+/*
+ * 区块图标：圆角浅底方块（第 5 步参考稿的子项标题样式，全部步骤统一）。
+ *
+ * 方块是「底」不是「框」—— 底色用图标主色的 ~12% 透明度版本，
+ * 图标本身用主色。颜色来自 .planner-block__icon--* 修饰类，
+ * 没有修饰类时回退到主色蓝。
+ *
+ * 参考稿尺寸：方块 32×32（padding 4px + 图标 24px）。
+ */
 .planner-block__icon {
   flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #e8f0fe;
   color: var(--primary);
-  width: 24px;
-  height: 24px;
 }
 
 .planner-block__intro {
@@ -4146,9 +4158,11 @@
   }
 }
 
-/* 选项卡片与两段标签中的图标 */
+/* 选项卡片与两段标签中的图标。实心（-fill）变体按参考稿用 16px。 */
 .planner-choice__icon {
   flex-shrink: 0;
+  width: 16px;
+  height: 16px;
   color: var(--primary);
 }
 
@@ -4202,25 +4216,30 @@
   color: #64748b;
 }
 
-/* 区块图标的颜色(按区块类型区分) */
+/* 区块图标的颜色(按区块类型区分)：图标主色 + 同色系浅底方块 */
 .planner-block__icon--blue {
-  color: #3478f6;
+  color: #3b82f6;
+  background: #eff6ff;
 }
 
 .planner-block__icon--yellow {
-  color: #fbbf24;
+  color: #d97706;
+  background: #fffbeb;
 }
 
 .planner-block__icon--brown {
   color: #92400e;
+  background: #f3e8dd;
 }
 
 .planner-block__icon--purple {
   color: #8b5cf6;
+  background: #f5f3ff;
 }
 
 .planner-block__icon--red {
   color: #e65d65;
+  background: #fdecec;
 }
 
 /* ── 第 4 步「旅行节奏」样式(按 step4.html,保留大字号)────────────────────────── */
@@ -4317,11 +4336,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  font-size: 13px;
-  line-height: 1;
+  /* 尺寸与底色继承全局 .planner-block__icon（32px 圆角方块），此处只控对齐 */
 }
 
 .planner-step-page[data-step='04'] .planner-choice {

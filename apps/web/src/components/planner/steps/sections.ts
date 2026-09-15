@@ -43,44 +43,72 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       intro: '请选择至少 1 个目的地；有多个备选时可以按期望顺序添加，最多 5 个。',
       fields: ['PV2-01-001'],
       icon: 'map',
+      iconColor: 'blue',
     },
     {
       title: '出发日期与返回日期',
       fields: ['PV2-01-004', 'PV2-01-005'],
       icon: 'calendar',
+      iconColor: 'blue',
     },
     {
       title: '目的地 / 备选目的地',
       fields: ['PV2-01-003'],
       icon: 'map',
+      iconColor: 'blue',
     },
-    { title: '这趟旅行为了什么', fields: ['PV2-01-006', 'PV2-01-007'], icon: 'tips' },
+    {
+      title: '这趟旅行为了什么',
+      fields: ['PV2-01-006', 'PV2-01-007'],
+      icon: 'tips',
+      iconColor: 'blue',
+    },
     {
       title: '已经订好的部分',
       intro: '已购买且不可随意改动的部分会成为整份行程的锚点。',
       fields: ['PV2-01-008', 'PV2-01-009'],
       icon: 'ticket',
+      iconColor: 'blue',
     },
   ],
 
   '02': [
-    { title: '旅行人员', fields: ['PV2-02-001', 'PV2-02-002'] },
+    {
+      title: '旅行人员',
+      fields: ['PV2-02-001', 'PV2-02-002'],
+      icon: 'users',
+      iconColor: 'blue',
+    },
     {
       title: '需要照顾的同行人',
       intro: '年龄是事实，行动能力是功能性约束 —— 我们不用年龄替代能力判断。',
       fields: ['PV2-02-003', 'PV2-02-004', 'PV2-02-005'],
+      icon: 'shield',
+      iconColor: 'blue',
     },
-    { title: '要不要分开', fields: ['PV2-02-006'] },
+    { title: '要不要分开', fields: ['PV2-02-006'], icon: 'users', iconColor: 'blue' },
   ],
 
   '03': [
-    { title: '怎么表达预算最自然', fields: ['PV2-03-001', 'PV2-03-002'] },
+    {
+      title: '怎么表达预算最自然',
+      fields: ['PV2-03-001', 'PV2-03-002'],
+      icon: 'budget',
+      iconColor: 'blue',
+    },
     {
       title: '目标范围与硬上限',
       intro: '硬上限的优先级高于档次偏好 —— 它是不能超过的线。',
       fields: ['PV2-03-003', 'PV2-03-004', 'PV2-03-005'],
+      icon: 'budget',
+      iconColor: 'blue',
     },
-    { title: '这笔钱包含什么，愿意多花在哪', fields: ['PV2-03-006'] },
+    {
+      title: '这笔钱包含什么，愿意多花在哪',
+      fields: ['PV2-03-006'],
+      icon: 'budget',
+      iconColor: 'blue',
+    },
   ],
 
   '04': [
@@ -129,39 +157,67 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
   ],
 
   '05': [
-    { title: '跨城怎么走', fields: ['PV2-05-001'] },
-    { title: '航班要求', fields: ['PV2-05-002', 'PV2-05-003', 'PV2-05-004'] },
-    { title: '到了当地怎么移动', fields: ['PV2-05-005', 'PV2-05-006'] },
-    { title: '行李', fields: ['PV2-05-007'] },
+    { title: '跨城怎么走', fields: ['PV2-05-001'], icon: 'bus', iconColor: 'blue' },
+    {
+      title: '航班要求',
+      fields: ['PV2-05-002', 'PV2-05-003', 'PV2-05-004'],
+      icon: 'plane',
+      iconColor: 'blue',
+    },
+    {
+      title: '到了当地怎么移动',
+      fields: ['PV2-05-005', 'PV2-05-006'],
+      icon: 'map-pin',
+      iconColor: 'blue',
+    },
+    { title: '行李', fields: ['PV2-05-007'], icon: 'luggage', iconColor: 'blue' },
   ],
 
   '06': [
-    { title: '住什么类型', fields: ['PV2-06-001'] },
+    { title: '住什么类型', fields: ['PV2-06-001'], icon: 'briefcase', iconColor: 'blue' },
     {
       title: '房间怎么配',
       intro: '房间配置需要能容纳全部旅行者，连通房需要供应商确认。',
       fields: ['PV2-06-002', 'PV2-06-003'],
+      icon: 'users',
+      iconColor: 'blue',
     },
-    { title: '每晚预算与位置取舍', fields: ['PV2-06-004', 'PV2-06-005'] },
+    {
+      title: '每晚预算与位置取舍',
+      fields: ['PV2-06-004', 'PV2-06-005'],
+      icon: 'budget',
+      iconColor: 'blue',
+    },
     {
       title: '星级、设施与入住',
       fields: ['PV2-06-006', 'PV2-06-007', 'PV2-06-008'],
+      icon: 'star',
+      iconColor: 'blue',
     },
   ],
 
   '07': [
-    { title: '想吃什么', fields: ['PV2-07-001', 'PV2-07-002'] },
+    {
+      title: '想吃什么',
+      fields: ['PV2-07-001', 'PV2-07-002'],
+      icon: 'food',
+      iconColor: 'blue',
+    },
     {
       title: '过敏与安全',
       intro: '过敏不用「偏好 / 必须 / 不要」表达 —— 它是安全硬约束。',
       fields: ['PV2-07-003', 'PV2-07-004'],
+      icon: 'shield',
+      iconColor: 'red',
     },
-    { title: '怎么吃', fields: ['PV2-07-005'] },
+    { title: '怎么吃', fields: ['PV2-07-005'], icon: 'food', iconColor: 'blue' },
     {
       title: '想玩什么',
       fields: ['PV2-07-006', 'PV2-07-007', 'PV2-07-008', 'PV2-07-009'],
+      icon: 'camera',
+      iconColor: 'blue',
     },
-    { title: '购物与退税', fields: ['PV2-07-010'] },
+    { title: '购物与退税', fields: ['PV2-07-010'], icon: 'budget', iconColor: 'blue' },
   ],
 
   '08': [
@@ -169,15 +225,34 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       title: '健康与无障碍',
       intro: '我们只问旅行中需要怎样的照顾，不收诊断信息。',
       fields: ['PV2-08-001', 'PV2-08-002'],
+      icon: 'shield',
+      iconColor: 'blue',
     },
-    { title: '高风险活动与随行药品', fields: ['PV2-08-003', 'PV2-08-004'] },
+    {
+      title: '高风险活动与随行药品',
+      fields: ['PV2-08-003', 'PV2-08-004'],
+      icon: 'alert',
+      iconColor: 'blue',
+    },
     {
       title: '证件',
       intro: '只收状态与到期日，不收护照号、签证号或身份证号。',
       fields: ['PV2-08-005', 'PV2-08-006', 'PV2-08-007'],
+      icon: 'ticket',
+      iconColor: 'blue',
     },
-    { title: '保险与安全阈值', fields: ['PV2-08-008', 'PV2-08-009'] },
-    { title: '不能移动的工作安排', fields: ['PV2-08-010'] },
+    {
+      title: '保险与安全阈值',
+      fields: ['PV2-08-008', 'PV2-08-009'],
+      icon: 'shield',
+      iconColor: 'blue',
+    },
+    {
+      title: '不能移动的工作安排',
+      fields: ['PV2-08-010'],
+      icon: 'briefcase',
+      iconColor: 'blue',
+    },
   ],
 
   '09': [
@@ -185,18 +260,42 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       title: '这是我们理解的你',
       intro: '逐组确认即可，有问题可以直接点回原来那一步修改。',
       fields: ['PV2-09-001', 'PV2-09-002'],
+      icon: 'flag',
+      iconColor: 'blue',
     },
-    { title: '希望我们怎么提醒你', fields: ['PV2-09-003', 'PV2-09-004'] },
+    {
+      title: '希望我们怎么提醒你',
+      fields: ['PV2-09-003', 'PV2-09-004'],
+      icon: 'clock',
+      iconColor: 'blue',
+    },
     {
       title: '信息使用授权',
       intro: '两项授权是分开的：一项用于本次服务，一项用于将来免于重填。',
       fields: ['PV2-09-005', 'PV2-09-006'],
+      icon: 'shield',
+      iconColor: 'blue',
     },
   ],
 
   '10': [
-    { title: '联网与支付', fields: ['PV2-10-001', 'PV2-10-002'] },
-    { title: '会员权益与紧急联系人', fields: ['PV2-10-003', 'PV2-10-004'] },
-    { title: '文件与旅中监控', fields: ['PV2-10-005', 'PV2-10-006'] },
+    {
+      title: '联网与支付',
+      fields: ['PV2-10-001', 'PV2-10-002'],
+      icon: 'budget',
+      iconColor: 'blue',
+    },
+    {
+      title: '会员权益与紧急联系人',
+      fields: ['PV2-10-003', 'PV2-10-004'],
+      icon: 'star',
+      iconColor: 'blue',
+    },
+    {
+      title: '文件与旅中监控',
+      fields: ['PV2-10-005', 'PV2-10-006'],
+      icon: 'shield',
+      iconColor: 'blue',
+    },
   ],
 };

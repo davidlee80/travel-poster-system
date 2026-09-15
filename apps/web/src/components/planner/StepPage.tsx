@@ -145,9 +145,15 @@ export function StepPage({
         }: (typeof visibleSections)[number]): React.ReactElement => (
           <div className="planner-block" key={section.title}>
             <h2 className="planner-block__title">
+              {/*
+               * 区块图标是实心填充风格的参考稿样式，因此用 -fill 变体；
+               * sections.ts 里写的仍是基础名（如 'plane'），这里统一补后缀。
+               * 找不到 -fill 变体时 resolveIconName 返回 null，Icon 组件会渲染
+               * 占位虚线框，让清单漏配在视觉上立刻可见。
+               */}
               {section.icon ? (
                 <Icon
-                  name={section.icon}
+                  name={`${section.icon}-fill`}
                   size={24}
                   className={`planner-block__icon${
                     section.iconColor ? ` planner-block__icon--${section.iconColor}` : ''
