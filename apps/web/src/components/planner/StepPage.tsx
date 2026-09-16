@@ -154,7 +154,7 @@ export function StepPage({
               {section.icon ? (
                 <Icon
                   name={`${section.icon}-fill`}
-                  size={24}
+                  size={30}
                   className={`planner-block__icon${
                     section.iconColor ? ` planner-block__icon--${section.iconColor}` : ''
                   }`}

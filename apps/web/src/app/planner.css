@@ -1090,14 +1090,14 @@
  * 图标本身用主色。颜色来自 .planner-block__icon--* 修饰类，
  * 没有修饰类时回退到主色蓝。
  *
- * 参考稿尺寸：方块 32×32（padding 4px + 图标 24px）。
+ * 参考稿尺寸：方块 40×40（padding 5px + 图标 30px）。
  */
 .planner-block__icon {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  padding: 4px;
-  border-radius: 8px;
+  width: 40px;
+  height: 40px;
+  padding: 5px;
+  border-radius: 10px;
   background: #e8f0fe;
   color: var(--primary);
 }
@@ -4350,7 +4350,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* 尺寸与底色继承全局 .planner-block__icon（32px 圆角方块），此处只控对齐 */
+  /* 尺寸与底色继承全局 .planner-block__icon（40px 圆角方块），此处只控对齐 */
 }
 
 .planner-step-page[data-step='04'] .planner-choice:hover {
