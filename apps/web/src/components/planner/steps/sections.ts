@@ -32,7 +32,7 @@ export interface PlannerSection {
   readonly icon?: string;
   /** 区块图标颜色（可选）。'blue' / 'yellow' / 'brown' / 'purple' / 'red' */
   readonly iconColor?: 'blue' | 'yellow' | 'brown' | 'purple' | 'red';
-  /** 相邻区块的布局组；相同组的连续卡片共享一个多列容器。 */
+  /** 相邻区块的布局组；相同组的连续卡片共享一个容器。 */
   readonly layoutGroup?: 'schedule' | 'preference';
 }
 
@@ -156,18 +156,52 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
     },
   ],
 
+  /*
+   * 第 5 步的分组对齐 step5-design.png 参考稿：航班相关的三个字段
+   * （002/003/004）在视觉上各成一张卡，字段标题就是那个问句
+   * （「对直飞和转机有什么要求？」……），因此 002/004 的描述符带
+   * `hide_question: true`；003 的问题恰好是「偏好舱等与座位」，与组名
+   * 一字不差，保留字段标题不换文案 —— 契约问句不动。
+   *
+   * 「到了当地怎么移动」只含 005 —— 同选「自驾」后展开的 006 细节表单
+   * 单列为「自驾计划详情」组，避免它挂在问句为「当地怎么移动」的卡里。
+   */
   '05': [
-    { title: '跨城怎么走', fields: ['PV2-05-001'], icon: 'bus', iconColor: 'blue' },
+    {
+      title: '跨城怎么走',
+      fields: ['PV2-05-001'],
+      icon: 'bus',
+      iconColor: 'blue',
+    },
     {
       title: '航班要求',
-      fields: ['PV2-05-002', 'PV2-05-003', 'PV2-05-004'],
+      /* 不填 intro：PV2-05-002 的 TRIGGER_REASON 文案与之一致，会显示在卡内 */
+      fields: ['PV2-05-002'],
       icon: 'plane',
       iconColor: 'blue',
     },
     {
+      title: '偏好舱等与座位',
+      fields: ['PV2-05-003'],
+      icon: 'seat',
+      iconColor: 'blue',
+    },
+    {
+      title: '更喜欢什么时候出发/抵达？',
+      fields: ['PV2-05-004'],
+      icon: 'clock',
+      iconColor: 'blue',
+    },
+    {
       title: '到了当地怎么移动',
-      fields: ['PV2-05-005', 'PV2-05-006'],
+      fields: ['PV2-05-005'],
       icon: 'map-pin',
+      iconColor: 'blue',
+    },
+    {
+      title: '自驾计划详情',
+      fields: ['PV2-05-006'],
+      icon: 'transport-drive',
       iconColor: 'blue',
     },
     { title: '行李', fields: ['PV2-05-007'], icon: 'luggage', iconColor: 'blue' },

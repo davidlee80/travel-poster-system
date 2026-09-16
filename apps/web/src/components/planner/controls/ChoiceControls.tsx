@@ -49,14 +49,14 @@ import type { ControlProps } from './control-props';
 type OptionIconSpec = { readonly icon: string; readonly tone?: string };
 
 const OPTION_ICON_MAP: Record<string, OptionIconSpec> = {
-  // 风险排除项（PV2-04-008）—— 第 4 步参考稿保留描边风格
-  RED_EYE_FLIGHT: { icon: 'plane' },
-  OVERNIGHT_GROUND: { icon: 'moon' },
-  MULTI_TRANSFER: { icon: 'transfer' },
-  REMOTE_AREA: { icon: 'mountain' },
-  LAST_MINUTE_CHANGE: { icon: 'alert' },
-  HIGH_RISK_ACTIVITY: { icon: 'shield' },
-  LONG_QUEUE: { icon: 'users' },
+  // 风险排除项（PV2-04-008）—— 第 4 步参考稿保留描边风格，图标带语义色
+  RED_EYE_FLIGHT: { icon: 'plane', tone: 'red' },
+  OVERNIGHT_GROUND: { icon: 'moon', tone: 'purple' },
+  MULTI_TRANSFER: { icon: 'transfer', tone: 'amber' },
+  REMOTE_AREA: { icon: 'mountain', tone: 'slate' },
+  LAST_MINUTE_CHANGE: { icon: 'alert', tone: 'orange' },
+  HIGH_RISK_ACTIVITY: { icon: 'shield', tone: 'red' },
+  LONG_QUEUE: { icon: 'users', tone: 'blue' },
   // ── 第 5 步：参考稿为实心填充（-fill 变体）+ 语义色 ──
   // 跨城交通方式（PV2-05-001）
   'transport.flight': { icon: 'plane-fill', tone: 'blue' },
@@ -73,7 +73,7 @@ const OPTION_ICON_MAP: Record<string, OptionIconSpec> = {
   // 直飞与转机（PV2-05-002）
   DIRECT_ONLY: { icon: 'plane-fill', tone: 'blue' },
   DIRECT_PREFERRED: { icon: 'thumb-up-fill', tone: 'green' },
-  MAX_ONE_TRANSFER: { icon: 'transfer', tone: 'amber' },
+  MAX_ONE_TRANSFER: { icon: 'repeat-fill', tone: 'amber' },
   MULTI_TRANSFER_OK: { icon: 'repeat-fill', tone: 'purple' },
   // 舱等（PV2-05-003）
   ECONOMY: { icon: 'seat-fill', tone: 'blue' },

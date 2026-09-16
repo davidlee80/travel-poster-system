@@ -7,15 +7,9 @@ import {
 } from '@tps/schemas';
 import { describe, expect, it } from 'vitest';
 
-import {
-  CONTROL_PRIMITIVES,
-  FIELD_DESCRIPTORS,
-  PROJECTION_ONLY_CODES,
-  TRISTATE_CODES,
-  declaredOptionValues,
-  type FieldPart,
-} from './descriptors';
+import { CONTROL_PRIMITIVES, FIELD_DESCRIPTORS, PROJECTION_ONLY_CODES, TRISTATE_CODES, declaredOptionValues, type FieldPart } from './descriptors';
 import { OPTION_LABEL } from './field-spec';
+import { STEP_SECTIONS } from '../../components/planner/steps/sections';
 
 /** 深度遍历一个字段的全部部件（含 `object-list` 的行部件）*/
 function allParts(fieldId: (typeof PLANNER_FIELDS)[number]['field_id']): readonly FieldPart[] {
@@ -100,6 +94,30 @@ describe('部件声明自洽', () => {
       for (const part of descriptor.parts) {
         if (part.key === null) problems.push(`${spec.field_id} 有多个部件但其中一个 key 为 null`);
         if (part.label === undefined) problems.push(`${spec.field_id}.${part.key ?? ''} 缺标签`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('hide_question 只允许在独占区块的字段上', () => {
+    /*
+     * `hide_question` 让字段标题整体消失，只有当该字段独占一个区块、
+     * 且区块标题（sections.ts 的组名）就是那个问句时才安全 —— 否则界面上
+     * 会出现一个没有问句的裸控件组。第 5 步的航班三字段是这个规则的应用者。
+     *
+     * 白名单之外的两条例外：预算模式（PV2-03-001）由 `BudgetControl` 组合控件
+     * 整体承载，字段级标题本就不渲染；第 9 步的两个元字段由 slot 注入。
+     */
+    const COMPOSITE_OWNED: readonly string[] = ['PV2-03-001'];
+    const problems: string[] = [];
+    for (const spec of PLANNER_FIELDS) {
+      if (COMPOSITE_OWNED.includes(spec.field_id)) continue;
+      const descriptor = FIELD_DESCRIPTORS[spec.field_id];
+      if (descriptor.kind !== 'parts' || descriptor.hide_question !== true) continue;
+      const sections = STEP_SECTIONS[spec.step];
+      const owner = sections.filter((section) => section.fields.includes(spec.field_id));
+      if (owner.length !== 1 || owner[0]?.fields.length !== 1) {
+        problems.push(`${spec.field_id} 声明了 hide_question 但不独占一个区块`);
       }
     }
     expect(problems).toEqual([]);

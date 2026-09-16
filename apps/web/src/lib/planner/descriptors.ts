@@ -442,8 +442,14 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
 
   // ── 05 路上怎么走 ────────────────────────────────────────
   'PV2-05-001': one('tristate', { options: INTERCITY_MODE_CODES, two_state: true }),
+  /*
+   * 第 5 步航班三个字段（002/003/004）在参考稿里各成一张卡，
+   * 区块标题就是问句（sections.ts 的组名），字段标题不再重复 —— `hide_question`。
+   * 002 的触发原因（TRIGGER_REASON）仍显示在卡内，文案与区块 intro 相同。
+   */
   'PV2-05-002': {
     kind: 'parts',
+    hide_question: true,
     parts: [
       {
         key: 'transfer_tolerance',
@@ -463,6 +469,7 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   },
   'PV2-05-004': {
     kind: 'parts',
+    hide_question: true,
     parts: [
       {
         key: 'windows',
@@ -470,7 +477,12 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
         label: '偏好的出发 / 抵达时段',
         options: DEPARTURE_WINDOW_VALUES,
       },
-      { key: 'avoid_late_night_arrival', primitive: 'bool', label: '避免深夜抵达' },
+      {
+        key: 'avoid_late_night_arrival',
+        primitive: 'bool',
+        label: '避免深夜抵达',
+        hint: '晚于当地 23:00 抵达的航班/车次，我们会默认避开。',
+      },
     ],
   },
   'PV2-05-005': one('tristate', { options: LOCAL_MODE_CODES, two_state: true }),

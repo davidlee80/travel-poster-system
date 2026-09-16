@@ -1235,20 +1235,32 @@
 .planner-choices--compact .planner-choice {
   padding: 6px 10px;
   font-size: 11px;
+  /* compact 变体不遵循 43px 标准：用于标签云等高密度场景，由使用方显式声明 */
 }
 
 .planner-choice {
   display: inline-flex;
   gap: 6px;
   align-items: center;
-  padding: 9px 13px;
+  min-height: 43px;
+  padding: 10px 15px;
   border: 1px solid #dce2eb;
-  border-radius: 11px;
+  border-radius: 12px;
   background: #fff;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 13px;
   text-align: left;
 }
+
+/*
+ * 选项按钮尺寸标准（TP-9-01）：
+ * 所有步骤页面的选项按钮（.planner-choice）必须统一使用本规则声明的尺寸：
+ *   min-height: 43px; padding: 10px 15px; border-radius: 12px; font-size: 13px;
+ * 步骤级覆盖（如 data-step='01' / data-step='04'）只允许调整颜色、阴影、间距等
+ * 非尺寸属性，不得修改 min-height / padding / border-radius / font-size。
+ * 按钮的视觉风格（边框样式、背景色、文字颜色、图标、选中态表现等）由各步骤
+ * 自由设计，尺寸标准仅约束上述四项。
+ */
 
 .planner-choice:hover {
   border-color: #8eacec;
@@ -3898,11 +3910,7 @@
 }
 
 .planner-step-page[data-step='01'] .planner-choice {
-  min-height: 43px;
-  padding: 10px 15px;
   border-color: #d9e2ee;
-  border-radius: 12px;
-  font-size: 13px;
 }
 
 .planner-step-page[data-step='01'] .planner-choice--on {
@@ -4166,8 +4174,8 @@
   color: var(--primary);
 }
 
-.planner-choice--check .planner-choice__icon,
-.planner-tag .planner-choice__icon {
+.planner-choice--check .planner-choice__icon:not([class*='planner-choice__icon--tone-']),
+.planner-tag .planner-choice__icon:not([class*='planner-choice__icon--tone-']) {
   color: inherit;
 }
 
@@ -4214,6 +4222,12 @@
 .planner-tag:not(.planner-tag--prefer):not(.planner-tag--require):not(.planner-tag--exclude)
   .planner-choice__icon--tone-slate {
   color: #64748b;
+}
+
+.planner-choice:not(.planner-choice--on) .planner-choice__icon--tone-red,
+.planner-tag:not(.planner-tag--prefer):not(.planner-tag--require):not(.planner-tag--exclude)
+  .planner-choice__icon--tone-red {
+  color: #e65d65;
 }
 
 /* 区块图标的颜色(按区块类型区分)：图标主色 + 同色系浅底方块 */
@@ -4339,25 +4353,6 @@
   /* 尺寸与底色继承全局 .planner-block__icon（32px 圆角方块），此处只控对齐 */
 }
 
-.planner-step-page[data-step='04'] .planner-choice {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-height: 32px;
-  padding: 6px 12px;
-  border: 1px solid #e9edf5;
-  border-radius: 5px;
-  color: #4a5573;
-  background: #f9fbfd;
-  font-size: 14px;
-  line-height: 1.3;
-  white-space: nowrap;
-  transition:
-    background 0.15s,
-    border-color 0.15s;
-}
-
 .planner-step-page[data-step='04'] .planner-choice:hover {
   background: #f0f5ff;
 }
@@ -4369,7 +4364,7 @@
   box-shadow: inset 0 0 0 2px #ffffffaa;
 }
 
-/* 参考稿的两组两列：容器包住相邻卡片，而不是把标题和字段拆成两列 */
+/* 参考稿的相邻区块分组容器：容器包住相邻卡片，而不是把标题和字段拆成两列 */
 .planner-layout {
   display: grid;
   gap: 12px;
@@ -4380,12 +4375,13 @@
   margin-top: 0;
 }
 
+/* 第 4 步已改为单列布局，废弃原有的两列设计 */
 .planner-layout--schedule {
-  grid-template-columns: 1fr 1.05fr;
+  grid-template-columns: 1fr;
 }
 
 .planner-layout--preference {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
 }
 
 .planner-step-page[data-step='04'] .planner-layout {
@@ -4533,7 +4529,7 @@
   background: #fff0f1;
 }
 
-/* 移动端改为单列 */
+/* 移动端保持单列 */
 @media (max-width: 768px) {
   .planner-layout--schedule,
   .planner-layout--preference {
