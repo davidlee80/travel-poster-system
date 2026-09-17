@@ -3620,7 +3620,6 @@
   + .planner-block
   > .planner-block__intro,
 .planner-step-page[data-step='01'] [data-field='PV2-01-001'],
-.planner-step-page[data-step='01'] [data-field='PV2-01-002'],
 .planner-step-page[data-step='01'] [data-field='PV2-01-003'],
 .planner-step-page[data-step='01'] [data-field='PV2-01-004'],
 .planner-step-page[data-step='01'] [data-field='PV2-01-005'] {
@@ -3650,13 +3649,6 @@
 .planner-step-page[data-step='01'] [data-field='PV2-01-004'] {
   order: 2;
   margin-top: 18px;
-}
-
-.planner-step-page[data-step='01'] [data-field='PV2-01-002'] {
-  order: 3;
-  margin-top: 22px;
-  padding-top: 20px;
-  border-top: 1px dashed #dfe5ee;
 }
 
 .planner-step-page[data-step='01'] [data-field='PV2-01-003'] {

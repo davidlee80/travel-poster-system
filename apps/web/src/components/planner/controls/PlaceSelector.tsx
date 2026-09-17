@@ -46,7 +46,7 @@ export interface PlaceSelectorValue {
   readonly text: string;
   readonly place_id?: string;
   readonly city?: string;
-  readonly country: string;
+  readonly country?: string;
   readonly custom?: boolean;
   readonly lat?: number;
   readonly lng?: number;
@@ -235,8 +235,9 @@ function PlaceSelectorModal({
                         name: value.text,
                         country:
                           citiesData.countries.find((c) => c.code === value.country)?.name ??
-                          value.country,
-                        countryCode: value.country,
+                          value.country ??
+                          '',
+                        countryCode: value.country ?? '',
                         lat: value.lat ?? 0,
                         lng: value.lng ?? 0,
                       }
@@ -285,6 +286,22 @@ function PlaceSelectorModal({
  * 只显示选中的结果(只读卡片),点击「选择地点」或「修改」按钮后弹出
  * 二级页面(模态框)进行选择或自定义输入。
  */
+/**
+ * 格式化地点显示文本。
+ *
+ * 有国家代码时显示「国家名 · 地点名」，只有地点名时显示地点名。
+ * 国家代码不在 citiesData 中时直接显示原始代码。
+ */
+function formatPlaceDisplay(value: Partial<PlaceSelectorValue> | undefined): string {
+  if (!value) return '';
+  const countryName = value.country
+    ? (citiesData.countries.find((c) => c.code === value.country)?.name ?? value.country)
+    : '';
+  const placeName = value.text ?? '';
+  if (countryName && placeName) return `${countryName} · ${placeName}`;
+  return placeName || countryName;
+}
+
 export function PlaceSelector({
   value,
   onChange,
@@ -298,14 +315,7 @@ export function PlaceSelector({
       ? (value as Partial<PlaceSelectorValue>)
       : undefined;
 
-  const displayText = currentValue
-    ? `${
-        currentValue.country
-          ? (citiesData.countries.find((c) => c.code === currentValue.country)?.name ??
-            currentValue.country)
-          : ''
-      }${currentValue.country && currentValue.text ? ' · ' : ''}${currentValue.text ?? ''}`
-    : '';
+  const displayText = formatPlaceDisplay(currentValue);
 
   return (
     <div
@@ -341,7 +351,7 @@ export function PlaceSelector({
 
       {modalOpen && (
         <PlaceSelectorModal
-          value={currentValue && currentValue.text && currentValue.country ? (currentValue as PlaceSelectorValue) : undefined}
+          value={currentValue as PlaceSelectorValue | undefined}
           onChange={onChange}
           onClose={() => setModalOpen(false)}
           id={`${id}-modal`}

@@ -307,7 +307,9 @@ function DestinationFields({
             onChange(undefined);
             return;
           }
-          if (typeof next === 'object' && 'text' in next && 'country' in next) {
+          // PlaceSelectorValue 的 text 是必填，country 是可选
+          // 合并时保留 destination 的额外字段（arrival_date/stay_days/arrival_transport）
+          if (typeof next === 'object' && 'text' in next) {
             onChange({
               ...destination,
               ...(next as Partial<DestinationValue>),
@@ -378,7 +380,20 @@ function DestinationFields({
               id={`${idPrefix}-stay-days`}
               aria-label={`${label}驻留天数`}
               min={1}
+              placeholder="1"
               value={destination.stay_days ?? ''}
+              onFocus={(event) => {
+                // 聚焦时如果为空，预填 1 帮助用户理解默认值
+                if (destination.stay_days === undefined) {
+                  event.target.value = '1';
+                }
+              }}
+              onBlur={(event) => {
+                // 失焦时如果值为空或无效，恢复为空（保持可选语义）
+                if (event.target.value === '' || Number(event.target.value) < 1) {
+                  event.target.value = '';
+                }
+              }}
               onChange={(event) =>
                 onChange(
                   packDestination(
