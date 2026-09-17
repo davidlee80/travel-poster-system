@@ -30,8 +30,16 @@ export interface PlannerSection {
   readonly fields: readonly PlannerFieldId[];
   /** 区块图标（可选）。图标名来自 `@tps/icon-library`，如 'map' / 'calendar' / 'flag' */
   readonly icon?: string;
-  /** 区块图标颜色（可选）。'blue' / 'yellow' / 'brown' / 'purple' / 'red' */
-  readonly iconColor?: 'blue' | 'yellow' | 'brown' | 'purple' | 'red';
+  /** 区块图标颜色（可选）。8 色语义体系，参考 subtitle.html 设计稿 */
+  readonly iconColor?:
+    | 'blue'
+    | 'green'
+    | 'orange'
+    | 'purple'
+    | 'red'
+    | 'cyan'
+    | 'indigo'
+    | 'gray';
   /** 相邻区块的布局组；相同组的连续卡片共享一个容器。 */
   readonly layoutGroup?: 'schedule' | 'preference';
 }
@@ -84,7 +92,7 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       intro: '年龄是事实，行动能力是功能性约束 —— 我们不用年龄替代能力判断。',
       fields: ['PV2-02-003', 'PV2-02-004', 'PV2-02-005'],
       icon: 'shield',
-      iconColor: 'blue',
+      iconColor: 'red',
     },
     { title: '要不要分开', fields: ['PV2-02-006'], icon: 'users', iconColor: 'blue' },
   ],
@@ -107,17 +115,17 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       title: '这笔钱包含什么，愿意多花在哪',
       fields: ['PV2-03-006'],
       icon: 'budget',
-      iconColor: 'blue',
+      iconColor: 'orange',
     },
   ],
 
   '04': [
-    { title: '整体强度', fields: ['PV2-04-001'], icon: 'chart-bar', iconColor: 'blue' },
+    { title: '整体强度', fields: ['PV2-04-001'], icon: 'chart-bar', iconColor: 'purple' },
     {
       title: '一天怎么过',
       fields: ['PV2-04-002'],
       icon: 'clock',
-      iconColor: 'blue',
+      iconColor: 'cyan',
       layoutGroup: 'schedule',
     },
     {
@@ -131,14 +139,14 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       title: '每天希望安排几个核心项目?',
       fields: ['PV2-04-004'],
       icon: 'star',
-      iconColor: 'yellow',
+      iconColor: 'orange',
       layoutGroup: 'preference',
     },
     {
       title: '每天希望留多少自由时间?',
       fields: ['PV2-04-005'],
       icon: 'clock',
-      iconColor: 'blue',
+      iconColor: 'cyan',
       layoutGroup: 'preference',
     },
     {
@@ -171,7 +179,7 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       title: '跨城怎么走',
       fields: ['PV2-05-001'],
       icon: 'bus',
-      iconColor: 'blue',
+      iconColor: 'green',
     },
     {
       title: '航班要求',
@@ -184,19 +192,19 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       title: '偏好舱等与座位',
       fields: ['PV2-05-003'],
       icon: 'seat',
-      iconColor: 'blue',
+      iconColor: 'cyan',
     },
     {
       title: '更喜欢什么时候出发/抵达？',
       fields: ['PV2-05-004'],
       icon: 'clock',
-      iconColor: 'blue',
+      iconColor: 'cyan',
     },
     {
       title: '到了当地怎么移动',
       fields: ['PV2-05-005'],
       icon: 'map-pin',
-      iconColor: 'blue',
+      iconColor: 'green',
     },
     {
       title: '自驾计划详情',
@@ -204,7 +212,7 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       icon: 'transport-drive',
       iconColor: 'blue',
     },
-    { title: '行李', fields: ['PV2-05-007'], icon: 'luggage', iconColor: 'blue' },
+    { title: '行李', fields: ['PV2-05-007'], icon: 'luggage', iconColor: 'purple' },
   ],
 
   /*
@@ -214,26 +222,26 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
    * 字段标题、这里省的是部件标签，契约问句都不动。
    */
   '06': [
-    { title: '住什么类型', fields: ['PV2-06-001'], icon: 'hotel', iconColor: 'blue' },
+    { title: '住什么类型', fields: ['PV2-06-001'], icon: 'hotel', iconColor: 'purple' },
     {
       title: '房间怎么配',
       intro: '房间配置需要能容纳全部旅行者，连通房需要供应商确认。',
       fields: ['PV2-06-002', 'PV2-06-003'],
       icon: 'bed',
-      iconColor: 'blue',
+      iconColor: 'purple',
     },
     {
       title: '每晚预算与位置取舍',
       fields: ['PV2-06-004', 'PV2-06-005'],
       icon: 'budget',
-      iconColor: 'blue',
+      iconColor: 'orange',
     },
     {
       title: '星级、设施与入住',
       intro: '住宿必须 / 偏好的设施',
       fields: ['PV2-06-006', 'PV2-06-007'],
       icon: 'star',
-      iconColor: 'blue',
+      iconColor: 'indigo',
     },
     {
       title: '睡眠和入住有什么硬要求？',
@@ -248,7 +256,7 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       title: '想吃什么',
       fields: ['PV2-07-001', 'PV2-07-002'],
       icon: 'food',
-      iconColor: 'blue',
+      iconColor: 'green',
     },
     {
       title: '过敏与安全',
@@ -257,7 +265,7 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       icon: 'shield',
       iconColor: 'red',
     },
-    { title: '怎么吃', fields: ['PV2-07-005'], icon: 'food', iconColor: 'blue' },
+    { title: '怎么吃', fields: ['PV2-07-005'], icon: 'food', iconColor: 'green' },
     {
       title: '想玩什么',
       fields: ['PV2-07-006', 'PV2-07-007', 'PV2-07-008', 'PV2-07-009'],
@@ -273,13 +281,13 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       intro: '我们只问旅行中需要怎样的照顾，不收诊断信息。',
       fields: ['PV2-08-001', 'PV2-08-002'],
       icon: 'shield',
-      iconColor: 'blue',
+      iconColor: 'cyan',
     },
     {
       title: '高风险活动与随行药品',
       fields: ['PV2-08-003', 'PV2-08-004'],
       icon: 'alert',
-      iconColor: 'blue',
+      iconColor: 'red',
     },
     {
       title: '证件',
@@ -292,7 +300,7 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
       title: '保险与安全阈值',
       fields: ['PV2-08-008', 'PV2-08-009'],
       icon: 'shield',
-      iconColor: 'blue',
+      iconColor: 'red',
     },
     {
       title: '不能移动的工作安排',

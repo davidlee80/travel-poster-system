@@ -4230,30 +4230,58 @@
   color: #e65d65;
 }
 
-/* 区块图标的颜色(按区块类型区分)：图标主色 + 同色系浅底方块 */
+/*
+ * 区块图标的颜色（8 色语义体系，参考 subtitle.html 设计稿）：
+ * 图标主色 + 同色系浅底方块（底色为主色 12% 透明度版本）。
+ *
+ * 语义对照（参考 docs/wiki/09-前端实现.md TP-9-02）：
+ * - blue    品牌蓝 #2563EB —— 核心/通用/主要操作（默认）
+ * - green   旅行绿 #10B981 —— 行程/出行/移动相关
+ * - orange  活力橙 #F59E0B —— 预算/提醒/重要关注
+ * - purple  品质紫 #8B5CF6 —— 住宿/体验/服务
+ * - red     安全红 #EF4444 —— 风险/安全/警示
+ * - cyan    信息蓝 #06B6D4 —— 信息/查询/帮助类
+ * - indigo  星级深蓝 #4338CA —— 收藏/评价/等级相关
+ * - gray    中性灰 #64748B —— 通用辅助/次要信息
+ */
 .planner-block__icon--blue {
-  color: #3b82f6;
-  background: #eff6ff;
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.12);
 }
 
-.planner-block__icon--yellow {
-  color: #d97706;
-  background: #fffbeb;
+.planner-block__icon--green {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
 }
 
-.planner-block__icon--brown {
-  color: #92400e;
-  background: #f3e8dd;
+.planner-block__icon--orange {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
 }
 
 .planner-block__icon--purple {
   color: #8b5cf6;
-  background: #f5f3ff;
+  background: rgba(139, 92, 246, 0.12);
 }
 
 .planner-block__icon--red {
-  color: #e65d65;
-  background: #fdecec;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.planner-block__icon--cyan {
+  color: #06b6d4;
+  background: rgba(6, 182, 212, 0.12);
+}
+
+.planner-block__icon--indigo {
+  color: #4338ca;
+  background: rgba(67, 56, 202, 0.12);
+}
+
+.planner-block__icon--gray {
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.12);
 }
 
 /* ── 第 4 步「旅行节奏」样式(按 step4.html,保留大字号)────────────────────────── */
