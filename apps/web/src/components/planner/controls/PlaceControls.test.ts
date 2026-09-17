@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// 日期联动测试不需要加载城市检索组件及其依赖。
+vi.mock('./PlaceSelector', () => ({ PlaceSelector: () => null }));
 
 import {
   addDays,
@@ -7,6 +10,7 @@ import {
   daysBetween,
   formatDate,
   parseDate,
+  reconcilePreviousStays,
   type DestinationValue,
 } from './PlaceControls';
 
@@ -169,6 +173,80 @@ describe('cascadeDestinations', () => {
   it('空列表安全返回', () => {
     expect(cascadeDestinations([], 0)).toEqual([]);
     expect(cascadeDestinations([{ text: '东京' }], 0)).toEqual([{ text: '东京' }]);
+  });
+});
+
+describe('reconcilePreviousStays', () => {
+  it('逐级缩短所有重叠的上级驻留时间，保留日期且不修改原数组', () => {
+    const list: DestinationValue[] = [
+      { text: '东京', arrival_date: '2026-03-01', stay_days: 5 },
+      { text: '大阪', arrival_date: '2026-03-04', stay_days: 4 },
+      { text: '京都', arrival_date: '2026-03-05', stay_days: 2 },
+    ];
+    const result = reconcilePreviousStays(list, 2);
+    expect(result.error).toBeUndefined();
+    expect(result.list).toEqual([
+      { ...list[0], stay_days: 3 },
+      { ...list[1], stay_days: 1 },
+      list[2],
+    ]);
+    expect(list.map((destination) => destination.stay_days)).toEqual([5, 4, 2]);
+  });
+
+  it.each([1, 2])('间隔大于或等于驻留时间 %i 天时不增加驻留时间', (stay_days) => {
+    const list = [
+      { text: '东京', arrival_date: '2026-03-01', stay_days },
+      { text: '大阪', arrival_date: '2026-03-03' },
+    ];
+    expect(reconcilePreviousStays(list, 1)).toEqual({ list });
+  });
+
+  it.each(['2026-03-01', '2026-02-28'])('同日或倒序抵达 %s 时提示不合理', (arrival_date) => {
+    const list = [
+      { text: '东京', arrival_date: '2026-03-01', stay_days: 2 },
+      { text: '大阪', arrival_date },
+    ];
+    const result = reconcilePreviousStays(list, 1);
+    expect(result.error).toContain('选中的时间不合理');
+    expect(result.error).toContain('最小驻留时间 1 天');
+    expect(result.list).toEqual(list);
+  });
+
+  it('更上一级不合法时不保留已经计算出的部分调整', () => {
+    const list = [
+      { text: '东京', arrival_date: '2026-03-04', stay_days: 2 },
+      { text: '大阪', arrival_date: '2026-03-03', stay_days: 5 },
+      { text: '京都', arrival_date: '2026-03-05' },
+    ];
+    const result = reconcilePreviousStays(list, 2);
+    expect(result.error).toContain('东京');
+    expect(result.list).toEqual(list);
+  });
+
+  it('未填写驻留天数时仍校验最小日期间隔', () => {
+    expect(
+      reconcilePreviousStays(
+        [
+          { text: '东京', arrival_date: '2026-03-01' },
+          { text: '大阪', arrival_date: '2026-03-01' },
+        ],
+        1,
+      ).error,
+    ).toContain('选中的时间不合理');
+  });
+
+  it('缺少日期的相邻行跳过，但继续检查更上一级', () => {
+    const list = [
+      { text: '东京', arrival_date: '2026-03-01', stay_days: 5 },
+      { text: '大阪', arrival_date: '2026-03-03' },
+      { text: '京都' },
+      { text: '奈良', arrival_date: '2026-03-05' },
+    ];
+    const result = reconcilePreviousStays(list, 3);
+    expect(result.error).toBeUndefined();
+    expect(result.list[0]?.stay_days).toBe(2);
+    expect(result.list.slice(1)).toEqual(list.slice(1));
+    expect(reconcilePreviousStays(list, 0)).toEqual({ list });
   });
 });
 

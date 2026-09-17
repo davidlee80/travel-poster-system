@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 import { asList } from '@/lib/planner/field-io';
 
 import { Icon } from '@/components/Icon';
@@ -230,6 +232,34 @@ export function cascadeAfterRemoval(
   // 从被删除位置的前一行开始级联（如果前一行存在）
   const startIndex = Math.max(0, removedIndex - 1);
   return cascadeDestinations(list, startIndex);
+}
+
+/** 手动修改抵达日期时逐级向前校验；全部合法后才提交调整。 */
+export function reconcilePreviousStays(
+  list: readonly (DestinationValue | undefined)[],
+  changedIndex: number,
+): { list: (DestinationValue | undefined)[]; error?: string } {
+  const result = [...list];
+  for (let i = changedIndex - 1; i >= 0; i--) {
+    const previous = result[i];
+    const next = result[i + 1];
+    const previousArrival = parseDate(previous?.arrival_date);
+    const nextArrival = parseDate(next?.arrival_date);
+    if (previous === undefined || previousArrival === undefined || nextArrival === undefined) {
+      continue;
+    }
+    const gap = daysBetween(previousArrival, nextArrival);
+    if (gap < 1) {
+      return {
+        list: [...list],
+        error: `选中的时间不合理：第 ${i + 1} 个目的地「${previous.text}」的驻留时间不足最小驻留时间 1 天，请重新选择抵达日期。`,
+      };
+    }
+    if (previous.stay_days !== undefined && gap < previous.stay_days) {
+      result[i] = { ...previous, stay_days: gap };
+    }
+  }
+  return { list: result };
 }
 
 function PlaceFields({
@@ -569,6 +599,7 @@ export function DestinationList({
 }: ControlProps): React.ReactElement {
   const destinations = asList(value).map(asDestination);
   const max = part.max ?? 5;
+  const [feedback, setFeedback] = useState<{ text: string; error: boolean }>();
 
   const write = (next: readonly (DestinationValue | undefined)[]): void => {
     const cleaned = next.filter((entry): entry is DestinationValue => entry !== undefined);
@@ -576,8 +607,28 @@ export function DestinationList({
   };
 
   const handleDestinationChange = (index: number, next: DestinationValue | undefined): void => {
+    setFeedback(undefined);
     const list: (DestinationValue | undefined)[] = [...destinations];
     list[index] = next;
+
+    if (next?.arrival_date && next.arrival_date !== destinations[index]?.arrival_date) {
+      const reconciled = reconcilePreviousStays(list, index);
+      if (reconciled.error !== undefined) {
+        setFeedback({ text: reconciled.error, error: true });
+        return;
+      }
+      const cascaded = cascadeDestinations(reconciled.list, index);
+      const adjustments = cascaded.flatMap((destination, i) =>
+        destination !== undefined && destination.stay_days !== destinations[i]?.stay_days
+          ? [`第 ${i + 1} 个目的地「${destination.text}」调整为 ${destination.stay_days} 天`]
+          : [],
+      );
+      if (adjustments.length > 0) {
+        setFeedback({ text: `驻留时间已经调整：${adjustments.join('；')}。`, error: false });
+      }
+      write(cascaded);
+      return;
+    }
 
     // 规则 1：任何字段变化时都检查联动
     // 规则 2：冲突检测在 cascadeDestinations 内部处理
@@ -587,6 +638,7 @@ export function DestinationList({
   };
 
   const handleAddDestination = (): void => {
+    setFeedback(undefined);
     // 规则 3：新增目的地时自动根据上一行推算抵达日期
     const last = destinations[destinations.length - 1];
     const autoArrival =
@@ -604,6 +656,7 @@ export function DestinationList({
   };
 
   const handleRemoveDestination = (index: number): void => {
+    setFeedback(undefined);
     const list = destinations.filter((_, i) => i !== index);
 
     // 规则 4：删除目的地后重新计算后续所有日期
@@ -648,6 +701,14 @@ export function DestinationList({
           </span>
           <span>{part.add_label ?? '添加目的地 / 备选目的地'}</span>
         </button>
+      )}
+      {feedback !== undefined && (
+        <p
+          className={feedback.error ? 'planner-error' : 'planner-hint'}
+          role={feedback.error ? 'alert' : 'status'}
+        >
+          {feedback.text}
+        </p>
       )}
     </div>
   );
