@@ -77,7 +77,47 @@ const EXPECTED = {
  * 它们不参与 12.1/12.2 的派生映射，因此不进 EXPECTED 的三组分类，
  * 但同样受「自包含、统一 viewBox」校验。
  */
-const EXPECTED_EXTRA = ['seat', 'crown', 'gem', 'thumb-up', 'bus', 'van', 'window', 'aisle', 'repeat'];
+const EXPECTED_EXTRA = [
+  'seat',
+  'crown',
+  'gem',
+  'thumb-up',
+  'bus',
+  'van',
+  'window',
+  'aisle',
+  'repeat',
+  // 选项按钮（第 7 步吃好也玩好，step7-design.png）
+  'bowl',
+  'wine',
+  'noodles',
+  'basket',
+  'cupcake',
+  'cocktail',
+  'chopsticks',
+  'fish',
+  'utensils',
+  'leaf',
+  'sprout',
+  'moon-star',
+  'star-of-david',
+  'chili',
+  'no-alcohol',
+  'dots',
+  'circle-check',
+  'circle-alert',
+  'circle-help',
+  'calendar-check',
+  'queue',
+  'no-queue',
+  'landmark',
+  'palette',
+  'hot-spring',
+  'roller-coaster',
+  'paw',
+  'hiking-boot',
+  'plus',
+];
 
 /**
  * 实心填充（fill）变体：第 5 步参考稿的选项按钮图标是实心风格，
@@ -154,6 +194,9 @@ const EXPECTED_FILL = [
   'food-fill',
   'camera-fill',
   'flag-fill',
+  // 第 7 步区块标题之外的实心变体（必去清单 / 排除清单）
+  'heart-fill',
+  'close-circle-fill',
 ];
 
 const EXPECTED_ALL = [

@@ -119,6 +119,51 @@ const OPTION_ICON_MAP: Record<string, OptionIconSpec> = {
   LATE_CHECK_IN: { icon: 'key-fill', tone: 'blue' },
   EARLY_CHECK_IN: { icon: 'sunrise-fill', tone: 'amber' },
   LATE_CHECK_OUT: { icon: 'door-open-fill', tone: 'blue' },
+  // ── 第 7 步：吃好也玩好（step7-design.png，描边图标 + 语义色）──
+  // 餐饮体验（PV2-07-001）
+  LOCAL_SPECIALTY: { icon: 'bowl', tone: 'amber' },
+  FINE_DINING: { icon: 'wine', tone: 'purple' },
+  STREET_FOOD: { icon: 'noodles', tone: 'orange' },
+  MARKET: { icon: 'basket', tone: 'green' },
+  CAFE_DESSERT: { icon: 'cupcake', tone: 'red' },
+  BAR_IZAKAYA: { icon: 'cocktail', tone: 'purple' },
+  CHINESE: { icon: 'chopsticks', tone: 'red' },
+  JAPANESE: { icon: 'fish', tone: 'blue' },
+  WESTERN: { icon: 'utensils', tone: 'slate' },
+  // 饮食方式（PV2-07-002）
+  VEGETARIAN: { icon: 'leaf', tone: 'green' },
+  VEGAN: { icon: 'sprout', tone: 'green' },
+  HALAL: { icon: 'moon-star', tone: 'green' },
+  KOSHER: { icon: 'star-of-david', tone: 'blue' },
+  NO_SPICY: { icon: 'chili', tone: 'red' },
+  ALCOHOL_FREE: { icon: 'no-alcohol', tone: 'red' },
+  OTHER: { icon: 'dots', tone: 'slate' },
+  // 是否存在食物过敏（PV2-07-003）
+  NO: { icon: 'circle-check', tone: 'green' },
+  YES: { icon: 'circle-alert', tone: 'red' },
+  UNSURE: { icon: 'circle-help', tone: 'slate' },
+  // 怎么吃（PV2-07-005）
+  MOSTLY_CASUAL: { icon: 'budget', tone: 'slate' },
+  MODERATE: { icon: 'budget', tone: 'amber' },
+  QUALITY_FIRST: { icon: 'budget', tone: 'purple' },
+  WILL_BOOK_AHEAD: { icon: 'calendar-check', tone: 'blue' },
+  WILL_QUEUE: { icon: 'queue', tone: 'blue' },
+  AVOID_QUEUE: { icon: 'no-queue', tone: 'slate' },
+  // 兴趣主题（PV2-07-006）
+  'interest.history_culture': { icon: 'landmark', tone: 'slate' },
+  'interest.nature': { icon: 'mountain-view-fill', tone: 'green' },
+  'interest.food': { icon: 'food', tone: 'amber' },
+  'interest.shopping': { icon: 'shopping-bag-fill', tone: 'blue' },
+  'interest.art_museum': { icon: 'palette', tone: 'purple' },
+  'interest.nightlife': { icon: 'moon-fill', tone: 'purple' },
+  'interest.photography': { icon: 'camera', tone: 'blue' },
+  'interest.family_kids': { icon: 'users-fill', tone: 'blue' },
+  'interest.city_walk': { icon: 'transport-walk-fill', tone: 'green' },
+  'interest.cafe': { icon: 'cupcake', tone: 'amber' },
+  'interest.hot_spring': { icon: 'hot-spring', tone: 'blue' },
+  'interest.theme_park': { icon: 'roller-coaster', tone: 'red' },
+  'interest.zoo_aquarium': { icon: 'paw', tone: 'blue' },
+  'interest.light_hiking': { icon: 'hiking-boot', tone: 'green' },
 };
 
 /** 选项图标。查不到时返回 null —— 调用方退化为纯文字按钮 */
