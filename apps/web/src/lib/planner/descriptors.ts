@@ -162,7 +162,7 @@ export const PROJECTION_ONLY_CODES = [
   'accommodation.single_base',
 ] as const;
 
-export const TRISTATE_CODES = {
+export const TAG_CODES = {
   'transport.intercity_modes': INTERCITY_MODE_CODES,
   'transport.local_modes': LOCAL_MODE_CODES,
   'lodging.types': LODGING_TYPE_CODES,
@@ -184,9 +184,9 @@ export const CONTROL_PRIMITIVES = [
   'choice',
   'check',
   'check-other',
+  'check-tag',
   'rank',
   'rank-other',
-  'tristate',
   'counter',
   'number',
   'slider',
@@ -227,15 +227,6 @@ export interface FieldPart {
    * 两者不能只靠选项数组长度区分，因此由描述符显式声明入口。
    */
   readonly empty_label?: string;
-  /**
-   * 三态标签的两段变体（预算优先项与第 5 步的两个交通字段）。
-   *
-   * 默认四段循环是「未选 → 偏好 → 必须 → 不要」；这些字段只保留
-   * 「未选 ⇄ 偏好」两段 —— 不渲染 ★♥× 图例与状态图标，写入恒为 `PREFER`，
-   * 值形状仍是 `{code, stance}[]`（schema 契约不变，旧草稿里的
-   * `REQUIRE`/`EXCLUDE` 值按「已选」显示，点一次清空）。
-   */
-  readonly two_state?: true;
   /** 兄弟键选中某个值时才显示。为空时恒显示 */
   readonly requires?: { readonly key: string; readonly value: string };
   /** `object-list` 每行的部件 */
@@ -419,10 +410,9 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
       },
       {
         key: 'priorities',
-        primitive: 'tristate',
+        primitive: 'check-tag',
         label: '哪些项目愿意多花',
         options: BUDGET_PRIORITY_CODES,
-        two_state: true,
       },
     ],
   },
@@ -441,7 +431,7 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   'PV2-04-008': one('check', { options: RISK_EXCLUSION_VALUES }),
 
   // ── 05 路上怎么走 ────────────────────────────────────────
-  'PV2-05-001': one('tristate', { options: INTERCITY_MODE_CODES, two_state: true }),
+  'PV2-05-001': one('check-tag', { options: INTERCITY_MODE_CODES }),
   /*
    * 第 5 步航班三个字段（002/003/004）在参考稿里各成一张卡，
    * 区块标题就是问句（sections.ts 的组名），字段标题不再重复 —— `hide_question`。
@@ -485,7 +475,7 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
       },
     ],
   },
-  'PV2-05-005': one('tristate', { options: LOCAL_MODE_CODES, two_state: true }),
+  'PV2-05-005': one('check-tag', { options: LOCAL_MODE_CODES }),
   'PV2-05-006': {
     kind: 'parts',
     reported: true,
@@ -523,7 +513,11 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
   },
 
   // ── 06 住得更舒服 ────────────────────────────────────────
-  'PV2-06-001': one('tristate', { options: LODGING_TYPE_CODES }),
+  /*
+   * PV2-06-001 用两段式选择（参考稿 step6-design.png 只表达「要 / 不要」），
+   * 与第 5 步交通字段同一处理：值形状为 `string[]`，触发器照旧读数组包含。
+   */
+  'PV2-06-001': one('check-tag', { options: LODGING_TYPE_CODES }),
   'PV2-06-002': one('counter', { min: 1, max: 10, truncates: 'lodging.room_configuration' }),
   'PV2-06-003': {
     kind: 'parts',
@@ -558,14 +552,14 @@ export const FIELD_DESCRIPTORS: Record<PlannerFieldId, FieldDescriptor> = {
       },
     ],
   },
-  'PV2-06-007': one('tristate', { options: LODGING_AMENITY_CODES }),
+  'PV2-06-007': one('check-tag', { options: LODGING_AMENITY_CODES }),
   'PV2-06-008': {
     kind: 'parts',
     parts: [
       {
         key: 'needs',
         primitive: 'check',
-        label: '睡眠与入住要求',
+        /* 无 label：该字段独占「睡眠和入住有什么硬要求？」区块，区块标题即问句 */
         options: SLEEP_CHECKIN_NEED_VALUES,
       },
       {

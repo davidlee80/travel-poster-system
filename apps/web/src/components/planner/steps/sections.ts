@@ -207,13 +207,19 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
     { title: '行李', fields: ['PV2-05-007'], icon: 'luggage', iconColor: 'blue' },
   ],
 
+  /*
+   * 第 6 步的分组对齐 step6-design.png 参考稿：「睡眠和入住有什么硬要求？」
+   * 独占一张卡（卡的标题就是问句），因此 PV2-06-008 的 check 部件不再带
+   * label —— 与第 5 步 002/004 的 hide_question 同一思路，只是那里藏的是
+   * 字段标题、这里省的是部件标签，契约问句都不动。
+   */
   '06': [
-    { title: '住什么类型', fields: ['PV2-06-001'], icon: 'briefcase', iconColor: 'blue' },
+    { title: '住什么类型', fields: ['PV2-06-001'], icon: 'hotel', iconColor: 'blue' },
     {
       title: '房间怎么配',
       intro: '房间配置需要能容纳全部旅行者，连通房需要供应商确认。',
       fields: ['PV2-06-002', 'PV2-06-003'],
-      icon: 'users',
+      icon: 'bed',
       iconColor: 'blue',
     },
     {
@@ -224,9 +230,16 @@ export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
     },
     {
       title: '星级、设施与入住',
-      fields: ['PV2-06-006', 'PV2-06-007', 'PV2-06-008'],
+      intro: '住宿必须 / 偏好的设施',
+      fields: ['PV2-06-006', 'PV2-06-007'],
       icon: 'star',
       iconColor: 'blue',
+    },
+    {
+      title: '睡眠和入住有什么硬要求？',
+      fields: ['PV2-06-008'],
+      icon: 'moon-stars',
+      iconColor: 'purple',
     },
   ],
 

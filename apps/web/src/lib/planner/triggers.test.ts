@@ -251,15 +251,17 @@ describe('S4 国际旅行（D-02 跨境链）', () => {
     expect(isTriggered(international, 'PV2-05-003')).toBe(true);
   });
 
-  it('用户明确排除飞机时，跨境不再强行认定涉及航空（4.1 的优先级）', () => {
+  it('跨境默认涉及航空 —— 本产品跨境场景基本都要飞', () => {
+    /*
+     * 两段式选择（要 / 不要）下 `intercity_modes` 是 `string[]`，
+     * 没有「明确排除」态。未选飞机时跨境仍按涉及航空处理 ——
+     * 跨境旅行默认需要航班，用户可在第 5 步航班卡里细化要求。
+     */
     const noFlight = answer(international, [
-      [
-        'PV2-05-001',
-        { transport: { intercity_modes: [{ code: 'transport.flight', stance: 'EXCLUDE' }] } },
-      ],
+      ['PV2-05-001', { transport: { intercity_modes: [] } }],
     ]);
-    expect(buildTriggerContext(noFlight.answers).involvesAir).toBe(false);
-    expect(isTriggered(noFlight, 'PV2-05-002')).toBe(false);
+    expect(buildTriggerContext(noFlight.answers).involvesAir).toBe(true);
+    expect(isTriggered(noFlight, 'PV2-05-002')).toBe(true);
   });
 
   it('国家未知时不触发跨境 —— 误触发会让国内游用户被问护照', () => {
@@ -284,7 +286,7 @@ describe('S5 自驾（D-03 自驾链）', () => {
     const intercity = answer(DOMESTIC_TWO_ADULTS, [
       [
         'PV2-05-001',
-        { transport: { intercity_modes: [{ code: 'transport.self_drive', stance: 'REQUIRE' }] } },
+        { transport: { intercity_modes: ['transport.self_drive'] } },
       ],
     ]);
     expect(isTriggered(intercity, 'PV2-05-006')).toBe(true);
@@ -292,17 +294,17 @@ describe('S5 自驾（D-03 自驾链）', () => {
     const local = answer(DOMESTIC_TWO_ADULTS, [
       [
         'PV2-05-005',
-        { transport: { local_modes: [{ code: 'transport.self_drive', stance: 'PREFER' }] } },
+        { transport: { local_modes: ['transport.self_drive'] } },
       ],
     ]);
     expect(isTriggered(local, 'PV2-05-006')).toBe(true);
   });
 
-  it('把自驾标成「不要」不展开自驾详情', () => {
+  it('未选自驾不展开自驾详情', () => {
     const excluded = answer(DOMESTIC_TWO_ADULTS, [
       [
         'PV2-05-001',
-        { transport: { intercity_modes: [{ code: 'transport.self_drive', stance: 'EXCLUDE' }] } },
+        { transport: { intercity_modes: [] } },
       ],
     ]);
     expect(isTriggered(excluded, 'PV2-05-006')).toBe(false);

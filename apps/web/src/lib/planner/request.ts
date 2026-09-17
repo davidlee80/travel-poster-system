@@ -7,7 +7,6 @@ import {
   type ExistingBooking,
   type PaceLevel,
   type PlannerProfileInput,
-  type PlannerStance,
   type TravelRequestUIInput,
 } from '@tps/schemas';
 
@@ -260,19 +259,11 @@ function precedenceOf(condition: ProjectedCondition): number {
   return 2;
 }
 
-function stanceConditions(
-  selections: readonly { readonly code: string; readonly stance: PlannerStance }[] | undefined,
-): readonly ProjectedCondition[] {
-  return (selections ?? []).map((entry) =>
-    conditionToContract(entry.code as ConditionCode, entry.stance),
-  );
-}
-
 /** 从一张映射表投影一组枚举值。域为 `accessibility` / `diet` 时 `conditionToContract` 自动升 MUST */
 function mapped(
   values: readonly string[] | undefined,
   table: Record<string, ConditionCode>,
-  stance: PlannerStance,
+  stance: 'PREFER' | 'REQUIRE',
 ): readonly ProjectedCondition[] {
   return (values ?? []).flatMap((value) => {
     const code = table[value];
@@ -291,12 +282,12 @@ function mapped(
 export function projectConditions(answers: PlannerProfileInput): readonly ProjectedCondition[] {
   const out: ProjectedCondition[] = [];
 
-  /* 四组三态标签：用户的态直接就是契约的 mode/value */
-  out.push(...stanceConditions(answers.transport?.intercity_modes));
-  out.push(...stanceConditions(answers.transport?.local_modes));
-  out.push(...stanceConditions(answers.lodging?.types));
-  out.push(...stanceConditions(answers.lodging?.amenities));
-  out.push(...stanceConditions(answers.budget?.scope_and_priorities?.priorities));
+  /* 五组两段式选择标签：用户的选中直接就是契约的 PREFER */
+  out.push(...(answers.transport?.intercity_modes ?? []).map((code) => conditionToContract(code as ConditionCode, 'PREFER')));
+  out.push(...(answers.transport?.local_modes ?? []).map((code) => conditionToContract(code as ConditionCode, 'PREFER')));
+  out.push(...(answers.lodging?.types ?? []).map((code) => conditionToContract(code as ConditionCode, 'PREFER')));
+  out.push(...(answers.lodging?.amenities ?? []).map((code) => conditionToContract(code as ConditionCode, 'PREFER')));
+  out.push(...(answers.budget?.scope_and_priorities?.priorities ?? []).map((code) => conditionToContract(code as ConditionCode, 'PREFER')));
 
   /*
    * 兴趣主题：PREFER。Top 3 的排序在 conditions[] 里表达不了（没有 rank），

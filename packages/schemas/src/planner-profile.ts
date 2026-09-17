@@ -50,25 +50,15 @@ import { DateStringSchema, NonEmptyStringSchema, TimeStringSchema } from './prim
 // ── 共用小类型 ──────────────────────────────────────────────
 
 /**
- * 三态。与 `apps/web` 的 `ConditionStance` 同名同值 —— 那里是界面态，
- * 这里是契约值，投影关系见 `conditionToContract`。
- */
-export const PLANNER_STANCE_VALUES = ['PREFER', 'REQUIRE', 'EXCLUDE'] as const;
-export const PlannerStanceSchema = z.enum(PLANNER_STANCE_VALUES);
-export type PlannerStance = (typeof PLANNER_STANCE_VALUES)[number];
-
-/**
- * 一个三态标签的选择。
+ * 两段式选择的值。与 `apps/web` 的 `check-tag` 控件对应。
+ *
+ * 选项只有「要 / 不要」两个状态（选中 / 未选中）。值形状为 `string[]`
+ * （选中的选项代码数组），不再使用 `{code, stance}` 对象。
  *
  * `code` 用 `ConditionCodeSchema`（域前缀正则）而不是内置字面量联合：
  * 配置中心可以发布七个既有域下的新码，写死联合会让新发布的标签在这里被拒，
  * 而症状是「配置改完了，前端能点，提交报 REQ_SCHEMA_INVALID」。
  */
-export const StanceSelectionSchema = z.object({
-  code: ConditionCodeSchema,
-  stance: PlannerStanceSchema,
-});
-export type StanceSelection = z.infer<typeof StanceSelectionSchema>;
 
 /**
  * 带「其他」补充文字的多选。
@@ -420,7 +410,7 @@ export const PlannerBudgetSchema = z.object({
   scope_and_priorities: z
     .object({
       included_items: z.array(BudgetScopeItemSchema).max(6),
-      priorities: z.array(StanceSelectionSchema).max(20),
+      priorities: z.array(ConditionCodeSchema).max(20),
     })
     .optional(),
 });
@@ -546,7 +536,7 @@ export type LargeLuggage = (typeof LARGE_LUGGAGE_VALUES)[number];
 
 export const PlannerTransportSchema = z.object({
   /** PV2-05-001 */
-  intercity_modes: z.array(StanceSelectionSchema).max(10).optional(),
+  intercity_modes: z.array(ConditionCodeSchema).max(10).optional(),
   /** PV2-05-002 */
   flight_constraints: z
     .object({
@@ -569,7 +559,7 @@ export const PlannerTransportSchema = z.object({
     })
     .optional(),
   /** PV2-05-005 */
-  local_modes: z.array(StanceSelectionSchema).max(10).optional(),
+  local_modes: z.array(ConditionCodeSchema).max(10).optional(),
   /**
    * PV2-05-006 自驾。
    *
@@ -647,7 +637,7 @@ export type RoomConfig = z.infer<typeof RoomConfigSchema>;
 
 export const PlannerLodgingSchema = z.object({
   /** PV2-06-001 */
-  types: z.array(StanceSelectionSchema).max(10).optional(),
+  types: z.array(ConditionCodeSchema).max(10).optional(),
   /** PV2-06-002 */
   rooms_count: z.number().int().min(1).max(10).optional(),
   /** PV2-06-003 */
@@ -664,7 +654,7 @@ export const PlannerLodgingSchema = z.object({
     })
     .optional(),
   /** PV2-06-007 */
-  amenities: z.array(StanceSelectionSchema).max(20).optional(),
+  amenities: z.array(ConditionCodeSchema).max(20).optional(),
   /** PV2-06-008 */
   sleep_checkin_needs: z
     .object({
@@ -694,8 +684,8 @@ export type FoodExperience = (typeof FOOD_EXPERIENCE_VALUES)[number];
 /**
  * 饮食方式。
  *
- * 规范 4.2 明确：宗教与饮食要求**不得使用三态循环**。因此这是普通多选而不是
- * `StanceSelection` —— 「偏好清真」不是一个有意义的表达。
+ * 规范 4.2 明确：宗教与饮食要求**不得使用三态循环**。因此这是普通多选 ——
+ * 「偏好清真」不是一个有意义的表达。
  */
 export const DIETARY_REQUIREMENT_VALUES = [
   'VEGETARIAN',
@@ -767,7 +757,7 @@ export const MustDoItemSchema = z.object({
 export type MustDoItem = z.infer<typeof MustDoItemSchema>;
 
 export const PlannerInterestsSchema = z.object({
-  /** PV2-07-006。值是条件码，理由同 StanceSelectionSchema.code */
+  /** PV2-07-006。值是条件码，理由同 check-tag 的选项代码 */
   tags: z.array(ConditionCodeSchema).max(30).optional(),
   /** PV2-07-007。必须是 `tags` 的子集（由 N-xx 校验）；数组顺序即排名 */
   top3: z.array(ConditionCodeSchema).max(3).optional(),

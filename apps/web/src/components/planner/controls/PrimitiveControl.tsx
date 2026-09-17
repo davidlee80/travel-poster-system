@@ -8,7 +8,7 @@ import { optionFieldKey, resolutionTarget } from '@/lib/planner/config-binding';
 import type { FieldPart } from '@/lib/planner/descriptors';
 import { asList } from '@/lib/planner/field-io';
 
-import { CheckGroup, ChoiceRow, RankSelect, TriStateTag } from './ChoiceControls';
+import { CheckGroup, CheckTag, ChoiceRow, RankSelect } from './ChoiceControls';
 import { DestinationList } from './PlaceControls';
 import { PlaceSelector } from './PlaceSelector';
 import {
@@ -52,8 +52,8 @@ export function PrimitiveControl(props: ControlProps): React.ReactElement {
       return <RankSelect {...props} wrapped={false} />;
     case 'rank-other':
       return <RankSelect {...props} wrapped />;
-    case 'tristate':
-      return <TriStateTag {...props} />;
+    case 'check-tag':
+      return <CheckTag {...props} />;
     case 'counter':
       return <Counter {...props} />;
     case 'number':

@@ -4542,3 +4542,191 @@
     max-width: calc(100% - 50px);
   }
 }
+
+/* ── 第 6 步「住得更舒服」（step6-design.png 参考稿）────────────────────── */
+
+/*
+ * 只调整颜色、阴影、间距与排版：选项按钮四项尺寸（43px / 10px 15px / 12px /
+ * 13px）与区块图标尺寸（40px / 30px）沿用全局标准，本段一律不覆盖。
+ */
+.planner-step-page[data-step='06'] {
+  background: #f6f8fc;
+}
+
+/* 顶部步骤胶囊：「06 · 住得更舒服」 */
+.planner-step-page[data-step='06'] .planner-page-head__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border: 1px solid #d3e2fd;
+  border-radius: 999px;
+  background: #eaf2ff;
+  color: #2876ff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.planner-step-page[data-step='06'] .planner-page-head__title {
+  margin: 8px 0 6px;
+  color: #1f2d3d;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+}
+
+.planner-step-page[data-step='06'] .planner-page-head__desc {
+  color: #65718d;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.planner-step-page[data-step='06'] .planner-page-head__badge {
+  border: 1px solid #e4eaf3;
+  background: #fff;
+  color: #8791a6;
+}
+
+/* 「必填项」提示条：浅绿圆角条 + 绿色徽标 */
+.planner-step-page[data-step='06'] .planner-required-legend {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border: 1px solid #ddefe6;
+  border-radius: 10px;
+  background: #f0f9f4;
+  color: #6b7a90;
+  font-size: 12px;
+}
+
+.planner-step-page[data-step='06'] .planner-required-legend .planner-badge--required {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #54a58d;
+  color: #fff;
+  font-size: 11px;
+}
+
+/* 白色区块卡 */
+.planner-step-page[data-step='06'] .planner-block {
+  margin-top: 12px;
+  padding: 16px 18px;
+  border: 1px solid #edf0f6;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(30 50 90 / 4%);
+}
+
+.planner-step-page[data-step='06'] .planner-block:first-of-type {
+  margin-top: 0;
+}
+
+.planner-step-page[data-step='06'] .planner-block__title {
+  gap: 10px;
+  margin: 0 0 4px;
+  color: #1f2d3d;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* 图标尺寸继承全局 40px 标准，这里只控对齐 */
+.planner-step-page[data-step='06'] .planner-block__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.planner-step-page[data-step='06'] .planner-block__intro {
+  margin: 2px 0 12px;
+  color: #8791a6;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 选项按钮：未选白底灰边，选中蓝色（与参考稿一致） */
+.planner-step-page[data-step='06'] .planner-choice {
+  border-color: #e2e8f0;
+  background: #fff;
+  color: #3c4657;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.planner-step-page[data-step='06'] .planner-choice:hover {
+  border-color: #a4beff;
+  background: #f6faff;
+}
+
+.planner-step-page[data-step='06'] .planner-choice--on {
+  border-color: #a4beff;
+  background: #f0f5ff;
+  color: #2876ff;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 2px #ffffffaa;
+}
+
+/* 两段式标签（check-tag）与选项按钮同一视觉语言 */
+.planner-step-page[data-step='06'] .planner-tag {
+  border-color: #e2e8f0;
+  background: #fff;
+  color: #3c4657;
+}
+
+.planner-step-page[data-step='06'] .planner-tag:hover {
+  border-color: #a4beff;
+  background: #f6faff;
+}
+
+.planner-step-page[data-step='06'] .planner-tag--prefer {
+  border-color: #a4beff;
+  background: #f0f5ff;
+  color: #2876ff;
+  font-weight: 600;
+}
+
+/* 房间计数器与 Repeater 微调 */
+.planner-step-page[data-step='06'] .planner-counter {
+  gap: 12px;
+}
+
+.planner-step-page[data-step='06'] .planner-counter .planner-icon-button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  color: #2876ff;
+  font-size: 15px;
+}
+
+.planner-step-page[data-step='06'] .planner-counter .planner-icon-button:hover:not(:disabled) {
+  border-color: #a4beff;
+  background: #f0f5ff;
+}
+
+.planner-step-page[data-step='06'] .planner-counter .planner-icon-button:disabled {
+  color: #b8c1d1;
+  background: #f8fafc;
+}
+
+.planner-step-page[data-step='06'] .planner-counter__value {
+  min-width: 30px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1f2d3d;
+}
+
+.planner-step-page[data-step='06'] .planner-repeater {
+  border-color: #edf0f6;
+  border-radius: 12px;
+  background: #fafbfd;
+}
+
+/* 每晚预算区间的输入框与参考稿一致留白 */
+.planner-step-page[data-step='06'] [data-field='PV2-06-004'] .planner-range {
+  max-width: 420px;
+}

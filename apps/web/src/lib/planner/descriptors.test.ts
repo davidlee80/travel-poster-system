@@ -7,7 +7,7 @@ import {
 } from '@tps/schemas';
 import { describe, expect, it } from 'vitest';
 
-import { CONTROL_PRIMITIVES, FIELD_DESCRIPTORS, PROJECTION_ONLY_CODES, TRISTATE_CODES, declaredOptionValues, type FieldPart } from './descriptors';
+import { CONTROL_PRIMITIVES, FIELD_DESCRIPTORS, PROJECTION_ONLY_CODES, TAG_CODES, declaredOptionValues, type FieldPart } from './descriptors';
 import { OPTION_LABEL } from './field-spec';
 import { STEP_SECTIONS } from '../../components/planner/steps/sections';
 
@@ -86,6 +86,9 @@ describe('部件声明自洽', () => {
      * 单部件字段可以 `key: null` 且不带标签（区块标题就是那个问句）。
      * 多部件字段里 `key: null` 会让两个部件写到同一个位置，
      * 而缺标签会让屏读用户听到两个没有名字的控件（违反规范 20 的「显式 label」）。
+     *
+     * 例外：PV2-06-008 的 `needs` 部件。该字段独占「睡眠和入住有什么硬要求？」
+     * 区块，区块标题就是问句，因此部件标签省略（与第 5 步 hide_question 同思路）。
      */
     const problems: string[] = [];
     for (const spec of PLANNER_FIELDS) {
@@ -93,7 +96,9 @@ describe('部件声明自洽', () => {
       if (descriptor.kind !== 'parts' || descriptor.parts.length < 2) continue;
       for (const part of descriptor.parts) {
         if (part.key === null) problems.push(`${spec.field_id} 有多个部件但其中一个 key 为 null`);
-        if (part.label === undefined) problems.push(`${spec.field_id}.${part.key ?? ''} 缺标签`);
+        if (part.label === undefined && !(spec.field_id === 'PV2-06-008' && part.key === 'needs')) {
+          problems.push(`${spec.field_id}.${part.key ?? ''} 缺标签`);
+        }
       }
     }
     expect(problems).toEqual([]);
@@ -251,7 +256,7 @@ describe('选项值都有中文文案', () => {
   });
 });
 
-describe('三态标签的条件码分组穷尽两个域', () => {
+describe('两段标签的条件码分组穷尽两个域', () => {
   it('交通域的码 = 跨城 ∪ 当地 ∪ 只作投影的码', () => {
     /*
      * 这条断言的价值：P9 往 `conditions.ts` 里加了 5 个 transport 码，
@@ -259,8 +264,8 @@ describe('三态标签的条件码分组穷尽两个域', () => {
      * 没有任何报错，且很容易被当成「设计稿里没有这一项」。
      */
     const grouped = new Set<string>([
-      ...TRISTATE_CODES['transport.intercity_modes'],
-      ...TRISTATE_CODES['transport.local_modes'],
+      ...TAG_CODES['transport.intercity_modes'],
+      ...TAG_CODES['transport.local_modes'],
       ...PROJECTION_ONLY_CODES,
     ]);
     const missing = CONDITION_CODES_BY_DOMAIN.transport.filter((code) => !grouped.has(code));
@@ -269,8 +274,8 @@ describe('三态标签的条件码分组穷尽两个域', () => {
 
   it('住宿域的码 = 类型 ∪ 设施 ∪ 只作投影的码', () => {
     const grouped = new Set<string>([
-      ...TRISTATE_CODES['lodging.types'],
-      ...TRISTATE_CODES['lodging.amenities'],
+      ...TAG_CODES['lodging.types'],
+      ...TAG_CODES['lodging.amenities'],
       ...PROJECTION_ONLY_CODES,
     ]);
     const missing = CONDITION_CODES_BY_DOMAIN.accommodation.filter((code) => !grouped.has(code));
@@ -284,7 +289,7 @@ describe('三态标签的条件码分组穷尽两个域', () => {
       ...CONDITION_CODES_BY_DOMAIN.budget,
       ...CONDITION_CODES_BY_DOMAIN.interest,
     ]);
-    const unknown = Object.values(TRISTATE_CODES)
+    const unknown = Object.values(TAG_CODES)
       .flat()
       .filter((code) => !known.has(code));
     expect(unknown).toEqual([]);
@@ -296,47 +301,36 @@ describe('三态标签的条件码分组穷尽两个域', () => {
      * 跨城路线，后者影响每日行程。同一个码出现在两个字段里因此是对的，
      * 而这条断言防的是有人在「去重」时把其中一处删掉。
      */
-    expect(TRISTATE_CODES['transport.intercity_modes']).toContain('transport.self_drive');
-    expect(TRISTATE_CODES['transport.local_modes']).toContain('transport.self_drive');
+    expect(TAG_CODES['transport.intercity_modes']).toContain('transport.self_drive');
+    expect(TAG_CODES['transport.local_modes']).toContain('transport.self_drive');
   });
 });
 
-describe('三态标签只用在主观取舍上（规范 4.2）', () => {
-  it('饮食、宗教与过敏字段都不是三态', () => {
+describe('两段式选择标签（要 / 不要）', () => {
+  it('饮食、宗教与过敏字段都不用标签选择', () => {
     /*
-     * 规范 4.2 明令禁止用三态循环表达宗教与饮食要求，规范 13 对过敏同样。
-     * 「偏好清真」不是一个有意义的表达，而「偏好不吃花生」在安全上是危险的。
+     * 规范 4.2 明令禁止用标签选择表达宗教与饮食要求，规范 13 对过敏同样。
+     * 「要清真」不是一个有意义的表达，而「要不吃花生」在安全上是危险的。
+     * 这些字段用 `check` / `choice` 而非 `check-tag`。
      */
     for (const fieldId of ['PV2-07-002', 'PV2-07-003', 'PV2-07-004'] as const) {
       const primitives = allParts(fieldId).map((part) => part.primitive);
-      expect(primitives).not.toContain('tristate');
+      expect(primitives).not.toContain('check-tag');
     }
   });
 
-  it('用三态的四个字段都是规范列出的那四组', () => {
-    const tristate = PLANNER_FIELDS.filter((spec) =>
-      allParts(spec.field_id).some((part) => part.primitive === 'tristate'),
+  it('用 check-tag 的字段都是规范列出的那五组', () => {
+    /*
+     * `check-tag` 是「要 / 不要」两段式标签：预算优先级、跨城/当地交通、
+     * 住宿类型、住宿设施。这张清单多一个或少一个都说明描述符改错了地方。
+     */
+    const checkTag = PLANNER_FIELDS.filter((spec) =>
+      allParts(spec.field_id).some((part) => part.primitive === 'check-tag'),
     ).map((spec) => spec.api_key);
-    expect(tristate.sort()).toEqual([
+    expect(checkTag.sort()).toEqual([
       'budget.scope_and_priorities',
       'lodging.amenities',
       'lodging.types',
-      'transport.intercity_modes',
-      'transport.local_modes',
-    ]);
-  });
-
-  it('两段变体只用在参考稿收敛过的三组上（预算优先级 + 第 5 步交通）', () => {
-    /*
-     * 参考稿把「哪些项目愿意多花」「跨城怎么走」「到了当地怎么移动」收敛成
-     * 「未选 ⇄ 偏好」两段。其余三态字段（住宿类型、住宿设施）保留四段循环
-     * —— 这张清单多一个或少一个都说明描述符改错了地方。
-     */
-    const twoState = PLANNER_FIELDS.filter((spec) =>
-      allParts(spec.field_id).some((part) => part.two_state === true),
-    ).map((spec) => spec.api_key);
-    expect(twoState.sort()).toEqual([
-      'budget.scope_and_priorities',
       'transport.intercity_modes',
       'transport.local_modes',
     ]);

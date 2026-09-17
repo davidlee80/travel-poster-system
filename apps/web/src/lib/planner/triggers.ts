@@ -5,7 +5,6 @@ import {
   type PlannerFieldId,
   type PlannerFieldRequirement,
   type PlannerProfileInput,
-  type PlannerStance,
 } from '@tps/schemas';
 
 import { hasValue, isAnswered, isOptedIn, type PlannerState } from './state';
@@ -91,20 +90,12 @@ export interface TriggerContext {
   readonly lateArrival: boolean;
 }
 
-function stanceOf(
-  selections: readonly { code: string; stance: PlannerStance }[] | undefined,
-  code: string,
-): PlannerStance | undefined {
-  return selections?.find((entry) => entry.code === code)?.stance;
-}
-
-/** 选了且不是「不要」。三态里 PREFER/REQUIRE 都意味着这种方式会出现在方案里 */
+/** 选项数组里是否包含某个代码。`check-tag` 的值就是 `string[]` */
 function chosen(
-  selections: readonly { code: string; stance: PlannerStance }[] | undefined,
+  selections: readonly string[] | undefined,
   code: string,
 ): boolean {
-  const stance = stanceOf(selections, code);
-  return stance === 'PREFER' || stance === 'REQUIRE';
+  return selections !== undefined && selections.includes(code);
 }
 
 export function buildTriggerContext(answers: PlannerProfileInput): TriggerContext {
@@ -145,12 +136,11 @@ export function buildTriggerContext(answers: PlannerProfileInput): TriggerContex
     chosen(intercity, 'transport.self_drive') || chosen(local, 'transport.self_drive');
 
   /*
-   * 「涉及航空交通」：明确选了飞机，或跨境（本产品的跨境场景基本都要飞），
-   * 但用户明确排除飞机时一律不涉及 —— EXCLUDE 是硬边界，
-   * 不能被「系统觉得跨境要飞」覆盖（规范 4.1：低优先级不得覆盖高优先级）。
+   * 「涉及航空交通」：明确选了飞机，或跨境（本产品的跨境场景基本都要飞）。
+   * 用户未选飞机时默认不涉及 —— 两段式选择（要 / 不要）没有「明确排除」态，
+   * 未选即不要。
    */
-  const flightExcluded = stanceOf(intercity, 'transport.flight') === 'EXCLUDE';
-  const involvesAir = !flightExcluded && (chosen(intercity, 'transport.flight') || isInternational);
+  const involvesAir = chosen(intercity, 'transport.flight') || isInternational;
 
   const involvesLongHaul =
     involvesAir ||

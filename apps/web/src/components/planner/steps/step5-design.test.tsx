@@ -26,10 +26,7 @@ const DESIGN_SCENE: PlannerState = {
       ],
     },
     transport: {
-      intercity_modes: [
-        { code: 'transport.flight', stance: 'PREFER' },
-        { code: 'transport.self_drive', stance: 'PREFER' },
-      ],
+      intercity_modes: ['transport.flight', 'transport.self_drive'],
     },
   },
   touched: [],

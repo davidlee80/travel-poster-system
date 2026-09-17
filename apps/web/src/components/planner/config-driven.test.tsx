@@ -105,7 +105,7 @@ const RICH: PlannerState = {
       origin: { text: '上海', country: '中国' },
       destinations: [{ text: '东京', country: '日本' }],
     },
-    transport: { intercity_modes: [{ code: 'transport.flight', stance: 'PREFER' }] },
+    transport: { intercity_modes: ['transport.flight'] },
     interests: { tags: ['interest.nightlife', 'interest.food'] },
   },
 };

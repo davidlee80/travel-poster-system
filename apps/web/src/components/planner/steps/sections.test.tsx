@@ -76,13 +76,10 @@ const RICH: PlannerState = {
     },
     budget: { mode: 'TOTAL' },
     transport: {
-      intercity_modes: [
-        { code: 'transport.flight', stance: 'PREFER' },
-        { code: 'transport.self_drive', stance: 'PREFER' },
-      ],
+      intercity_modes: ['transport.flight', 'transport.self_drive'],
     },
     lodging: {
-      types: [{ code: 'accommodation.hotel', stance: 'REQUIRE' }],
+      types: ['accommodation.hotel'],
       rooms_count: 1,
     },
     food: { has_allergies: 'YES' },
@@ -373,7 +370,7 @@ describe('控件真的渲染出来了', () => {
     expect(html).toContain('前后可差 3 天');
   });
 
-  it('第 5 步的三态标签是两段变体：无图例、无状态图标，选中仅靠颜色与 aria 表达', () => {
+  it('第 5 步的两段式选择标签：无图例、无状态图标，选中仅靠颜色与 aria 表达', () => {
     const snapshot = buildSnapshot(RICH);
     const html = renderToStaticMarkup(
       <StepPage
@@ -388,16 +385,15 @@ describe('控件真的渲染出来了', () => {
         registerField={() => undefined}
       />,
     );
-    expect(html).toContain('data-stance="PREFER"');
     expect(html).toContain('aria-pressed="true"');
-    /* 两段变体没有 ★♥× 图例与「连续点击」提示，也没有 ♥ 状态图标 */
+    /* 两段式选择没有 ★♥× 图例与「连续点击」提示，也没有 ♥ 状态图标 */
     expect(html).not.toContain('planner-stance-guide');
     expect(html).not.toContain('连续点击');
     expect(html).not.toContain('planner-tag__mark');
     expect(html).toMatch(/aria-label="[^"]*，已选。点击取消"/);
   });
 
-  it('其他步骤的三态标签仍是四段循环：图例、状态图标与循环 aria 文案都在', () => {
+  it('第 6 步的两段式选择标签：同样无图例与状态图标', () => {
     const snapshot = buildSnapshot(RICH);
     const html = renderToStaticMarkup(
       <StepPage
@@ -412,12 +408,9 @@ describe('控件真的渲染出来了', () => {
         registerField={() => undefined}
       />,
     );
-    expect(html).toContain('planner-stance-guide');
-    expect(html).toContain('连续点击可切换状态，再点一次可取消。');
-    expect(html).toMatch(/planner-stance-guide__require[^>]*>★<\/span>/);
-    expect(html).toMatch(/planner-stance-guide__exclude[^>]*>×<\/span>/);
-    expect(html).toMatch(/planner-tag__mark[^>]*>★<\/span><span class="planner-tag__label">/);
-    expect(html).toMatch(/aria-label="[^"]*当前必须满足/);
+    expect(html).not.toContain('planner-stance-guide');
+    expect(html).not.toContain('连续点击');
+    expect(html).not.toContain('planner-tag__mark');
   });
 
   it('条件分支首次展开时带触发原因（规范 6 的「触发解释」）', () => {
@@ -530,9 +523,9 @@ describe('可访问性的可自动化部分（附录 C）', () => {
     expect(dangling).toEqual([]);
   });
 
-  it('三态状态有可访问名称，字段头按后台配置显示“必填项”徽标', () => {
+  it('两段式选择状态有可访问名称，字段头按后台配置显示“必填项”徽标', () => {
     const markup = allMarkup();
-    expect(markup).toMatch(/planner-tag--require[^>]*aria-label="[^"]*当前必须满足/);
+    expect(markup).toMatch(/planner-tag--prefer[^>]*aria-label="[^"]*已选。点击取消/);
     expect(markup).toContain('planner-badge planner-badge--required');
     expect(markup).toMatch(/planner-badge--required[^>]*>必填项<\/span>/);
     expect(markup).toMatch(/data-field="PV2-01-001"[^>]*data-generation-required="true"/);

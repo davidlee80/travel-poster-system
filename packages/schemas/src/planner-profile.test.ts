@@ -123,18 +123,18 @@ describe('planner_profile 的解析行为', () => {
 
   it('部分填写合法 —— 未触发的字段不必出现', () => {
     const result = PlannerProfileSchema.safeParse({
-      trip: { origin: { text: '上海' }, destination_status: 'SHORTLISTED' },
+      trip: { origin: { text: '上海', country: '中国' } },
       travelers: { count: 2 },
     });
     expect(result.success).toBe(true);
   });
 
-  it('三态标签保留 code 与态', () => {
+  it('两段式选择标签保留条件码（string[]）', () => {
     const result = PlannerProfileSchema.safeParse({
-      transport: { intercity_modes: [{ code: 'transport.rail', stance: 'REQUIRE' }] },
+      transport: { intercity_modes: ['transport.rail'] },
     });
     expect(result.success).toBe(true);
-    expect(result.data?.transport?.intercity_modes?.[0]?.stance).toBe('REQUIRE');
+    expect(result.data?.transport?.intercity_modes?.[0]).toBe('transport.rail');
   });
 
   it('配置中心新发布的条件码能通过 —— code 是域前缀正则而不是字面量联合', () => {
@@ -144,14 +144,14 @@ describe('planner_profile 的解析行为', () => {
      * 提交报 REQ_SCHEMA_INVALID」。
      */
     const result = PlannerProfileSchema.safeParse({
-      lodging: { amenities: [{ code: 'accommodation.brand_new_amenity', stance: 'PREFER' }] },
+      lodging: { amenities: ['accommodation.brand_new_amenity'] },
     });
     expect(result.success).toBe(true);
   });
 
   it('域前缀之外的码仍然被拒', () => {
     const result = PlannerProfileSchema.safeParse({
-      lodging: { amenities: [{ code: 'unknown_domain.whatever', stance: 'PREFER' }] },
+      lodging: { amenities: ['unknown_domain.whatever'] },
     });
     expect(result.success).toBe(false);
   });
@@ -218,7 +218,10 @@ describe('挂到 TravelRequestUI 之后的向后兼容', () => {
       planner_profile: {
         /* 首个目的地必须与 `trip.destination.text` 一致，见下面那组断言 */
         trip: {
-          destinations: [{ text: '杭州' }, { text: '苏州' }],
+          destinations: [
+            { text: '杭州', country: '中国' },
+            { text: '苏州', country: '中国' },
+          ],
           date_flexibility: 'PLUS_MINUS_3',
         },
         privacy: { trip_processing_consent: true, save_preferences: false },
@@ -267,7 +270,12 @@ describe('目的地两处一致（陷阱 3）', () => {
     const result = TravelRequestUISchema.safeParse({
       ...base,
       planner_profile: {
-        trip: { destinations: [{ text: '东京', place_id: 'tokyo' }, { text: '京都' }] },
+        trip: {
+          destinations: [
+            { text: '东京', place_id: 'tokyo', country: '日本' },
+            { text: '京都', country: '日本' },
+          ],
+        },
       },
     });
     expect(result.success).toBe(true);
@@ -276,7 +284,7 @@ describe('目的地两处一致（陷阱 3）', () => {
   it('地点名不一致时被拒，且 path 指向具体那一处', () => {
     const result = TravelRequestUISchema.safeParse({
       ...base,
-      planner_profile: { trip: { destinations: [{ text: '大阪' }] } },
+      planner_profile: { trip: { destinations: [{ text: '大阪', country: '日本' }] } },
     });
     expect(result.success).toBe(false);
     /* 13.7 要求请求校验错误带 field，而 field 就是从这个 path 来的 */
@@ -292,7 +300,9 @@ describe('目的地两处一致（陷阱 3）', () => {
   it('place_id 不一致时被拒', () => {
     const result = TravelRequestUISchema.safeParse({
       ...base,
-      planner_profile: { trip: { destinations: [{ text: '东京', place_id: 'osaka' }] } },
+      planner_profile: {
+        trip: { destinations: [{ text: '东京', place_id: 'osaka', country: '日本' }] },
+      },
     });
     expect(result.success).toBe(false);
   });
@@ -300,7 +310,7 @@ describe('目的地两处一致（陷阱 3）', () => {
   it('只有一边有 place_id 时不算不一致 —— 还没接地点服务是受支持的中间态', () => {
     const result = TravelRequestUISchema.safeParse({
       ...base,
-      planner_profile: { trip: { destinations: [{ text: '东京' }] } },
+      planner_profile: { trip: { destinations: [{ text: '东京', country: '日本' }] } },
     });
     expect(result.success).toBe(true);
   });

@@ -74,7 +74,7 @@ const COMPLETE: PlannerProfileInput = {
     travel_tier: 'QUALITY',
     scope_and_priorities: {
       included_items: ['ACCOMMODATION', 'MEALS'],
-      priorities: [{ code: 'budget.lodging_quality', stance: 'REQUIRE' }],
+      priorities: ['budget.lodging_quality'],
     },
   },
   pace: {
@@ -86,20 +86,20 @@ const COMPLETE: PlannerProfileInput = {
   },
   risk: { exclusions: ['MULTI_TRANSFER'] },
   transport: {
-    intercity_modes: [{ code: 'transport.flight', stance: 'PREFER' }],
+    intercity_modes: ['transport.flight'],
     flight_constraints: { transfer_tolerance: 'DIRECT_ONLY' },
-    local_modes: [{ code: 'transport.public_transit', stance: 'PREFER' }],
+    local_modes: ['transport.public_transit'],
     time_preferences: { avoid_late_night_arrival: true },
   },
   lodging: {
-    types: [{ code: 'accommodation.hotel', stance: 'REQUIRE' }],
+    types: ['accommodation.hotel'],
     rooms_count: 2,
     room_configuration: [
       { room_index: 1, bed_type: 'DOUBLE', capacity: 2 },
       { room_index: 2, bed_type: 'TWIN', capacity: 2 },
     ],
     location_priorities: ['TRANSIT_CONVENIENT', 'QUIET'],
-    amenities: [{ code: 'accommodation.breakfast', stance: 'PREFER' }],
+    amenities: ['accommodation.breakfast'],
   },
   food: {
     experience_tags: ['LOCAL_SPECIALTY'],
@@ -448,21 +448,16 @@ describe('条件投影', () => {
     expect(projectConditions(legacy)).toEqual([]);
   });
 
-  it('三态标签原样带 mode 与 value', () => {
+  it('两段式选择标签原样带 SHOULD + true', () => {
     const result = projectConditions({
       transport: {
-        local_modes: [
-          { code: 'transport.public_transit', stance: 'REQUIRE' },
-          { code: 'transport.cycling', stance: 'EXCLUDE' },
-          { code: 'transport.walking_first', stance: 'PREFER' },
-        ],
+        local_modes: ['transport.public_transit', 'transport.cycling', 'transport.walking_first'],
       },
     });
     expect(result).toEqual(
       expect.arrayContaining([
-        { code: 'transport.public_transit', mode: 'MUST', value: true },
-        /* 「不要」走 value: false，不进 code 名（命名约定 1）*/
-        { code: 'transport.cycling', mode: 'MUST', value: false },
+        { code: 'transport.public_transit', mode: 'SHOULD', value: true },
+        { code: 'transport.cycling', mode: 'SHOULD', value: true },
         { code: 'transport.walking_first', mode: 'SHOULD', value: true },
       ]),
     );
