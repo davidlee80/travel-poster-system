@@ -26,7 +26,7 @@ interface PlaceValue {
   readonly country?: string;
 }
 
-interface DestinationValue extends PlaceValue {
+export interface DestinationValue extends PlaceValue {
   readonly arrival_date?: string;
   readonly stay_days?: number;
   readonly arrival_transport?: 'PLANE' | 'TRAIN' | 'CAR' | 'OTHER';
@@ -97,16 +97,140 @@ function packDestination(
 }
 
 /**
- * 联动逻辑：抵达日期 ↔ 驻留天数。
+ * 联动规则（抵达日期 ↔ 驻留天数）：
  *
- * - 设置抵达日期时,如果有驻留天数,保持不变
- * - 设置驻留天数时,如果有抵达日期,保持不变
- * - 两者都存在时,不自动联动(避免覆盖用户的选择)
+ * 1. 任何字段变化时都检查联动
+ * 2. 下一行用户手动改过时，以用户输入为主；检测联动结果是否冲突
+ * 3. 新增目的地时自动根据上一行推算抵达日期
+ * 4. 删除目的地后重新计算后续所有日期
+ * 5. 级联到末尾（修改一行会影响后续所有行）
  *
- * 注意:当前设计是「抵达日期」是某个目的地的开始日期,而不是整个旅行的开始日期。
- * 多目的地时,第 N 个目的地的抵达日期 = 第 N-1 个目的地的抵达日期 + 驻留天数。
- * 但这个计算在父组件(DestinationList)里做,这里只负责单个目的地的字段。
+ * 冲突检测：如果推算出的抵达日期与下一行已有的抵达日期不一致，
+ * 且差异不为 0，则回推上一行的驻留天数（驻留天数 = 两日期差）。
  */
+
+/**
+ * 解析 YYYY-MM-DD 为 Date（本地时区，避免 UTC 偏移）。
+ * 输入不合法时返回 undefined。
+ *
+ * 导出供单元测试使用。
+ */
+export function parseDate(dateStr: string | undefined): Date | undefined {
+  if (dateStr === undefined || dateStr.trim().length === 0) return undefined;
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length !== 3) return undefined;
+  const [y, m, d] = parts;
+  if (y === undefined || m === undefined || d === undefined) return undefined;
+  if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d)) return undefined;
+  return new Date(y, m - 1, d);
+}
+
+/** 把 Date 格式化为 YYYY-MM-DD（本地时区）。导出供单元测试使用。 */
+export function formatDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** 计算两个日期之间的天数差（date2 - date1）。导出供单元测试使用。 */
+export function daysBetween(date1: Date, date2: Date): number {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.round((date2.getTime() - date1.getTime()) / msPerDay);
+}
+
+/** 在日期上加天数，返回新的日期字符串。导出供单元测试使用。 */
+export function addDays(dateStr: string, days: number): string | undefined {
+  const date = parseDate(dateStr);
+  if (date === undefined) return undefined;
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return formatDate(result);
+}
+
+/**
+ * 核心联动算法：从被修改的行开始，向末尾级联推算。
+ *
+ * 规则：
+ * - 如果当前行有 arrival_date + stay_days，推算下一行的 arrival_date
+ * - 如果下一行已有 arrival_date（用户手动改过），检测冲突：
+ *   - 一致：不改动，继续级联
+ *   - 不一致：回推当前行的 stay_days = 下一行 arrival_date - 当前行 arrival_date
+ *     （以用户手动输入的下一行日期为主，调整上一行的驻留天数来匹配）
+ * - 如果下一行没有 arrival_date，自动填入推算值
+ *
+ * 导出供单元测试使用。
+ */
+export function cascadeDestinations(
+  list: (DestinationValue | undefined)[],
+  startIndex: number,
+): (DestinationValue | undefined)[] {
+  const result = [...list];
+
+  for (let i = startIndex; i < result.length - 1; i++) {
+    const current = result[i];
+    const next = result[i + 1];
+    if (current === undefined || next === undefined) continue;
+
+    // 当前行缺少日期或驻留天数，无法推算，跳过后续
+    if (
+      current.arrival_date === undefined ||
+      current.arrival_date.trim().length === 0 ||
+      current.stay_days === undefined
+    ) {
+      continue;
+    }
+
+    const currentArrival = parseDate(current.arrival_date);
+    if (currentArrival === undefined) continue;
+
+    const expectedNextArrival = addDays(current.arrival_date, current.stay_days);
+    if (expectedNextArrival === undefined) continue;
+
+    // 下一行已有抵达日期 → 冲突检测
+    if (next.arrival_date !== undefined && next.arrival_date.trim().length > 0) {
+      const nextArrival = parseDate(next.arrival_date);
+      if (nextArrival === undefined) {
+        // 下一行日期格式非法，用推算值覆盖
+        result[i + 1] = { ...next, arrival_date: expectedNextArrival };
+        continue;
+      }
+
+      const actualGap = daysBetween(currentArrival, nextArrival);
+      if (actualGap !== current.stay_days) {
+        // 冲突：以用户输入的下一行日期为主，回推当前行驻留天数
+        if (actualGap >= 1) {
+          result[i] = { ...current, stay_days: actualGap };
+        } else {
+          // 下一行日期早于当前行，无法回推有效驻留天数，保持当前行不变
+          // 但仍需用推算值覆盖下一行（否则日期链断裂）
+          result[i + 1] = { ...next, arrival_date: expectedNextArrival };
+        }
+      }
+      // 一致时不动，继续级联
+    } else {
+      // 下一行没有抵达日期 → 自动填入推算值
+      result[i + 1] = { ...next, arrival_date: expectedNextArrival };
+    }
+  }
+
+  return result;
+}
+
+/**
+ * 删除一行后，重新计算从删除位置开始的所有后续日期。
+ * 如果删除的是中间行，后续行的日期需要基于新的前一行重新推算。
+ *
+ * 导出供单元测试使用。
+ */
+export function cascadeAfterRemoval(
+  list: (DestinationValue | undefined)[],
+  removedIndex: number,
+): (DestinationValue | undefined)[] {
+  // 从被删除位置的前一行开始级联（如果前一行存在）
+  const startIndex = Math.max(0, removedIndex - 1);
+  return cascadeDestinations(list, startIndex);
+}
 
 function PlaceFields({
   place,
@@ -436,6 +560,42 @@ export function DestinationList({
     onChange(cleaned.length === 0 ? undefined : cleaned);
   };
 
+  const handleDestinationChange = (index: number, next: DestinationValue | undefined): void => {
+    const list: (DestinationValue | undefined)[] = [...destinations];
+    list[index] = next;
+
+    // 规则 1：任何字段变化时都检查联动
+    // 规则 2：冲突检测在 cascadeDestinations 内部处理
+    // 规则 5：级联到末尾
+    const cascaded = cascadeDestinations(list, index);
+    write(cascaded);
+  };
+
+  const handleAddDestination = (): void => {
+    // 规则 3：新增目的地时自动根据上一行推算抵达日期
+    const last = destinations[destinations.length - 1];
+    const autoArrival =
+      last !== undefined &&
+      last.arrival_date !== undefined &&
+      last.arrival_date.trim().length > 0 &&
+      last.stay_days !== undefined
+        ? addDays(last.arrival_date, last.stay_days)
+        : undefined;
+
+    const newDestination: DestinationValue =
+      autoArrival !== undefined ? { text: '', arrival_date: autoArrival } : { text: '' };
+
+    onChange([...destinations, newDestination]);
+  };
+
+  const handleRemoveDestination = (index: number): void => {
+    const list = destinations.filter((_, i) => i !== index);
+
+    // 规则 4：删除目的地后重新计算后续所有日期
+    const cascaded = cascadeAfterRemoval(list, index);
+    write(cascaded);
+  };
+
   return (
     <div id={id} {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}>
       {destinations.map((destination, index) => (
@@ -446,35 +606,7 @@ export function DestinationList({
           </span>
           <DestinationFields
             destination={destination}
-            onChange={(next) => {
-              const list: (DestinationValue | undefined)[] = [...destinations];
-              list[index] = next;
-
-              // 联动逻辑:抵达日期 ↔ 驻留天数
-              // 如果修改了驻留天数,且有抵达日期,自动计算下一个目的地的抵达日期
-              if (
-                next &&
-                next.stay_days !== undefined &&
-                next.arrival_date !== undefined &&
-                next.arrival_date.trim().length > 0 &&
-                index < destinations.length - 1
-              ) {
-                const nextArrivalDate = new Date(next.arrival_date);
-                nextArrivalDate.setDate(nextArrivalDate.getDate() + next.stay_days);
-                const nextArrivalDateStr = nextArrivalDate.toISOString().split('T')[0];
-
-                // 更新下一个目的地的抵达日期
-                const nextDest = list[index + 1];
-                if (nextDest && nextArrivalDateStr) {
-                  list[index + 1] = {
-                    ...nextDest,
-                    arrival_date: nextArrivalDateStr,
-                  } as DestinationValue;
-                }
-              }
-
-              write(list);
-            }}
+            onChange={(next) => handleDestinationChange(index, next)}
             idPrefix={`${id}-${index}`}
             label={`第 ${index + 1} 个目的地的`}
             part={part}
@@ -485,7 +617,7 @@ export function DestinationList({
             type="button"
             className="planner-icon-button planner-icon-button--danger"
             aria-label={`删除第 ${index + 1} 个目的地`}
-            onClick={() => write(destinations.filter((_, i) => i !== index))}
+            onClick={() => handleRemoveDestination(index)}
           >
             ✕
           </button>
@@ -495,11 +627,7 @@ export function DestinationList({
       {destinations.length >= max ? (
         <p className="planner-hint">最多 {max} 个目的地。</p>
       ) : (
-        <button
-          type="button"
-          className="planner-add-card"
-          onClick={() => onChange([...destinations, { text: '' }])}
-        >
+        <button type="button" className="planner-add-card" onClick={handleAddDestination}>
           <span className="planner-add-card__plus" aria-hidden="true">
             ＋
           </span>
