@@ -399,13 +399,6 @@ export function declaredPhraseValues(field: PlannerFieldId): readonly string[] {
   return Object.keys(PHRASE_BY_FIELD[field] ?? {});
 }
 
-/** 三态 → 运行时类型。`PREFER` 落 PREFER，`REQUIRE` 落 HARD，`EXCLUDE` 落 EXCLUDE */
-const STANCE_TYPE: Record<string, PlannerConstraintType> = {
-  PREFER: 'PREFER',
-  REQUIRE: 'HARD',
-  EXCLUDE: 'EXCLUDE',
-};
-
 // ── 派生 ────────────────────────────────────────────────────
 
 /**
@@ -553,10 +546,10 @@ export function deriveConstraints(profile: PlannerProfile | undefined): DerivedC
   // ── 05 路上怎么走 ──────────────────────────────────────
   const transport = profile.transport;
   for (const selection of transport?.intercity_modes ?? []) {
-    pushStance(push, 'PV2-05-001', selection, '跨城交通');
+    pushPreference(push, 'PV2-05-001', selection, '跨城交通');
   }
   for (const selection of transport?.local_modes ?? []) {
-    pushStance(push, 'PV2-05-005', selection, '当地交通');
+    pushPreference(push, 'PV2-05-005', selection, '当地交通');
   }
   const flight = transport?.flight_constraints;
   if (flight?.transfer_tolerance !== undefined) {
@@ -611,10 +604,10 @@ export function deriveConstraints(profile: PlannerProfile | undefined): DerivedC
   // ── 06 住得更舒服 ──────────────────────────────────────
   const lodging = profile.lodging;
   for (const selection of lodging?.types ?? []) {
-    pushStance(push, 'PV2-06-001', selection, '住宿类型');
+    pushPreference(push, 'PV2-06-001', selection, '住宿类型');
   }
   for (const selection of lodging?.amenities ?? []) {
-    pushStance(push, 'PV2-06-007', selection, '住宿设施');
+    pushPreference(push, 'PV2-06-007', selection, '住宿设施');
   }
   const rooms = lodging?.room_configuration ?? [];
   if (rooms.length > 0) {
@@ -842,17 +835,14 @@ export function deriveConstraints(profile: PlannerProfile | undefined): DerivedC
   return { constraints: drafts.map(toConstraint), verify_items: verify };
 }
 
-/** 一个三态选择 → 一条约束。三处调用共用，避免三份各自演化的态到类型映射 */
-function pushStance(
+/** 选中的交通或住宿代码生成偏好约束，与前端 conditions 投影保持一致。 */
+function pushPreference(
   push: (type: PlannerConstraintType, field: PlannerFieldId, text: string, slot?: string) => void,
   field: PlannerFieldId,
-  selection: { readonly code: string; readonly stance: string },
+  code: string,
   label: string,
 ): void {
-  const type = STANCE_TYPE[selection.stance];
-  if (type === undefined) return;
-  const verb = type === 'HARD' ? '必须' : type === 'EXCLUDE' ? '不要' : '优先';
-  push(type, field, `${label}${verb}：${selection.code}`, selection.code);
+  push('PREFER', field, `${label}优先：${code}`, code);
 }
 
 /**

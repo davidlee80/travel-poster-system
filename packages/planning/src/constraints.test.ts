@@ -93,22 +93,31 @@ describe('LOCKED 由已有订单派生（规范 4 章的注）', () => {
 });
 
 describe('类型分派', () => {
-  it('三态标签的三个态分别落 PREFER / HARD / EXCLUDE', () => {
+  it('交通和住宿的选中代码均生成可追溯的偏好约束', () => {
     const result = derive({
       transport: {
-        local_modes: [
-          { code: 'transport.public_transit', stance: 'PREFER' },
-          { code: 'transport.self_drive', stance: 'REQUIRE' },
-          { code: 'transport.cycling', stance: 'EXCLUDE' },
-        ],
+        intercity_modes: ['transport.rail'],
+        local_modes: ['transport.public_transit'],
+      },
+      lodging: {
+        types: ['accommodation.hotel'],
+        amenities: ['accommodation.pool'],
       },
     });
     const byCode = new Map(
       result.constraints.map((constraint) => [constraint.constraint_id, constraint.type]),
     );
     expect(byCode.get('PREFER:PV2-05-005#transport.public_transit')).toBe('PREFER');
-    expect(byCode.get('HARD:PV2-05-005#transport.self_drive')).toBe('HARD');
-    expect(byCode.get('EXCLUDE:PV2-05-005#transport.cycling')).toBe('EXCLUDE');
+    expect(byCode.get('PREFER:PV2-05-001#transport.rail')).toBe('PREFER');
+    expect(byCode.get('PREFER:PV2-06-001#accommodation.hotel')).toBe('PREFER');
+    expect(byCode.get('PREFER:PV2-06-007#accommodation.pool')).toBe('PREFER');
+    expect(result.constraints).toHaveLength(4);
+    expect(result.constraints.map((constraint) => constraint.text)).toEqual([
+      '跨城交通优先：transport.rail',
+      '当地交通优先：transport.public_transit',
+      '住宿类型优先：accommodation.hotel',
+      '住宿设施优先：accommodation.pool',
+    ]);
   });
 
   it('饮食是 HARD 而不是 PREFER（规范 4.2）', () => {
