@@ -1,6 +1,5 @@
 'use client';
 
-import { ENTRY_ROUTE_LABEL } from '@/lib/planner/entry-routes';
 import type { EntryRoute } from '@/lib/planner/state';
 
 /**
@@ -26,6 +25,8 @@ interface EntryCard {
   readonly route: EntryRoute;
   readonly caption: string;
   readonly tags: readonly string[];
+  readonly title: string;
+  readonly desc: string;
   readonly hint: string;
   readonly art: 'explore' | 'destination' | 'time' | 'plan';
 }
@@ -35,6 +36,8 @@ const CARDS: readonly EntryCard[] = [
     route: 'explore',
     caption: 'FIND YOUR INSPIRATION',
     tags: ['目的地未定', '时间未定'],
+    title: '还没想好去哪',
+    desc: '只是有点想出去走走，先看看有哪些可能。',
     hint: '从喜欢的体验，找到旅行方向',
     art: 'explore',
   },
@@ -42,6 +45,8 @@ const CARDS: readonly EntryCard[] = [
     route: 'destination',
     caption: 'MAKE THE MOST OF YOUR DAYS',
     tags: ['目的地未定', '时间已定 ✓'],
+    title: '假期有了，去哪好呢',
+    desc: '时间已经留出来，想找一个适合这段假期的地方。',
     hint: '根据假期、预算，比较目的地',
     art: 'destination',
   },
@@ -49,6 +54,8 @@ const CARDS: readonly EntryCard[] = [
     route: 'time',
     caption: 'A PLACE ON YOUR WISHLIST',
     tags: ['目的地已定 ✓', '时间未定'],
+    title: '有想去的地方，时间待定',
+    desc: '心里已经有了目的地，想挑一段合适的时间出发。',
     hint: '比较出行窗口，让心愿更近一步',
     art: 'time',
   },
@@ -56,6 +63,8 @@ const CARDS: readonly EntryCard[] = [
     route: 'plan',
     caption: 'LET’S PUT IT ALL TOGETHER',
     tags: ['目的地已定 ✓', '时间已定 ✓'],
+    title: '都定了，开始规划吧',
+    desc: '知道去哪、什么时候去，就差把每天的安排串起来。',
     hint: '整理交通、住宿，生成行程草案',
     art: 'plan',
   },
@@ -97,10 +106,15 @@ export function Step0Entry({ selected, onSelect }: Step0EntryProps): React.React
                     </span>
                   ))}
                 </span>
-                <span className="planner-step0__title">{ENTRY_ROUTE_LABEL[card.route]}</span>
-                <span className="planner-step0__desc">{card.hint}</span>
-                <span className="planner-step0__arrow" aria-hidden="true">
-                  ↗
+                <span className="planner-step0__title">{card.title}</span>
+                <span className="planner-step0__desc">{card.desc}</span>
+                {/*
+                 * 底部行 = 引导语（左）+ 箭头（右），对齐参考稿的 card-bottom。
+                 * 之前把引导语塞进 desc、箭头单独右对齐，丢失了这一行的「左右分布」。
+                 */}
+                <span className="planner-step0__bottom" aria-hidden="true">
+                  <span>{card.hint}</span>
+                  <span className="planner-step0__arrow">↗</span>
                 </span>
               </span>
             </button>

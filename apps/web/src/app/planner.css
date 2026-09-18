@@ -1173,10 +1173,19 @@
 
 /* ── 第 0 步 · 入口路线卡（参考 00.html 设计稿）─────────────────
  *
- * 卡片配色取自参考稿的四组低饱和色（探索紫/假期橙/时间绿/计划红），
- * 选中态用参考稿的深绿（#28634f）。页面大背景仍用 .planner 的 --canvas，
- * 与第 1–9 步保持一致 —— 只有卡片这一层是参考稿的视觉。
+ * 配色与文字色全部对齐参考稿的 `:root`：
+ *   --background #f8f7f3（米白）  --text #293d35（墨绿）
+ *   --muted #758079（灰绿）       --primary #28634f（深绿）
+ * 卡片四组插画色（探索紫/假期橙/时间绿/计划红）沿用参考稿，
+ * 页面大背景仍是 planner 的 --canvas —— 只有卡片这一层是参考稿的视觉。
  */
+
+/* 本区块的参考稿文字色板（局部变量，不污染 .planner 其它部分） */
+.planner-step0 {
+  --step0-text: #293d35;
+  --step0-muted: #758079;
+  --step0-primary: #28634f;
+}
 
 .planner-step0__eyebrow {
   margin: 0 0 14px;
@@ -1198,18 +1207,17 @@
   display: flex;
   flex-direction: column;
   /*
-   * 宽高比锁死为参考稿 00-1.png 的 1.6:1（宽/高）。
+   * 宽高比锁死为参考稿 00-1.png：竖向卡片，宽 : 高 ≈ 1 : 1.36。
    *
-   * 用 aspect-ratio 而不是 min-height：要求的是「比例」而不是「尺寸」，
-   * min-height 会让卡片在窄屏变高变瘦（比例随宽度漂移），
-   * 而 aspect-ratio 让高度始终 = 宽度 / 1.6。
+   * `aspect-ratio` 的值是「宽 / 高」，因此 1:1.36 写成 `1 / 1.36` ——
+   * 高度 = 宽度 × 1.36，而不是除以。之前写成 8/5（横向）是把方向弄反了。
    *
-   * 插画与内容区都在这个固定高度里伸缩：插画用 overflow 截断，
-   * 内容区字号本身有下限，窄屏（单列、宽约 350px）时卡片约 219px 高，
-   * 仍容得下标题与一行标签。
+   * 卡片由 grid 两列均分宽度，高度随宽度等比增长；插画与内容区
+   * 在这个高度里按 flex 分配，窄屏变单列时解锁（见媒体查询）。
    */
-  aspect-ratio: 8 / 5;
+  aspect-ratio: 1 / 1.36;
   padding: 0;
+  /* 参考稿的卡片边线比 .planner 的 --line 更灰绿 */
   border: 1px solid #e4e6df;
   border-radius: 21px;
   background: #fff;
@@ -1228,9 +1236,9 @@
 }
 
 .planner-step0__card--active {
-  border-color: #28634f;
+  border-color: var(--step0-primary);
   box-shadow:
-    0 0 0 2px #28634f,
+    0 0 0 2px var(--step0-primary),
     0 12px 28px rgb(49 78 53 / 6%);
 }
 
@@ -1258,8 +1266,8 @@
 }
 
 .planner-step0__card--active .planner-step0__mark {
-  border-color: #28634f;
-  background: #28634f;
+  border-color: var(--step0-primary);
+  background: var(--step0-primary);
   color: #fff;
 }
 
@@ -1309,6 +1317,40 @@
   color: #aa7662;
 }
 
+/* ── 各卡文字色：跟随插画色系（参考图特征，非统一墨绿）──
+ *
+ * 参考图里每张卡的「标题/描述」都带自己那一组色系：
+ * 探索卡是紫、假期卡是暖棕、时间卡是绿、计划卡是红棕。
+ * 统一用墨绿会让四张卡文字看起来一个色，与参考图不符。
+ */
+.planner-step0__card--explore .planner-step0__title {
+  color: #4a4a6e;
+}
+.planner-step0__card--explore .planner-step0__desc {
+  color: #7a7a9e;
+}
+
+.planner-step0__card--destination .planner-step0__title {
+  color: #6b4f2a;
+}
+.planner-step0__card--destination .planner-step0__desc {
+  color: #9b7850;
+}
+
+.planner-step0__card--time .planner-step0__title {
+  color: #3a5a44;
+}
+.planner-step0__card--time .planner-step0__desc {
+  color: #6a7a6a;
+}
+
+.planner-step0__card--plan .planner-step0__title {
+  color: #8a4a3a;
+}
+.planner-step0__card--plan .planner-step0__desc {
+  color: #9a6a5a;
+}
+
 .planner-step0__body {
   display: flex;
   flex: 1;
@@ -1316,15 +1358,16 @@
   padding: 20px 23px 19px;
 }
 
+/* 标签行：参考稿用 gap 分隔、紧贴标题上方 */
 .planner-step0__tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: 7px;
+  margin-bottom: 10px;
 }
 
 .planner-step0__tag {
-  padding: 3px 7px;
+  padding: 4px 7px;
   border-radius: 5px;
   background: #f2f4ef;
   color: #788179;
@@ -1337,37 +1380,52 @@
   color: #477058;
 }
 
+/* 标题：参考稿 20px，比当前 18px 更大更醒目 */
 .planner-step0__title {
-  margin-bottom: 6px;
-  color: var(--ink);
-  font-size: 18px;
+  margin-bottom: 8px;
+  /* 参考稿标题色：墨绿 --text，不用 .planner 的 --ink */
+  color: var(--step0-text);
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.4px;
 }
 
 .planner-step0__desc {
-  color: var(--muted);
+  /* 参考稿描述色：灰绿 --muted，不用 .planner 的 --muted（偏蓝灰） */
+  color: var(--step0-muted);
   font-size: 12px;
-  line-height: 1.7;
+  line-height: 1.8;
+}
+
+/*
+ * 底部行：引导语（左）+ 箭头（右），margin-top:auto 把它压到卡片底部 ——
+ * 这让四张卡无论内容多少，底部行都对齐在同一水平线上（参考稿特征）。
+ */
+.planner-step0__bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 17px;
+  color: #697a6e;
+  font-size: 11px;
 }
 
 .planner-step0__arrow {
-  align-self: flex-end;
-  margin-top: auto;
-  padding-top: 12px;
   color: #8b988e;
   font-size: 18px;
   transition: transform 0.2s ease;
 }
 
 .planner-step0__card--active .planner-step0__arrow {
-  color: #28634f;
+  color: var(--step0-primary);
   transform: translateX(3px);
 }
 
 .planner-step0__hint {
   margin: 18px 0 0;
-  color: var(--muted);
+  color: var(--step0-muted);
   font-size: 12px;
   text-align: center;
 }
@@ -1378,10 +1436,10 @@
     gap: 15px;
   }
 
-  /* 单列下不再锁 1.6:1 —— 宽=屏宽时 8/5 会把卡片压得太扁 */
+  /* 单列下仍保持竖向比例，但放宽下限防止内容被压 */
   .planner-step0__card {
     aspect-ratio: auto;
-    min-height: 240px;
+    min-height: 320px;
   }
 
   .planner-step0__art {
