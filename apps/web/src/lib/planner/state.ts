@@ -31,6 +31,15 @@ import {
 // ── 状态 ────────────────────────────────────────────────────
 
 /**
+ * 第 0 步入口路线（对应参考稿 00.html 的四张卡片）。
+ *
+ * **刻意不进契约。** 它只影响前端在第 1 步展示哪些区块，不向后端发送；
+ * 待后端契约重梳理时再决定它是否映射为正式字段。
+ */
+export const ENTRY_ROUTE_VALUES = ['explore', 'destination', 'time', 'plan'] as const;
+export type EntryRoute = (typeof ENTRY_ROUTE_VALUES)[number];
+
+/**
  * 一次答案更新。按块浅合并 —— patch 的目标总是叶子键，
  * 因此块级浅合并已经足够，不需要引入深合并（深合并会让「把数组清空」
  * 与「不改这个数组」难以区分）。
@@ -73,15 +82,22 @@ export interface PlannerState {
   readonly templateId: TemplateId | null;
   /** Dev Mode：显示 Field ID / API Key / 运行时类型 / 触发来源（规范 21.1） */
   readonly devMode: boolean;
+  /**
+   * 第 0 步选中的入口路线。
+   *
+   * `null` = 还没进过第 0 步或没选。它不参与答案提交，仅驱动前端展示。
+   */
+  readonly entryRoute: EntryRoute | null;
 }
 
 export const INITIAL_PLANNER_STATE: PlannerState = {
   answers: {},
   touched: [],
   optIns: [],
-  activeStep: '01',
+  activeStep: '00',
   templateId: null,
   devMode: false,
+  entryRoute: null,
 };
 
 // ── 通用读取 ────────────────────────────────────────────────
@@ -183,6 +199,8 @@ export type PlannerAction =
   /** 用户主动展开/收起一个「或用户主动开启」的分支 */
   | { readonly type: 'toggleOptIn'; readonly fieldId: PlannerFieldId }
   | { readonly type: 'goToStep'; readonly step: PlannerStepId }
+  /** 第 0 步选中入口路线 */
+  | { readonly type: 'setEntryRoute'; readonly route: EntryRoute }
   /** 选输出样式套件（R-85 P3）。`null` = 改回「用默认」 */
   | { readonly type: 'setTemplate'; readonly templateId: TemplateId | null }
   | { readonly type: 'setDevMode'; readonly on: boolean }
@@ -242,6 +260,9 @@ export function plannerReducer(state: PlannerState, action: PlannerAction): Plan
 
     case 'goToStep':
       return { ...state, activeStep: action.step };
+
+    case 'setEntryRoute':
+      return { ...state, entryRoute: action.route };
 
     case 'setTemplate':
       return { ...state, templateId: action.templateId };

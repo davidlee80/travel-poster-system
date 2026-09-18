@@ -223,6 +223,11 @@ describe('区块表与元数据表一致', () => {
 
   it('每一步至少有一个区块，且没有空区块', () => {
     for (const step of PLANNER_STEP_IDS) {
+      /*
+       * 第 0 步（入口页）没有契约字段，其内容由 Step0Entry 组件承载，
+       * 因此它的区块表为空是**有意为之**而不是漏配。
+       */
+      if (step === '00') continue;
       expect(STEP_SECTIONS[step].length, `第 ${step} 步`).toBeGreaterThan(0);
       for (const section of STEP_SECTIONS[step]) {
         expect(section.fields.length, `${step} · ${section.title}`).toBeGreaterThan(0);

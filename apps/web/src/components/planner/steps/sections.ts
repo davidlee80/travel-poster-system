@@ -45,6 +45,12 @@ export interface PlannerSection {
 }
 
 export const STEP_SECTIONS: Record<PlannerStepId, readonly PlannerSection[]> = {
+  /*
+   * 第 0 步（入口页）没有契约字段，内容由 `Step0Entry` 组件承载。
+   * 保留空数组是为了让 `Record<PlannerStepId, …>` 类型完整 ——
+   * 缺这个键会在编译期报错，而不是运行期渲染一个空页面。
+   */
+  '00': [],
   '01': [
     {
       title: '从哪出发，去哪里',

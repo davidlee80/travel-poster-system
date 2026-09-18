@@ -3,10 +3,12 @@
 import { PLANNER_STEPS, type PlannerFieldId, type PlannerStepId } from '@tps/schemas';
 
 import { Icon } from '@/components/Icon';
+import { routeAffectsStep, filterStep1Sections } from '@/lib/planner/entry-routes';
 import type { PlannerAction, PlannerState } from '@/lib/planner/state';
 import type { PlannerSnapshot } from '@/lib/planner/step-state';
 
 import { FieldControl } from './controls/FieldControl';
+import { Step0Entry } from './Step0Entry';
 import { STEP_SECTIONS, type PlannerSection } from './steps/sections';
 
 /**
@@ -73,6 +75,17 @@ export function StepPage({
   const triggered = new Set(snapshot.triggered);
   const hidden = new Set(hiddenFields);
   const sections = STEP_SECTIONS[step];
+  const isEntryStep = step === '00';
+
+  /*
+   * 入口路线对第 1 步的区块过滤（见 entry-routes.ts）。
+   *
+   * 只在「这一步会被路线影响」且「已选路线」时过滤；未选路线
+   * （比如直接跳到第 1 步）显示全部区块 —— 那是兜底而不是常态。
+   */
+  const filteredSections = routeAffectsStep(step)
+    ? filterStep1Sections(state.entryRoute, sections)
+    : sections;
 
   return (
     <section
@@ -103,16 +116,25 @@ export function StepPage({
             aria-hidden="true"
           />
         </div>
-        <span className="planner-page-head__badge">第 {Number(step)} 步 / 9</span>
+        <span className="planner-page-head__badge">
+          第 {Number(step)} 步 / {PLANNER_STEPS.length - 1}
+        </span>
       </header>
 
-      <div className="planner-required-legend" role="note">
-        <span className="planner-badge planner-badge--required">必填项</span>
-        <span>“当前必填”会随你的选择出现；其他问题可以跳过。</span>
-      </div>
+      {isEntryStep ? (
+        <Step0Entry
+          selected={state.entryRoute}
+          onSelect={(route) => dispatch({ type: 'setEntryRoute', route })}
+        />
+      ) : (
+        <>
+          <div className="planner-required-legend" role="note">
+            <span className="planner-badge planner-badge--required">必填项</span>
+            <span>“当前必填”会随你的选择出现；其他问题可以跳过。</span>
+          </div>
 
-      {(() => {
-        const visibleSections = sections.flatMap((section) => {
+          {(() => {
+        const visibleSections = filteredSections.flatMap((section) => {
           const fields = section.fields.filter(
             (fieldId) => triggered.has(fieldId) && !hidden.has(fieldId),
           );
@@ -190,6 +212,8 @@ export function StepPage({
           ),
         );
       })()}
+        </>
+      )}
 
       {beforeActions}
 

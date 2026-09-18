@@ -1171,6 +1171,224 @@
   line-height: 1.5;
 }
 
+/* ── 第 0 步 · 入口路线卡（参考 00.html 设计稿）─────────────────
+ *
+ * 卡片配色取自参考稿的四组低饱和色（探索紫/假期橙/时间绿/计划红），
+ * 选中态用参考稿的深绿（#28634f）。页面大背景仍用 .planner 的 --canvas，
+ * 与第 1–9 步保持一致 —— 只有卡片这一层是参考稿的视觉。
+ */
+
+.planner-step0__eyebrow {
+  margin: 0 0 14px;
+  color: #7d8b72;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-align: center;
+}
+
+.planner-step0__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.planner-step0__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  /*
+   * 宽高比锁死为参考稿 00-1.png 的 1.6:1（宽/高）。
+   *
+   * 用 aspect-ratio 而不是 min-height：要求的是「比例」而不是「尺寸」，
+   * min-height 会让卡片在窄屏变高变瘦（比例随宽度漂移），
+   * 而 aspect-ratio 让高度始终 = 宽度 / 1.6。
+   *
+   * 插画与内容区都在这个固定高度里伸缩：插画用 overflow 截断，
+   * 内容区字号本身有下限，窄屏（单列、宽约 350px）时卡片约 219px 高，
+   * 仍容得下标题与一行标签。
+   */
+  aspect-ratio: 8 / 5;
+  padding: 0;
+  border: 1px solid #e4e6df;
+  border-radius: 21px;
+  background: #fff;
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.planner-step0__card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgb(49 78 53 / 6%);
+}
+
+.planner-step0__card--active {
+  border-color: #28634f;
+  box-shadow:
+    0 0 0 2px #28634f,
+    0 12px 28px rgb(49 78 53 / 6%);
+}
+
+.planner-step0__card:focus-visible {
+  outline: 3px solid #80aa97;
+  outline-offset: 4px;
+}
+
+.planner-step0__mark {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 50%);
+  color: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  transition: 0.2s ease;
+}
+
+.planner-step0__card--active .planner-step0__mark {
+  border-color: #28634f;
+  background: #28634f;
+  color: #fff;
+}
+
+.planner-step0__art {
+  position: relative;
+  /*
+   * 占卡片高度的插画份额（参考稿约 53%），而不是固定 158px ——
+   * 卡片高度随宽度变，固定像素会让插画占比漂移。
+   */
+  height: 53%;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.planner-step0__art svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.planner-step0__art-caption {
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 2px;
+}
+
+.planner-step0__art--explore {
+  background: #eaeaf7;
+  color: #69678e;
+}
+
+.planner-step0__art--destination {
+  background: #fbefda;
+  color: #9b7850;
+}
+
+.planner-step0__art--time {
+  background: #e6eee3;
+  color: #668367;
+}
+
+.planner-step0__art--plan {
+  background: #fae8e0;
+  color: #aa7662;
+}
+
+.planner-step0__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  padding: 20px 23px 19px;
+}
+
+.planner-step0__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.planner-step0__tag {
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: #f2f4ef;
+  color: #788179;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.planner-step0__tag--confirmed {
+  background: #eaf2e9;
+  color: #477058;
+}
+
+.planner-step0__title {
+  margin-bottom: 6px;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.planner-step0__desc {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.planner-step0__arrow {
+  align-self: flex-end;
+  margin-top: auto;
+  padding-top: 12px;
+  color: #8b988e;
+  font-size: 18px;
+  transition: transform 0.2s ease;
+}
+
+.planner-step0__card--active .planner-step0__arrow {
+  color: #28634f;
+  transform: translateX(3px);
+}
+
+.planner-step0__hint {
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .planner-step0__grid {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+
+  /* 单列下不再锁 1.6:1 —— 宽=屏宽时 8/5 会把卡片压得太扁 */
+  .planner-step0__card {
+    aspect-ratio: auto;
+    min-height: 240px;
+  }
+
+  .planner-step0__art {
+    height: 142px;
+  }
+}
+
 .planner-badge--prefer,
 .planner-badge--prefer_exclude {
   color: var(--primary);

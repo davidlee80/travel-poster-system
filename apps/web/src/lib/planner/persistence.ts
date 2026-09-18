@@ -6,7 +6,7 @@ import {
   type TemplateId,
 } from '@tps/schemas';
 
-import { INITIAL_PLANNER_STATE, type PlannerState } from './state';
+import { ENTRY_ROUTE_VALUES, INITIAL_PLANNER_STATE, type EntryRoute, type PlannerState } from './state';
 
 /**
  * 草稿持久化（规范 6 的「自动保存」与附录 C 的「草稿恢复」）。
@@ -60,6 +60,11 @@ interface StoredDraft {
    * 升版反而有害：那会让所有人的九步草稿因为多了一个可选字段而作废。
    */
   readonly templateId: string | null;
+  /**
+   * 第 0 步选中的入口路线（前端本地状态，不进契约）。
+   * 同 `templateId`，缺失时回退 null，不升 DRAFT_VERSION。
+   */
+  readonly entryRoute?: string | null;
 }
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
@@ -97,6 +102,7 @@ export function saveDraft(state: PlannerState, now: string): boolean {
     optIns: state.optIns,
     activeStep: state.activeStep,
     templateId: state.templateId,
+    entryRoute: state.entryRoute,
   };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
@@ -150,7 +156,7 @@ export function loadDraft(): PlannerState | null {
   const activeStep =
     typeof draft.activeStep === 'string' && steps.includes(draft.activeStep)
       ? (draft.activeStep as PlannerStepId)
-      : '01';
+      : '00';
 
   /*
    * 样式套件要**对当前枚举验一次**（R-85 P3），不能直接 `as TemplateId`。
@@ -170,6 +176,12 @@ export function loadDraft(): PlannerState | null {
       ? (draft.templateId as TemplateId)
       : null;
 
+  const entryRoutes: readonly string[] = ENTRY_ROUTE_VALUES;
+  const entryRoute =
+    typeof draft.entryRoute === 'string' && entryRoutes.includes(draft.entryRoute)
+      ? (draft.entryRoute as EntryRoute)
+      : null;
+
   return {
     ...INITIAL_PLANNER_STATE,
     answers: migrateAnswers(draft.answers, draft.version),
@@ -177,6 +189,7 @@ export function loadDraft(): PlannerState | null {
     optIns: (Array.isArray(draft.optIns) ? draft.optIns : []) as readonly PlannerFieldId[],
     activeStep,
     templateId,
+    entryRoute,
   };
 }
 

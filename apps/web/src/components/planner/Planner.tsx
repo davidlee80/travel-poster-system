@@ -46,7 +46,7 @@ import { TopBar } from './shell/TopBar';
  * 生成与轮询沿用 P2 的逻辑（13.1 提交 → 13.2 轮询）。
  */
 
-/** 主问卷的九步。第 10 步是生成之后的行前准备中心（规范 16）*/
+/** 主问卷的十步（含第 0 步入口页）。第 10 步是生成之后的行前准备中心（规范 16）*/
 const MAIN_STEPS: readonly PlannerStepId[] = PLANNER_STEPS.filter((step) => step.step !== '10').map(
   (step) => step.step,
 );

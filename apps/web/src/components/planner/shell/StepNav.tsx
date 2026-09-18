@@ -20,7 +20,7 @@ import { STEP_STATE_LABEL, TRIP_STATE_LABEL, type PlannerSnapshot } from '@/lib/
  * 因此每个点都有 `title` 与 `aria-label`，且 needs-attention 在 CSS 里是**方形**。
  */
 
-/** 主问卷的九步。第 10 步只在方案生成之后加进来（规范 16）*/
+/** 主问卷的十步（含第 0 步入口页）。第 10 步只在方案生成之后加进来（规范 16）*/
 const NAV_STEPS = PLANNER_STEPS.filter((step) => step.step !== '10');
 const PREP_STEP = PLANNER_STEPS.find((step) => step.step === '10');
 
@@ -53,7 +53,7 @@ export function StepNav({
       className={`planner-panel planner-left${open ? ' planner-left--open' : ''}`}
       aria-label="步骤导航与旅行画像进度"
     >
-      <p className="planner-left__heading">这趟旅行的九个问题</p>
+      <p className="planner-left__heading">这趟旅行的十个问题</p>
       <p className="planner-left__copy">按顺序回答，条件问题只在相关时出现。</p>
 
       <nav className="planner-steps">

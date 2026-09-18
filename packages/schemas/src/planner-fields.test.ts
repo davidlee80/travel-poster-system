@@ -94,6 +94,7 @@ describe('Planner 字段元数据（规范 21.1 硬门槛）', () => {
    */
   it('每步字段数与规范 2.2 的分布表一致', () => {
     const expected: Record<PlannerStepId, number> = {
+      '00': 0,
       '01': 8,
       '02': 6,
       '03': 6,

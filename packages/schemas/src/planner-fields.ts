@@ -53,8 +53,9 @@ import { z } from 'zod';
  * `PV2-01-009` 在附录 A 里是 `HARD`，这不是笔误。
  */
 
-/** 9 步主问卷 + 生成后的行前准备中心。字符串而不是数字 —— 它同时是 field_id 的第二段 */
+/** 入口页（第 0 步）+ 9 步主问卷 + 生成后的行前准备中心。字符串而不是数字 —— 它同时是 field_id 的第二段 */
 export const PLANNER_STEP_IDS = [
+  '00',
   '01',
   '02',
   '03',
@@ -226,6 +227,13 @@ export interface PlannerStepSpec {
 }
 
 export const PLANNER_STEPS = [
+  {
+    step: '00',
+    nav: '从这里开始',
+    title: '这趟旅行，你想到哪一步了？',
+    module: '旅行准备状态',
+    intro: '不用全部想清楚。选一个最接近的状态，我们一起往下走。',
+  },
   {
     step: '01',
     nav: '旅行轮廓',
