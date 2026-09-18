@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>自由行智能规划器 - 视觉设计稿</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;700&display=swap" rel="stylesheet">
+  
+  <style>
+    /* =======================================================
+       1. 调色盘与全局变量（低刺激、温润自然的大地与植物色系）
+       ======================================================= */
+    :root {
+      --bg-base: #F7F5F0;          /* 暖燕麦纸质底色 */
+      --bg-surface: #FFFFFF;       /* 纯净白卡片 */
+      --bg-surface-subtle: #F1EFEA;/* 弱层次容器色 */
+      
+      --text-main: #232B28;        /* 深杉木色（主文本，防纯黑刺眼） */
+      --text-muted: #6C7771;       /* 柔灰绿（次级文本与提示） */
+      --text-light: #9DA6A0;       /* 占位与极淡色 */
+      
+      --primary: #335948;          /* 松针墨绿（品牌主色与主行为） */
+      --primary-hover: #264336;    /* 墨绿 Hover */
+      --primary-light: #EBF2EE;    /* 墨绿浅色水洗底色 */
+      
+      --accent: #CF7E48;           /* 陶土暖橘（高光、激活与温暖点缀） */
+      --accent-light: #FBF0E9;     /* 陶土浅底色 */
+
+      --border-subtle: rgba(35, 43, 40, 0.07);
+      --border-focus: rgba(51, 89, 72, 0.4);
+      --shadow-sm: 0 2px 8px rgba(35, 43, 40, 0.03);
+      --shadow-md: 0 8px 30px rgba(35, 43, 40, 0.05);
+      --shadow-hover: 0 14px 40px rgba(35, 43, 40, 0.08);
+
+      --radius-sm: 10px;
+      --radius-md: 16px;
+      --radius-lg: 24px;
+      --radius-full: 9999px;
+
+      --font-serif: 'Noto Serif SC', Georgia, serif;
+      --font-sans: 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* 纸张微光与呼吸感弥散背景光晕 */
+    .ambient-glow-1 {
+      position: fixed;
+      top: -120px;
+      right: -100px;
+      width: 580px;
+      height: 580px;
+      background: radial-gradient(circle, rgba(224, 237, 227, 0.7) 0%, rgba(247, 245, 240, 0) 70%);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .ambient-glow-2 {
+      position: fixed;
+      bottom: -150px;
+      left: -100px;
+      width: 650px;
+      height: 650px;
+      background: radial-gradient(circle, rgba(251, 237, 225, 0.5) 0%, rgba(247, 245, 240, 0) 70%);
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* =======================================================
+       2. 顶部导航（轻盈沉浸式）
+       ======================================================= */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 40px;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      background: rgba(247, 245, 240, 0.85);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background: var(--primary-light);
+      color: var(--primary);
+      border-radius: var(--radius-sm);
+      display: grid;
+      place-items: center;
+      font-size: 16px;
+    }
+    .brand-text h1 {
+      font-family: var(--font-serif);
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .brand-text p {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+    .save-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .save-indicator::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      background: #73A786;
+      border-radius: 50%;
+    }
+    .btn-ghost {
+      border: 1px solid var(--border-subtle);
+      background: transparent;
+      padding: 8px 16px;
+      border-radius: var(--radius-full);
+      font-size: 13px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-ghost:hover {
+      background: rgba(0,0,0,0.03);
+      color: var(--text-main);
+    }
+
+    /* =======================================================
+       3. 核心布局（去繁化简的双栏主工作台）
+       ======================================================= */
+    .app-workspace {
+      position: relative;
+      z-index: 1;
+      max-width: 1240px;
+      margin: 0 auto;
+      width: 100%;
+      padding: 32px 32px 80px;
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 56px;
+      align-items: start;
+    }
+
+    /* 优雅紧凑的左侧步骤引导轨 */
+    .nav-rail {
+      position: sticky;
+      top: 100px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+    .rail-header {
+      padding-left: 12px;
+    }
+    .rail-header h3 {
+      font-family: var(--font-serif);
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 4px;
+    }
+    .rail-header p {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .step-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      position: relative;
+    }
+    .step-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      font-size: 14px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-decoration: none;
+    }
+    .step-num {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      opacity: 0.6;
+    }
+    .step-item:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.4);
+    }
+    .step-item.active {
+      color: var(--primary);
+      font-weight: 600;
+      background: var(--bg-surface);
+      box-shadow: var(--shadow-sm);
+    }
+    .step-item.active .step-num {
+      color: var(--primary);
+      opacity: 1;
+    }
+    .step-dot {
+      margin-left: auto;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: transparent;
+    }
+    .step-item.active .step-dot {
+      background: var(--accent);
+    }
+
+    /* =======================================================
+       4. 中间主内容区（旅行杂志画报感）
+       ======================================================= */
+    .main-content {
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+      animation: fadeIn 0.4s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* 头部标题区 */
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 24px;
+    }
+    .eyebrow {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    .headline {
+      font-family: var(--font-serif);
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1.25;
+      color: var(--text-main);
+      letter-spacing: -0.3px;
+    }
+    .subline {
+      margin-top: 8px;
+      font-size: 15px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+    .step-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 14px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-full);
+      font-size: 13px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    /* 选项卡片网格 (2x2) */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+    }
+
+    .choice-card {
+      background: var(--bg-surface);
+      border-radius: var(--radius-lg);
+      border: 1.5px solid transparent;
+      padding: 24px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+      overflow: hidden;
+    }
+    .choice-card:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-hover);
+      border-color: rgba(51, 89, 72, 0.2);
+    }
+    .choice-card.selected {
+      border-color: var(--primary);
+      background: #FFFFFF;
+      box-shadow: var(--shadow-md);
+    }
+
+    /* 视觉插图区（杂志配图质感） */
+    .card-art {
+      height: 120px;
+      border-radius: var(--radius-md);
+      margin-bottom: 20px;
+      display: grid;
+      place-items: center;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.3s ease;
+    }
+    .choice-card:hover .card-art {
+      transform: scale(1.02);
+    }
+
+    /* 各卡片定制柔和背景 */
+    .art-bg-1 { background: linear-gradient(135deg, #ECE8F6 0%, #DFE8F3 100%); }
+    .art-bg-2 { background: linear-gradient(135deg, #F9F0E1 0%, #E8EFE5 100%); }
+    .art-bg-3 { background: linear-gradient(135deg, #E3EFE5 0%, #D8E7E7 100%); }
+    .art-bg-4 { background: linear-gradient(135deg, #F7EAE3 0%, #F5F1E9 100%); }
+
+    /* 抽象简约的插画元素 */
+    .art-caption {
+      position: absolute;
+      top: 10px;
+      left: 14px;
+      font-size: 9px;
+      letter-spacing: 1.5px;
+      color: rgba(35, 43, 40, 0.45);
+      font-weight: 600;
+    }
+
+    /* 卡片内容区 */
+    .card-tags {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .tag {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: var(--bg-surface-subtle);
+      color: var(--text-muted);
+    }
+    .tag.confirmed {
+      background: var(--primary-light);
+      color: var(--primary);
+      font-weight: 500;
+    }
+
+    .card-title {
+      font-family: var(--font-serif);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 6px;
+    }
+    .card-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 18px;
+      flex-grow: 1;
+    }
+
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 14px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .card-arrow {
+      font-size: 15px;
+      color: var(--text-main);
+      transition: transform 0.2s;
+    }
+    .choice-card:hover .card-arrow {
+      transform: translateX(3px);
+      color: var(--primary);
+    }
+
+    /* 底部操作区 */
+    .bottom-bar {
+      margin-top: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 24px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 14px 32px;
+      border-radius: var(--radius-full);
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(51, 89, 72, 0.25);
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-primary:hover {
+      background: var(--primary-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(51, 89, 72, 0.3);
+    }
+
+    /* =======================================================
+       5. 浮动“行程账本”状态胶囊（替代原先庞大的右侧栏）
+       ======================================================= */
+    .floating-summary-pill {
+      position: fixed;
+      bottom: 24px;
+      right: 32px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      padding: 10px 18px;
+      border-radius: var(--radius-full);
+      box-shadow: var(--shadow-md);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      z-index: 100;
+    }
+    .floating-summary-pill:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-hover);
+    }
+    .pill-progress {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pill-progress-bar {
+      width: 48px;
+      height: 5px;
+      background: var(--bg-surface-subtle);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .pill-progress-fill {
+      width: 10%;
+      height: 100%;
+      background: var(--accent);
+    }
+    .pill-text {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-main);
+    }
+    .pill-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      border-left: 1px solid var(--border-subtle);
+      padding-left: 14px;
+    }
+
+    /* 响应式调整 */
+    @media (max-width: 992px) {
+      .app-workspace {
+        grid-template-columns: 1fr;
+        gap: 32px;
+      }
+      .nav-rail {
+        display: none;
+      }
+      .cards-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 弥散柔光氛围（不晃眼的环境光） -->
+  <div class="ambient-glow-1"></div>
+  <div class="ambient-glow-2"></div>
+
+  <!-- 顶部沉浸式状态栏 -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">✦</div>
+      <div class="brand-text">
+        <h1>自由行规划向导</h1>
+        <p>为你量身打造的私人慢旅行</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span class="save-indicator">已实时保存</span>
+      <button class="btn-ghost">重新规划</button>
+      <button class="btn-ghost">我的行程 (1)</button>
+    </div>
+  </header>
+
+  <!-- 工作区容器 -->
+  <main class="app-workspace">
+    
+    <!-- 左侧简化向导导航（减轻传统表单压迫感） -->
+    <aside class="nav-rail">
+      <div class="rail-header">
+        <h3>旅程轮廓</h3>
+        <p>10 步勾勒你的心仪假日</p>
+      </div>
+      <ul class="step-list">
+        <li><a class="step-item active"><span class="step-num">00</span> 从这里开始 <span class="step-dot"></span></a></li>
+        <li><a class="step-item"><span class="step-num">01</span> 旅行轮廓 <span class="step-dot"></span></a></li>
+        <li><a class="step-item"><span class="step-num">02</span> 同行人员 <span class="step-dot"></span></a></li>
+        <li><a class="step-item"><span class="step-num">03</span> 预算预期 <span class="step-dot"></span></a></li>
+        <li><a class="step-item"><span class="step-num">04</span> 旅行节奏 <span class="step-dot"></span></a></li>
+        <li><a class="step-item"><span class="step-num">05</span> 行程交通 <span class="step-dot"></span></a></li>
+        <li><a class="step-item"><span class="step-num">06</span> 住宿偏好 <span class="step-dot"></span></a></li>
+        <li><a class="step-item"><span class="step-num">07</span> 餐饮探索 <span class="step-dot"></span></a></li>
+        <li><a class="step-item"><span class="step-num">08</span> 特别关照 <span class="step-dot"></span></a></li>
+        <li><a class="step-item"><span class="step-num">09</span> 生成计划 <span class="step-dot"></span></a></li>
+      </ul>
+    </aside>
+
+    <!-- 主展示与问答区 -->
+    <section class="main-content">
+      
+      <div class="page-header">
+        <div>
+          <p class="eyebrow">STEP 00 · INITIAL INSPIRATION</p>
+          <h2 class="headline">这趟旅行，你想到哪一步了？</h2>
+          <p class="subline">不用有压力去构想全部细节。选一个最惬意的起点，我们一同慢慢拼凑。</p>
+        </div>
+        <div class="step-badge">
+          第 0 步 / 共 10 步
+        </div>
+      </div>
+
+      <!-- 4张杂志感主卡片 -->
+      <div class="cards-grid">
+        
+        <!-- 卡片 1 -->
+        <article class="choice-card" onclick="selectCard(this)">
+          <div class="card-art art-bg-1">
+            <span class="art-caption">FIND YOUR INSPIRATION</span>
+            <!-- 极简自然图景 -->
+            <svg width="80" height="60" viewBox="0 0 80 60" fill="none">
+              <circle cx="56" cy="22" r="16" fill="#B3B1D8" opacity="0.5"/>
+              <ellipse cx="32" cy="40" rx="26" ry="10" fill="#959ABF" opacity="0.6"/>
+              <circle cx="28" cy="28" r="4" fill="#FFFFFF"/>
+            </svg>
+          </div>
+          <div class="card-tags">
+            <span class="tag">目的地未定</span>
+            <span class="tag">时间未定</span>
+          </div>
+          <h4 class="card-title">还没想好去哪</h4>
+          <p class="card-desc">只是感觉需要出去透透气，看看世界有什么可能，从心仪的体验开始探索。</p>
+          <div class="card-footer">
+            <span>根据偏好风格推荐灵感</span>
+            <span class="card-arrow">→</span>
+          </div>
+        </article>
+
+        <!-- 卡片 2 -->
+        <article class="choice-card selected" onclick="selectCard(this)">
+          <div class="card-art art-bg-2">
+            <span class="art-caption">MAKE THE MOST OF DAYS</span>
+            <svg width="80" height="60" viewBox="0 0 80 60" fill="none">
+              <rect x="22" y="16" width="36" height="30" rx="6" fill="#FFFFFF" opacity="0.8"/>
+              <rect x="22" y="16" width="36" height="8" rx="2" fill="#D3A56D" opacity="0.8"/>
+              <circle cx="50" cy="34" r="8" fill="#7D987B" opacity="0.7"/>
+            </svg>
+          </div>
+          <div class="card-tags">
+            <span class="tag">目的地未定</span>
+            <span class="tag confirmed">时间已定 ✓</span>
+          </div>
+          <h4 class="card-title">假期有了，去哪好呢</h4>
+          <p class="card-desc">一段宝贵的空档期已经留出，想挑一个最适合这个季节与节奏的度假地。</p>
+          <div class="card-footer">
+            <span>结合季节与天数精准比对</span>
+            <span class="card-arrow">→</span>
+          </div>
+        </article>
+
+        <!-- 卡片 3 -->
+        <article class="choice-card" onclick="selectCard(this)">
+          <div class="card-art art-bg-3">
+            <span class="art-caption">A PLACE ON WISHLIST</span>
+            <svg width="80" height="60" viewBox="0 0 80 60" fill="none">
+              <path d="M18 42L34 22L50 42H18Z" fill="#759477" opacity="0.6"/>
+              <circle cx="56" cy="22" r="6" fill="#E8CD89"/>
+              <circle cx="38" cy="18" r="3" fill="#D67B54"/>
+            </svg>
+          </div>
+          <div class="card-tags">
+            <span class="tag confirmed">目的地已定 ✓</span>
+            <span class="tag">时间未定</span>
+          </div>
+          <h4 class="card-title">有想去的地方，时间待定</h4>
+          <p class="card-desc">心里已经有一张一定要打卡的心愿地图，正在等待一个气候最舒服的窗口出发。</p>
+          <div class="card-footer">
+            <span>分析最佳旅行月份与时机</span>
+            <span class="card-arrow">→</span>
+          </div>
+        </article>
+
+        <!-- 卡片 4 -->
+        <article class="choice-card" onclick="selectCard(this)">
+          <div class="card-art art-bg-4">
+            <span class="art-caption">LET'S PUT TOGETHER</span>
+            <svg width="80" height="60" viewBox="0 0 80 60" fill="none">
+              <path d="M20 20L40 26L60 18V44L40 50L20 44V20Z" fill="#FFFFFF" opacity="0.8"/>
+              <circle cx="32" cy="34" r="3" fill="#C57558"/>
+              <circle cx="48" cy="30" r="3" fill="#3A6351"/>
+            </svg>
+          </div>
+          <div class="card-tags">
+            <span class="tag confirmed">目的地已定 ✓</span>
+            <span class="tag confirmed">时间已定 ✓</span>
+          </div>
+          <h4 class="card-title">都敲定了，开始做功课吧</h4>
+          <p class="card-desc">目标城市和出发日期都已经明确，现在需要把散落的路线、住宿与体验串成珍珠。</p>
+          <div class="card-footer">
+            <span>开始行程细节与节奏规划</span>
+            <span class="card-arrow">→</span>
+          </div>
+        </article>
+
+      </div>
+
+      <!-- 底部行动条 -->
+      <footer class="bottom-bar">
+        <span style="font-size: 13px; color: var(--text-muted);">
+          选择后可随时返回更改，无需担心定型
+        </span>
+        <button class="btn-primary">
+          下一步 · 旅行轮廓 <span>→</span>
+        </button>
+      </footer>
+
+    </section>
+
+  </main>
+
+  <!-- 浮动收纳状态胶囊（把原先繁琐的右侧面板收入胶囊，点击可展开） -->
+  <div class="floating-summary-pill" title="点击查看已整理的偏好与智能研究">
+    <div class="pill-progress">
+      <div class="pill-progress-bar">
+        <div class="pill-progress-fill"></div>
+      </div>
+      <span class="pill-text">10% 旅程画像</span>
+    </div>
+    <span class="pill-hint">已就绪 1 项 · 8 项由 AI 协助研究</span>
+  </div>
+
+  <script>
+    // 简单的单选卡片交互演示
+    function selectCard(element) {
+      document.querySelectorAll('.choice-card').forEach(card => {
+        card.classList.remove('selected');
+      });
+      element.classList.add('selected');
+    }
+  </script>
+</body>
+</html>

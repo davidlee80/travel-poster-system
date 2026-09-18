@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>自由行智能规划器 - 步骤 01：旅行轮廓</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@600;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* 大地自然色系 */
+      --bg-canvas: #F8F7F4;
+      --bg-surface: #FFFFFF;
+      --bg-subtle: #F2EEE9;
+      --border-subtle: #E7E2DA;
+      --border-hover: #D4CDC2;
+
+      /* 文字层级（避免纯黑） */
+      --text-main: #28332A;
+      --text-muted: #647065;
+      --text-light: #96A197;
+
+      /* 核心鼠尾草绿 */
+      --brand-primary: #3E6649;
+      --brand-primary-hover: #32533B;
+      --brand-surface: #EEF4F0;
+
+      /* 字体规范 */
+      --font-serif: "Noto Serif SC", serif;
+      --font-sans: "Noto Sans SC", -apple-system, sans-serif;
+      --font-num: "Plus Jakarta Sans", sans-serif;
+
+      --shadow-card: 0 4px 20px -2px rgba(45, 55, 45, 0.05), 0 1px 3px 0 rgba(45, 55, 45, 0.03);
+      --shadow-float: 0 8px 24px -4px rgba(45, 55, 45, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-canvas);
+      color: var(--text-main);
+      line-height: 1.55;
+      min-height: 100vh;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* 柔光微氛围 */
+    .ambient-glow {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(140px);
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.6;
+    }
+    .glow-left {
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, #E6EFE9 0%, rgba(230, 239, 233, 0) 70%);
+      top: -120px;
+      left: 10%;
+    }
+    .glow-right {
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, #F8EDDF 0%, rgba(248, 237, 223, 0) 70%);
+      bottom: -120px;
+      right: 5%;
+    }
+
+    /* 顶部毛玻璃导航条 */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 36px;
+      background: rgba(248, 247, 244, 0.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(231, 226, 218, 0.65);
+    }
+    .topbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .brand-symbol {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: var(--brand-primary);
+      color: #FFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    .brand-meta h1 {
+      font-family: var(--font-serif);
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+    .brand-meta span {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+    .save-status {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+    .save-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--brand-primary);
+    }
+
+    /* 三栏主体框架 */
+    .app-layout {
+      position: relative;
+      z-index: 1;
+      max-width: 1440px;
+      margin: 28px auto 80px;
+      padding: 0 32px;
+      display: grid;
+      grid-template-columns: 240px 1fr 340px;
+      gap: 32px;
+      align-items: start;
+    }
+
+    /* 左侧步骤列表 */
+    .step-rail {
+      position: sticky;
+      top: 88px;
+      background: rgba(255, 255, 255, 0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 22px;
+      padding: 22px 18px;
+      box-shadow: var(--shadow-card);
+    }
+    .rail-header h2 {
+      font-family: var(--font-serif);
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .rail-header p {
+      font-size: 0.76rem;
+      color: var(--text-muted);
+      margin-bottom: 18px;
+    }
+    .step-nav-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .step-nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-radius: 12px;
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .step-nav-item.active {
+      background: var(--brand-surface);
+      color: var(--brand-primary);
+      font-weight: 600;
+    }
+    .nav-left-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .nav-num {
+      font-family: var(--font-num);
+      font-size: 0.8rem;
+      color: var(--text-light);
+    }
+    .step-nav-item.active .nav-num {
+      color: var(--brand-primary);
+    }
+    .status-dot-done {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #739B7C;
+    }
+    .status-dot-active {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--brand-primary);
+    }
+
+    /* 中间：第 1 步主内容 */
+    .main-canvas {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .card-hero {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 24px;
+      padding: 36px 40px;
+      box-shadow: var(--shadow-card);
+    }
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 30px;
+    }
+    .step-eyebrow {
+      font-family: var(--font-num);
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--brand-primary);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+    .card-top h2 {
+      font-family: var(--font-serif);
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .card-top p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+    .step-badge {
+      font-family: var(--font-num);
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--brand-primary);
+      background: var(--brand-surface);
+      padding: 4px 14px;
+      border-radius: 20px;
+      border: 1px solid #D9E6DC;
+    }
+
+    /* 表单区块设计 */
+    .section-block {
+      margin-bottom: 32px;
+    }
+    .section-block:last-of-type {
+      margin-bottom: 20px;
+    }
+    .block-title {
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .block-title small {
+      font-weight: 400;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    /* 出发与到达路线胶囊 */
+    .route-capsule {
+      display: grid;
+      grid-template-columns: 1fr 48px 1fr;
+      align-items: center;
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-subtle);
+      border-radius: 18px;
+      padding: 6px 12px;
+      transition: all 0.25s;
+    }
+    .route-capsule:focus-within {
+      background: #FFF;
+      border-color: var(--brand-primary);
+      box-shadow: 0 0 0 4px rgba(62, 102, 73, 0.08);
+    }
+    .route-input-group {
+      padding: 8px 12px;
+    }
+    .route-label {
+      font-size: 0.74rem;
+      color: var(--text-light);
+      display: block;
+      margin-bottom: 2px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .route-input {
+      width: 100%;
+      border: none;
+      background: transparent;
+      outline: none;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+    .route-input::placeholder {
+      color: #A9B2AA;
+      font-weight: 400;
+    }
+    .route-divider {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--brand-primary);
+      font-size: 18px;
+    }
+    .route-sub-options {
+      display: flex;
+      gap: 16px;
+      margin-top: 10px;
+      padding-left: 4px;
+    }
+    .sub-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .v2-badge {
+      font-size: 0.68rem;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--bg-subtle);
+      color: var(--text-light);
+    }
+
+    /* 日期双卡片联动 */
+    .date-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 160px;
+      gap: 16px;
+      align-items: center;
+    }
+    .date-field {
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 12px 18px;
+      transition: all 0.2s;
+    }
+    .date-field:focus-within {
+      background: #FFF;
+      border-color: var(--brand-primary);
+      box-shadow: 0 0 0 4px rgba(62, 102, 73, 0.08);
+    }
+    .date-field label {
+      font-size: 0.74rem;
+      color: var(--text-light);
+      display: block;
+      margin-bottom: 4px;
+    }
+    .date-field input {
+      border: none;
+      background: transparent;
+      outline: none;
+      width: 100%;
+      font-family: var(--font-num);
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-main);
+      cursor: pointer;
+    }
+    .trip-calc-badge {
+      background: var(--brand-surface);
+      border: 1px dashed #BFD8C5;
+      border-radius: 16px;
+      padding: 14px 16px;
+      text-align: center;
+    }
+    .trip-calc-badge span {
+      font-size: 0.75rem;
+      color: var(--brand-primary);
+      display: block;
+      margin-bottom: 2px;
+    }
+    .trip-calc-badge strong {
+      font-family: var(--font-num);
+      font-size: 1.15rem;
+      color: var(--brand-primary);
+    }
+
+    /* 已有预订（锚点）卡片化多选芯片 */
+    .anchor-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+    .anchor-card {
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-canvas);
+      border-radius: 16px;
+      padding: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      user-select: none;
+    }
+    .anchor-card:hover {
+      background: #FFF;
+      border-color: var(--border-hover);
+      transform: translateY(-2px);
+    }
+    .anchor-card.active {
+      background: var(--brand-surface);
+      border-color: var(--brand-primary);
+      box-shadow: 0 2px 10px rgba(62, 102, 73, 0.1);
+    }
+    .anchor-icon {
+      font-size: 20px;
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: #FFF;
+      border: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .anchor-card.active .anchor-icon {
+      border-color: #BFD8C5;
+      background: #FFF;
+    }
+    .anchor-meta strong {
+      display: block;
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-bottom: 2px;
+    }
+    .anchor-card.active .anchor-meta strong {
+      color: var(--brand-primary);
+    }
+    .anchor-meta span {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      line-height: 1.3;
+      display: block;
+    }
+
+    /* 温和提示条 */
+    .soft-hint-bar {
+      background: #FBF7F0;
+      border: 1px solid #EFE2CE;
+      border-radius: 14px;
+      padding: 12px 16px;
+      margin-top: 14px;
+      font-size: 0.78rem;
+      color: #7A5F35;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .soft-hint-bar::before {
+      content: "💡";
+      font-size: 14px;
+    }
+
+    /* 底部操作条 */
+    .bottom-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid var(--bg-subtle);
+    }
+    .btn-prev {
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 11px 22px;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .btn-prev:hover {
+      background: #FFF;
+      border-color: var(--border-hover);
+      color: var(--text-main);
+    }
+    .btn-next {
+      background: var(--brand-primary);
+      color: #FFF;
+      border: none;
+      padding: 12px 30px;
+      border-radius: 14px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(62, 102, 73, 0.25);
+      transition: all 0.2s;
+    }
+    .btn-next:hover {
+      background: var(--brand-primary-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(62, 102, 73, 0.3);
+    }
+
+    /* 右侧进度栏 */
+    .right-sidebar {
+      position: sticky;
+      top: 88px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .sidebar-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 22px;
+      padding: 24px;
+      box-shadow: var(--shadow-card);
+    }
+    .sidebar-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 12px;
+    }
+    .sidebar-head h3 {
+      font-family: var(--font-serif);
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    .progress-bar {
+      height: 6px;
+      background: var(--bg-subtle);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .progress-fill {
+      width: 20%;
+      height: 100%;
+      background: var(--brand-primary);
+    }
+    .stat-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .stat-box {
+      background: var(--bg-canvas);
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border-subtle);
+    }
+    .stat-box span {
+      font-size: 0.74rem;
+      color: var(--text-muted);
+      display: block;
+    }
+    .stat-box strong {
+      font-family: var(--font-num);
+      font-size: 1.05rem;
+      color: var(--text-main);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 背景柔和光晕 -->
+  <div class="ambient-glow glow-left"></div>
+  <div class="ambient-glow glow-right"></div>
+
+  <!-- 顶部状态栏 -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="brand-symbol">✦</div>
+      <div class="brand-meta">
+        <h1>自由行智能规划器</h1>
+        <span>私人旅行规划服务</span>
+      </div>
+    </div>
+    <div class="save-status">
+      <div class="save-dot"></div>
+      <span>修改已自动保存</span>
+    </div>
+  </header>
+
+  <!-- 主体工作区 -->
+  <main class="app-layout">
+    
+    <!-- 左侧导航 -->
+    <aside class="step-rail">
+      <div class="rail-header">
+        <h2>旅程的十个问题</h2>
+        <p>按顺序回答，条件问题按需呈现</p>
+      </div>
+      <nav class="step-nav-list">
+        <div class="step-nav-item">
+          <div class="nav-left-meta"><span class="nav-num">00</span><span>从这里开始</span></div>
+          <span class="status-dot-done"></span>
+        </div>
+        <div class="step-nav-item active">
+          <div class="nav-left-meta"><span class="nav-num">01</span><span>旅行轮廓</span></div>
+          <span class="status-dot-active"></span>
+        </div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">02</span><span>旅行人员</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">03</span><span>预算取舍</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">04</span><span>旅行节奏</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">05</span><span>路上怎么走</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">06</span><span>住得更舒服</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">07</span><span>吃好也玩好</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">08</span><span>特别关照</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">09</span><span>确认旅程</span></div></div>
+      </nav>
+    </aside>
+
+    <!-- 中间：步骤 01 旅行轮廓 -->
+    <section class="main-canvas">
+      <div class="card-hero">
+        <div class="card-top">
+          <div>
+            <div class="step-eyebrow">01 · 旅行轮廓</div>
+            <h2>确定出发地、目的地与出行日期</h2>
+            <p>填好基本轮廓，系统即可开始为你绘制大致的时间轴与动线骨架。</p>
+          </div>
+          <span class="step-badge">第 1 步 / 10</span>
+        </div>
+
+        <!-- 1. 路线起止胶囊 -->
+        <div class="section-block">
+          <div class="block-title">
+            <span>规划路线</span>
+            <small>输入城市或区域</small>
+          </div>
+          <div class="route-capsule">
+            <div class="route-input-group">
+              <span class="route-label">出发城市</span>
+              <input type="text" class="route-input" placeholder="例如：上海" value="上海" />
+            </div>
+            <div class="route-divider">➔</div>
+            <div class="route-input-group">
+              <span class="route-label">目的地</span>
+              <input type="text" class="route-input" placeholder="例如：京都 / 关西" value="京都" />
+            </div>
+          </div>
+          <div class="route-sub-options">
+            <label class="sub-checkbox">
+              <input type="checkbox" /> 目的地尚未完全确定
+              <span class="v2-badge">V2</span>
+            </label>
+            <label class="sub-checkbox">
+              <input type="checkbox" disabled /> 接受多个目的地组合
+              <span class="v2-badge">V2</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 2. 日期与周期计算 -->
+        <div class="section-block">
+          <div class="block-title">
+            <span>出行时间</span>
+            <small>往返日期与时长</small>
+          </div>
+          <div class="date-grid">
+            <div class="date-field">
+              <label>出发日期</label>
+              <input type="date" value="2026-10-01" />
+            </div>
+            <div class="date-field">
+              <label>返回日期</label>
+              <input type="date" value="2026-10-06" />
+            </div>
+            <div class="trip-calc-badge">
+              <span>预计行程总长</span>
+              <strong>6 天 5 晚</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 已有预订（行程锚点） -->
+        <div class="section-block">
+          <div class="block-title">
+            <span>已有预订项目</span>
+            <small>已订项目将作为不可挪动的硬约束时间窗</small>
+          </div>
+          <div class="anchor-grid">
+            <div class="anchor-card active" onclick="toggleAnchor(this)">
+              <div class="anchor-icon">✈️</div>
+              <div class="anchor-meta">
+                <strong>已订往返大交通</strong>
+                <span>钉住首日到达与末日离港时间</span>
+              </div>
+            </div>
+            <div class="anchor-card" onclick="toggleAnchor(this)">
+              <div class="anchor-icon">🏨</div>
+              <div class="anchor-meta">
+                <strong>已订部分或全程住宿</strong>
+                <span>每日动线将围绕固定落脚点辐射</span>
+              </div>
+            </div>
+            <div class="anchor-card" onclick="toggleAnchor(this)">
+              <div class="anchor-icon">🎟️</div>
+              <div class="anchor-meta">
+                <strong>已有预约门票 / 演出</strong>
+                <span>优先保全特定时间段的专属预约</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="soft-hint-bar">
+            已订酒店或交通会让特定日程固定，AI 会在此时间窗内智能填充最优景点与餐食。
+          </div>
+        </div>
+
+        <!-- 底部前进 / 返回 -->
+        <div class="bottom-actions">
+          <button class="btn-prev" onclick="window.history.back()">← 上一步</button>
+          <button class="btn-next">下一步 · 旅行人员 →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右侧看板 -->
+    <aside class="right-sidebar">
+      <div class="sidebar-card">
+        <div class="sidebar-head">
+          <h3>规划进度</h3>
+          <strong style="font-family: var(--font-num); color: var(--brand-primary);">20%</strong>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill"></div>
+        </div>
+        <p style="font-size: 0.78rem; color: var(--text-muted);">
+          已完成 2/10 步。旅行轮廓已确立。
+        </p>
+
+        <div class="stat-list">
+          <div class="stat-box">
+            <span>目标目的地</span>
+            <strong>京都</strong>
+          </div>
+          <div class="stat-box">
+            <span>预计天数</span>
+            <strong>6 天</strong>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </main>
+
+  <script>
+    function toggleAnchor(card) {
+      card.classList.toggle('active');
+    }
+  </script>
+</body>
+</html>

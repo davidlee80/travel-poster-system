@@ -259,6 +259,7 @@ export function plannerReducer(state: PlannerState, action: PlannerAction): Plan
     }
 
     case 'goToStep':
+      if (action.step !== '00' && state.entryRoute === null) return state;
       return { ...state, activeStep: action.step };
 
     case 'setEntryRoute':
@@ -271,7 +272,9 @@ export function plannerReducer(state: PlannerState, action: PlannerAction): Plan
       return { ...state, devMode: action.on };
 
     case 'restore':
-      return action.state;
+      return action.state.entryRoute === null
+        ? { ...action.state, activeStep: '00' }
+        : action.state;
 
     case 'reset':
       return INITIAL_PLANNER_STATE;

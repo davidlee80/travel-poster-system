@@ -444,6 +444,7 @@ export function Planner(): React.ReactElement {
           onJump={goToStep}
           open={menuOpen}
           planGenerated={planId !== null}
+          entrySelected={state.entryRoute !== null}
         />
 
         <main className="planner-main">

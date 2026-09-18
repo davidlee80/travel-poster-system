@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>旅行规划器 - 前端设计系统规范参考 (Design Tokens & UI Kit)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    /* ========================================================
+       1. 全局设计参数 Tokens (CSS Custom Properties)
+       ======================================================== */
+    :root {
+      /* 基础色彩 */
+      --color-canvas: #F8F7F2;          /* 主画布/纸张底色 */
+      --color-surface: #FFFFFF;         /* 纯净卡片表面色 */
+      --color-surface-subtle: #F1EFEA;  /* 次级灰底、输入框背景 */
+      --color-surface-elevated: #FFFFFF;/* 浮层表面色 */
+
+      /* 文字色彩 */
+      --text-main: #242D28;             /* 主文本：深杉木色，防纯黑刺眼 */
+      --text-muted: #6B756E;            /* 次要/说明文字 */
+      --text-tertiary: #9DA7A0;         /* 占位符、边框辅助文本 */
+      --text-inverse: #FFFFFF;          /* 反色文字 */
+
+      /* 品牌主色系：松针墨绿 */
+      --primary: #3B6955;
+      --primary-hover: #2E5343;
+      --primary-subtle: #EBF2EE;
+
+      /* 辅助点睛色：陶土暖橘 */
+      --accent: #D08552;
+      --accent-hover: #BD7442;
+      --accent-subtle: #FAF0E8;
+
+      /* 语义色（图例状态提取） */
+      --status-locked: #8C9590;         /* 已锁定：温和灰石色 */
+      --status-consent: #5B82A6;        /* 授权：淡灰丹宁蓝 */
+      --status-hard: #C0584D;           /* 必须满足：陶砖暗红 */
+      --status-exclude: #8A6885;        /* 明确不要：柔调灰紫 */
+      --status-verify: #D08552;         /* 还需要确认：暖陶色 */
+      --status-prefer: #4E876E;         /* 优先满足：植物青绿 */
+
+      /* 字体规范 */
+      --font-sans: 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+      --font-serif: 'Noto Serif SC', Georgia, serif;
+      --font-numeric: 'Inter', system-ui, sans-serif;
+
+      /* 边框与圆角 */
+      --border-subtle: rgba(36, 45, 40, 0.08);
+      --border-focus: rgba(59, 105, 85, 0.4);
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --radius-full: 9999px;
+
+      /* 阴影 */
+      --shadow-sm: 0 2px 8px rgba(36, 45, 40, 0.04);
+      --shadow-md: 0 8px 24px rgba(36, 45, 40, 0.06);
+      --shadow-hover: 0 12px 36px rgba(36, 45, 40, 0.09);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--color-canvas);
+      color: var(--text-main);
+      padding: 40px;
+      line-height: 1.6;
+    }
+
+    .spec-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 48px;
+    }
+
+    .spec-header {
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 24px;
+    }
+    .spec-header h1 {
+      font-family: var(--font-serif);
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    .spec-header p {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+
+    /* 章节区块 */
+    .spec-section {
+      background: var(--color-surface);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      box-shadow: var(--shadow-sm);
+      border: 1px solid var(--border-subtle);
+    }
+    .section-title {
+      font-family: var(--font-serif);
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .section-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 24px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    /* ========================================================
+       2. 组件样式：基础元素提取与新设计复原
+       ======================================================== */
+    
+    /* [元素 1]：品牌顶栏 Brand Topbar */
+    .comp-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .comp-brand__logo {
+      width: 36px;
+      height: 36px;
+      background: var(--primary-subtle);
+      color: var(--primary);
+      border-radius: var(--radius-sm);
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .comp-brand strong {
+      font-family: var(--font-serif);
+      font-size: 15px;
+      display: block;
+      color: var(--text-main);
+    }
+    .comp-brand small {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* 实时保存状态 */
+    .comp-save-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .comp-save-state__dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #73A786;
+      box-shadow: 0 0 0 2px rgba(115, 167, 134, 0.2);
+    }
+
+    /* [元素 2]：步骤项 Step Items */
+    .comp-steps-box {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-width: 280px;
+    }
+    .comp-step {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      font-size: 14px;
+      border: 1px solid transparent;
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+    .comp-step__meta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .comp-step__num {
+      font-family: var(--font-numeric);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-tertiary);
+    }
+    .comp-step--untouched {
+      color: var(--text-muted);
+    }
+    .comp-step--untouched:hover {
+      background: var(--color-surface-subtle);
+    }
+    .comp-step--active {
+      background: var(--primary-subtle);
+      color: var(--primary);
+      font-weight: 600;
+      border-color: rgba(59, 105, 85, 0.15);
+    }
+    .comp-step--active .comp-step__num {
+      color: var(--primary);
+    }
+    .comp-step__badge-attention {
+      background: var(--accent-subtle);
+      color: var(--accent);
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: var(--radius-full);
+      font-weight: 500;
+    }
+
+    /* [元素 3]：进度条体系 Progress Indicators */
+    .comp-progress {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .comp-progress__row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .comp-progress__row strong {
+      font-family: var(--font-numeric);
+      color: var(--text-main);
+    }
+    .comp-progress__track {
+      height: 6px;
+      background: var(--color-surface-subtle);
+      border-radius: var(--radius-full);
+      overflow: hidden;
+    }
+    .comp-progress__fill {
+      height: 100%;
+      background: var(--primary);
+      border-radius: var(--radius-full);
+      transition: width 0.3s ease;
+    }
+
+    /* [元素 4]：决策图例体系 Legend Swatches */
+    .comp-legend-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+    .comp-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--text-muted);
+      padding: 8px 12px;
+      background: var(--color-surface-subtle);
+      border-radius: var(--radius-sm);
+    }
+    .comp-legend__swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+    .swatch--locked  { background-color: var(--status-locked); }
+    .swatch--consent { background-color: var(--status-consent); }
+    .swatch--hard    { background-color: var(--status-hard); }
+    .swatch--exclude { background-color: var(--status-exclude); }
+    .swatch--verify  { background-color: var(--status-verify); }
+    .swatch--prefer  { background-color: var(--status-prefer); }
+
+    /* [元素 5]：标签体系 Tags */
+    .comp-tags-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .comp-tag {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: var(--color-surface-subtle);
+      color: var(--text-muted);
+    }
+    .comp-tag--confirmed {
+      background: var(--primary-subtle);
+      color: var(--primary);
+      font-weight: 500;
+    }
+    .comp-tag--highlight {
+      background: var(--accent-subtle);
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    /* [元素 6]：指标网格 Metrics (4项提取) */
+    .comp-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+    .comp-metric {
+      background: var(--color-surface-subtle);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .comp-metric strong {
+      font-family: var(--font-numeric);
+      font-size: 18px;
+      color: var(--text-main);
+    }
+    .comp-metric span {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* [元素 7]：研究清单 Research Chips */
+    .comp-research-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .comp-research-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: var(--color-surface-subtle);
+      border-radius: var(--radius-full);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .comp-research-chip::before {
+      content: "✦";
+      color: var(--primary);
+      font-size: 10px;
+    }
+
+    /* [元素 8]：按钮群组 Buttons */
+    .comp-buttons {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      font-family: var(--font-sans);
+      font-size: 14px;
+      padding: 10px 22px;
+      border-radius: var(--radius-full);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      border: 1px solid transparent;
+      text-decoration: none;
+    }
+    .btn--primary {
+      background: var(--primary);
+      color: var(--text-inverse);
+      box-shadow: 0 4px 12px rgba(59, 105, 85, 0.2);
+    }
+    .btn--primary:hover {
+      background: var(--primary-hover);
+      box-shadow: 0 6px 18px rgba(59, 105, 85, 0.3);
+    }
+    .btn--secondary {
+      background: var(--accent);
+      color: var(--text-inverse);
+    }
+    .btn--secondary:hover {
+      background: var(--accent-hover);
+    }
+    .btn--light {
+      background: var(--color-surface);
+      color: var(--text-muted);
+      border-color: var(--border-subtle);
+    }
+    .btn--light:hover {
+      color: var(--text-main);
+      background: var(--color-surface-subtle);
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="spec-container">
+    
+    <!-- 顶部说明 -->
+    <header class="spec-header">
+      <h1>自由行规划器 · 前端设计系统规范 (UI Kit)</h1>
+      <p>从原始 html 中提取的基础元素，按柔和、护眼的大地纸感进行视觉重塑的参数对照库。</p>
+    </header>
+
+    <!-- 1. 顶栏与品牌元素 -->
+    <section class="spec-section">
+      <h2 class="section-title">01 / 顶栏与状态标识 (Top Bar & Status)</h2>
+      <p class="section-desc">对应原系统顶部的 LOGO 块、自动保存状态小点与动作按钮。</p>
+      
+      <div class="grid-2">
+        <div>
+          <div class="comp-brand">
+            <span class="comp-brand__logo">✦</span>
+            <div>
+              <strong>自由行智能规划器</strong>
+              <small>私人旅行规划服务</small>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="comp-save-state">
+            <i class="comp-save-state__dot"></i>
+            修改会自动保存
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. 步骤指示器状态 -->
+    <section class="spec-section">
+      <h2 class="section-title">02 / 步骤导航项 (Step Nav Items)</h2>
+      <p class="section-desc">提取自原左侧 00~09 共 10 个步骤指示，包含未开始、当前聚焦与需关注状态。</p>
+
+      <div class="comp-steps-box">
+        <!-- 未开始 -->
+        <div class="comp-step comp-step--untouched">
+          <div class="comp-step__meta">
+            <span class="comp-step__num">00</span>
+            <span>从这里开始</span>
+          </div>
+        </div>
+        <!-- 激活/当前步骤 -->
+        <div class="comp-step comp-step--active">
+          <div class="comp-step__meta">
+            <span class="comp-step__num">01</span>
+            <span>旅行轮廓</span>
+          </div>
+          <span>●</span>
+        </div>
+        <!-- 需关注 -->
+        <div class="comp-step comp-step--untouched">
+          <div class="comp-step__meta">
+            <span class="comp-step__num">02</span>
+            <span>旅行人员</span>
+          </div>
+          <span class="comp-step__badge-attention">需处理</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 规划完整度进度条 -->
+    <section class="spec-section">
+      <h2 class="section-title">03 / 进度条指标 (Progress Indicators)</h2>
+      <p class="section-desc">提取自原左右两侧的信息完整度进度条[cite: 1]。</p>
+
+      <div class="grid-2">
+        <div class="comp-progress">
+          <div class="comp-progress__row">
+            <span>旅行画像完整度</span>
+            <strong>35%</strong>
+          </div>
+          <div class="comp-progress__track">
+            <div class="comp-progress__fill" style="width: 35%;"></div>
+          </div>
+        </div>
+
+        <div class="comp-progress">
+          <div class="comp-progress__row">
+            <span>已完成 2 / 9 步骤</span>
+            <strong style="color: var(--accent);">待核验</strong>
+          </div>
+          <div class="comp-progress__track">
+            <div class="comp-progress__fill" style="width: 22%; background: var(--accent);"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. 决策图例体系 (提取自原 6 种 legend) -->
+    <section class="spec-section">
+      <h2 class="section-title">04 / 旅行偏好约束图例 (Decision Legend Swatches)</h2>
+      <p class="section-desc">对应原 html 中的 6 种旅行决策标记[cite: 1]，调整为温和低饱和度的矿物自然色彩。</p>
+
+      <div class="comp-legend-grid">
+        <div class="comp-legend-item">
+          <span class="comp-legend__swatch swatch--locked"></span>
+          <span>已锁定，不可移动</span>
+        </div>
+        <div class="comp-legend-item">
+          <span class="comp-legend__swatch swatch--consent"></span>
+          <span>授权</span>
+        </div>
+        <div class="comp-legend-item">
+          <span class="comp-legend__swatch swatch--hard"></span>
+          <span>必须满足</span>
+        </div>
+        <div class="comp-legend-item">
+          <span class="comp-legend__swatch swatch--exclude"></span>
+          <span>明确不要</span>
+        </div>
+        <div class="comp-legend-item">
+          <span class="comp-legend__swatch swatch--verify"></span>
+          <span>还需要确认</span>
+        </div>
+        <div class="comp-legend-item">
+          <span class="comp-legend__swatch swatch--prefer"></span>
+          <span>优先满足</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. 标签体系 (Tags) -->
+    <section class="spec-section">
+      <h2 class="section-title">05 / 状态标签 (State Tags)</h2>
+      <p class="section-desc">提取自步骤选项中的目的地/时间等状态胶囊[cite: 1]。</p>
+
+      <div class="comp-tags-box">
+        <span class="comp-tag">目的地未定</span>
+        <span class="comp-tag">时间未定</span>
+        <span class="comp-tag comp-tag--confirmed">目的地已定 ✓</span>
+        <span class="comp-tag comp-tag--confirmed">时间已定 ✓</span>
+        <span class="comp-tag comp-tag--highlight">14 个待补充</span>
+      </div>
+    </section>
+
+    <!-- 6. 核心指标网格 (Metrics) -->
+    <section class="spec-section">
+      <h2 class="section-title">06 / 行程核心指标看板 (Planner Metrics)</h2>
+      <p class="section-desc">提取自原右侧看板中四个核心指标（目标总预算、行程天数、旅行人数、每日步行）[cite: 1]。</p>
+
+      <div class="comp-metrics">
+        <div class="comp-metric">
+          <strong>待估算</strong>
+          <span>目标总预算</span>
+        </div>
+        <div class="comp-metric">
+          <strong>7 天</strong>
+          <span>行程天数</span>
+        </div>
+        <div class="comp-metric">
+          <strong>2 人</strong>
+          <span>旅行人数</span>
+        </div>
+        <div class="comp-metric">
+          <strong>12,000 步</strong>
+          <span>每日步行</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. 系统自动研究项 Chips -->
+    <section class="spec-section">
+      <h2 class="section-title">07 / 自动研究项 (System Auto-Research Chips)</h2>
+      <p class="section-desc">对应原系统自动研究的 8 项无需用户填写的服务内容[cite: 1]。</p>
+
+      <div class="comp-research-chips">
+        <span class="comp-research-chip">天气穿衣</span>
+        <span class="comp-research-chip">签证过境</span>
+        <span class="comp-research-chip">当地安全</span>
+        <span class="comp-research-chip">交通票制</span>
+        <span class="comp-research-chip">景点预约</span>
+        <span class="comp-research-chip">餐厅预约</span>
+        <span class="comp-research-chip">支付现金</span>
+        <span class="comp-research-chip">通信 eSIM</span>
+      </div>
+    </section>
+
+    <!-- 8. 操作按钮群 Buttons -->
+    <section class="spec-section">
+      <h2 class="section-title">08 / 操作按钮 (Action Buttons)</h2>
+      <p class="section-desc">包含主行动按钮、次级操作与不可用状态[cite: 1]。</p>
+
+      <div class="comp-buttons">
+        <button class="btn btn--primary">下一步 · 旅行轮廓 →</button>
+        <button class="btn btn--secondary">确认提交意向</button>
+        <button class="btn btn--light">重新开始</button>
+        <button class="btn btn--primary" disabled>还差几项必答，去看看</button>
+      </div>
+    </section>
+
+  </div>
+
+</body>
+</html>

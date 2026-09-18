@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>自由行智能规划器 - 视觉与交互新版设计稿</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@600;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* 大地自然底色与表面 */
+      --bg-canvas: #F8F7F4;
+      --bg-surface: #FFFFFF;
+      --bg-subtle: #F2EEE9;
+      --border-subtle: #E7E2DA;
+      --border-hover: #D4CDC2;
+
+      /* 文字层级（去除刺眼纯黑） */
+      --text-main: #28332A;
+      --text-muted: #647065;
+      --text-light: #96A197;
+
+      /* 核心主色（鼠尾草绿与度假质感） */
+      --brand-primary: #3E6649;
+      --brand-primary-hover: #32533B;
+      --brand-surface: #EEF4F0;
+
+      /* planner_2.html 对应的 6 类状态色彩规范 */
+      --state-locked: #48544C;
+      --state-consent: #6B628A;
+      --state-hard: #265D37;
+      --state-exclude: #98433E;
+      --state-verify: #A66E1E;
+      --state-prefer: #235F82;
+
+      /* 字体规范 */
+      --font-serif: "Noto Serif SC", serif;
+      --font-sans: "Noto Sans SC", -apple-system, sans-serif;
+      --font-num: "Plus Jakarta Sans", sans-serif;
+
+      --shadow-card: 0 4px 20px -2px rgba(45, 55, 45, 0.05), 0 1px 3px 0 rgba(45, 55, 45, 0.03);
+      --shadow-hover: 0 12px 30px -4px rgba(45, 55, 45, 0.09);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-canvas);
+      color: var(--text-main);
+      line-height: 1.55;
+      min-height: 100vh;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    /* 背景氛围光斑 */
+    .ambient-glow {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(140px);
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.6;
+    }
+    .glow-left {
+      width: 550px;
+      height: 550px;
+      background: radial-gradient(circle, #E6EFE9 0%, rgba(230, 239, 233, 0) 70%);
+      top: -150px;
+      left: 10%;
+    }
+    .glow-right {
+      width: 650px;
+      height: 650px;
+      background: radial-gradient(circle, #F8EDDF 0%, rgba(248, 237, 223, 0) 70%);
+      bottom: -150px;
+      right: 5%;
+    }
+
+    /* 顶部毛玻璃导航条 */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 36px;
+      background: rgba(248, 247, 244, 0.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(231, 226, 218, 0.65);
+    }
+    .topbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .brand-symbol {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: var(--brand-primary);
+      color: #FFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      box-shadow: 0 3px 10px rgba(62, 102, 73, 0.2);
+    }
+    .brand-meta h1 {
+      font-family: var(--font-serif);
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .brand-meta span {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .save-status {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+    .save-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--brand-primary);
+      animation: pulse 2s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+    .action-btn-light {
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 0.82rem;
+      color: var(--text-main);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .action-btn-light:hover {
+      background: #FFF;
+      border-color: var(--border-hover);
+    }
+    .user-card-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #FFF;
+      border: 1px solid var(--border-subtle);
+      border-radius: 24px;
+      padding: 5px 12px;
+      cursor: pointer;
+      font-size: 0.82rem;
+    }
+
+    /* 3 栏现代排版架构 */
+    .app-layout {
+      position: relative;
+      z-index: 1;
+      max-width: 1440px;
+      margin: 28px auto 80px;
+      padding: 0 32px;
+      display: grid;
+      grid-template-columns: 240px 1fr 340px;
+      gap: 32px;
+      align-items: start;
+    }
+
+    /* 左侧步骤导航栏 */
+    .step-rail {
+      position: sticky;
+      top: 88px;
+      background: rgba(255, 255, 255, 0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 22px;
+      padding: 22px 18px;
+      box-shadow: var(--shadow-card);
+    }
+    .rail-header h2 {
+      font-family: var(--font-serif);
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .rail-header p {
+      font-size: 0.76rem;
+      color: var(--text-muted);
+      margin-bottom: 18px;
+    }
+    .step-nav-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 22px;
+    }
+    .step-nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-radius: 12px;
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .step-nav-item:hover {
+      background: var(--bg-subtle);
+      color: var(--text-main);
+    }
+    .step-nav-item.active {
+      background: var(--brand-surface);
+      color: var(--brand-primary);
+      font-weight: 600;
+    }
+    .nav-left-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .nav-num {
+      font-family: var(--font-num);
+      font-size: 0.8rem;
+      color: var(--text-light);
+    }
+    .step-nav-item.active .nav-num {
+      color: var(--brand-primary);
+    }
+    .nav-status-indicator {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--border-subtle);
+    }
+    .step-nav-item.active .nav-status-indicator {
+      background: var(--brand-primary);
+    }
+
+    /* 左侧图例说明 */
+    .legend-box {
+      border-top: 1px dashed var(--border-subtle);
+      padding-top: 16px;
+    }
+    .legend-title {
+      font-size: 0.76rem;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 10px;
+    }
+    .legend-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 10px;
+      font-size: 0.76rem;
+      color: var(--text-muted);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .legend-chip {
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+    }
+
+    /* 中间主体内容区 */
+    .main-canvas {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .hero-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 24px;
+      padding: 36px 40px;
+      box-shadow: var(--shadow-card);
+    }
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 24px;
+    }
+    .step-eyebrow {
+      font-family: var(--font-num);
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--brand-primary);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+    .card-top h2 {
+      font-family: var(--font-serif);
+      font-size: 1.6rem;
+      font-weight: 700;
+      line-height: 1.35;
+      margin-bottom: 8px;
+    }
+    .card-top p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+    .step-tag-pill {
+      font-family: var(--font-num);
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--brand-primary);
+      background: var(--brand-surface);
+      padding: 4px 14px;
+      border-radius: 20px;
+      border: 1px solid #D9E6DC;
+    }
+
+    /* 4 种启程状态选择网格 */
+    .choice-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+      margin-bottom: 28px;
+    }
+    .choice-card {
+      position: relative;
+      border: 1px solid var(--border-subtle);
+      border-radius: 18px;
+      background: #FFF;
+      padding: 22px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 16px;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .choice-card:hover {
+      border-color: var(--border-hover);
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-hover);
+    }
+    .choice-card.selected {
+      border-color: var(--brand-primary);
+      background: #F9FBF9;
+      box-shadow: 0 0 0 1px var(--brand-primary), var(--shadow-card);
+    }
+
+    /* 卡片内置微插画视窗 */
+    .art-viewport {
+      height: 90px;
+      border-radius: 12px;
+      background: var(--bg-canvas);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .art-badge-text {
+      position: absolute;
+      top: 8px;
+      left: 10px;
+      font-family: var(--font-num);
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--text-light);
+    }
+    .card-tags {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .tag-chip {
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: var(--bg-subtle);
+      color: var(--text-muted);
+    }
+    .tag-chip.confirmed {
+      background: var(--brand-surface);
+      color: var(--brand-primary);
+      font-weight: 500;
+    }
+    .choice-title {
+      font-family: var(--font-serif);
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-bottom: 4px;
+    }
+    .choice-desc {
+      font-size: 0.83rem;
+      color: var(--text-muted);
+      line-height: 1.45;
+      margin-bottom: 12px;
+    }
+    .choice-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid var(--bg-subtle);
+      padding-top: 10px;
+      font-size: 0.78rem;
+      color: var(--brand-primary);
+      font-weight: 500;
+    }
+
+    /* 底部导航操作条 */
+    .card-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 10px;
+      padding-top: 20px;
+      border-top: 1px solid var(--bg-subtle);
+    }
+    .actions-note {
+      font-size: 0.8rem;
+      color: var(--text-light);
+    }
+    .btn-next {
+      background: var(--brand-primary);
+      color: #FFF;
+      border: none;
+      padding: 12px 28px;
+      border-radius: 14px;
+      font-size: 0.92rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 14px rgba(62, 102, 73, 0.25);
+      transition: all 0.2s;
+    }
+    .btn-next:hover {
+      background: var(--brand-primary-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(62, 102, 73, 0.3);
+    }
+
+    /* 右侧进度与系统分析看板 */
+    .right-sidebar {
+      position: sticky;
+      top: 88px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .sidebar-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 22px;
+      padding: 24px;
+      box-shadow: var(--shadow-card);
+    }
+    .sidebar-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .sidebar-title-row h3 {
+      font-family: var(--font-serif);
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    .progress-bar-track {
+      width: 100%;
+      height: 6px;
+      background: var(--bg-subtle);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .progress-bar-val {
+      height: 100%;
+      width: 10%;
+      background: var(--brand-primary);
+      border-radius: 4px;
+    }
+    .attention-card {
+      background: #FDF9F2;
+      border: 1px solid #EFE2CD;
+      border-radius: 16px;
+      padding: 14px 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .attention-card:hover {
+      border-color: #DFC8A7;
+    }
+    .attention-card span {
+      font-size: 0.76rem;
+      color: #8C6A3B;
+      display: block;
+      margin-bottom: 2px;
+    }
+    .attention-card strong {
+      font-size: 0.88rem;
+      color: #59401C;
+      display: block;
+    }
+
+    /* 4 个预估小指标 */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .metric-cell {
+      background: var(--bg-canvas);
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border-subtle);
+    }
+    .metric-cell strong {
+      font-family: var(--font-num);
+      font-size: 1rem;
+      display: block;
+      color: var(--text-main);
+    }
+    .metric-cell span {
+      font-size: 0.74rem;
+      color: var(--text-muted);
+    }
+
+    /* 系统自动研究清单 */
+    .research-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+    .research-chip {
+      font-size: 0.76rem;
+      padding: 4px 10px;
+      border-radius: 8px;
+      background: #F2F6F3;
+      color: var(--brand-primary);
+      border: 1px solid #DFEBE2;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 背景自然柔光 -->
+  <div class="ambient-glow glow-left"></div>
+  <div class="ambient-glow glow-right"></div>
+
+  <!-- 顶部毛玻璃导航 -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="brand-symbol">✦</div>
+      <div class="brand-meta">
+        <h1>自由行智能规划器</h1>
+        <span>私人旅行规划服务</span>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <div class="save-status">
+        <div class="save-dot"></div>
+        <span>修改已自动保存</span>
+      </div>
+      <button class="action-btn-light">重新开始</button>
+      <div class="user-card-pill">
+        <span style="font-size: 14px;">👤</span>
+        <strong>张同学</strong>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主架构三栏 -->
+  <main class="app-layout">
+    
+    <!-- 左侧：10 步问答与进度图例 -->
+    <aside class="step-rail">
+      <div class="rail-header">
+        <h2>旅程的十个问题</h2>
+        <p>按顺序回答，条件问题按需呈现</p>
+      </div>
+
+      <nav class="step-nav-list">
+        <div class="step-nav-item active">
+          <div class="nav-left-meta">
+            <span class="nav-num">00</span>
+            <span>从这里开始</span>
+          </div>
+          <span class="nav-status-indicator"></span>
+        </div>
+        <div class="step-nav-item">
+          <div class="nav-left-meta">
+            <span class="nav-num">01</span>
+            <span>旅行轮廓</span>
+          </div>
+          <span class="nav-status-indicator" style="background: #E8A863;"></span>
+        </div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">02</span><span>旅行人员</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">03</span><span>预算取舍</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">04</span><span>旅行节奏</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">05</span><span>路上怎么走</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">06</span><span>住得更舒服</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">07</span><span>吃好也玩好</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">08</span><span>特别关照</span></div></div>
+        <div class="step-nav-item"><div class="nav-left-meta"><span class="nav-num">09</span><span>确认旅程</span></div></div>
+      </nav>
+
+      <!-- 6 种旅行约束条件图例说明 -->
+      <div class="legend-box">
+        <div class="legend-title">条件约束图例</div>
+        <div class="legend-grid">
+          <div class="legend-item"><div class="legend-chip" style="background: var(--state-locked);"></div>已锁定</div>
+          <div class="legend-item"><div class="legend-chip" style="background: var(--state-consent);"></div>授权</div>
+          <div class="legend-item"><div class="legend-chip" style="background: var(--state-hard);"></div>必须满足</div>
+          <div class="legend-item"><div class="legend-chip" style="background: var(--state-exclude);"></div>明确不要</div>
+          <div class="legend-item"><div class="legend-chip" style="background: var(--state-verify);"></div>待确认</div>
+          <div class="legend-item"><div class="legend-chip" style="background: var(--state-prefer);"></div>优先满足</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 中间：第 0 步卡片内容 -->
+    <section class="main-canvas">
+      <div class="hero-card">
+        <div class="card-top">
+          <div>
+            <div class="step-eyebrow">00 · 从这里开始</div>
+            <h2>这趟旅行，你想到哪一步了？</h2>
+            <p>不用全部想清楚。选一个最接近的状态，我们一起往下走。</p>
+          </div>
+          <span class="step-tag-pill">第 0 步 / 10</span>
+        </div>
+
+        <!-- 4 种启程状态卡片 -->
+        <div class="choice-grid" id="choice-group">
+          
+          <!-- 选项 1 -->
+          <div class="choice-card" onclick="selectCard(this)">
+            <div class="art-viewport" style="background: #F1F0F7;">
+              <span class="art-badge-text">FIND YOUR INSPIRATION</span>
+              <svg width="120" height="60" viewBox="0 0 120 60" fill="none">
+                <circle cx="90" cy="20" r="24" fill="#E0DFF2" />
+                <ellipse cx="60" cy="35" rx="35" ry="12" stroke="#A5A0C5" stroke-dasharray="3 4"/>
+                <circle cx="60" cy="35" r="14" fill="#B6B4DA" />
+              </svg>
+            </div>
+            <div>
+              <div class="card-tags">
+                <span class="tag-chip">目的地未定</span>
+                <span class="tag-chip">时间未定</span>
+              </div>
+              <h3 class="choice-title">还没想好去哪</h3>
+              <p class="choice-desc">只是有点想出去走走，先看看有哪些可能。</p>
+            </div>
+            <div class="choice-footer">
+              <span>从喜欢的体验找方向</span>
+              <span>↗</span>
+            </div>
+          </div>
+
+          <!-- 选项 2 -->
+          <div class="choice-card selected" onclick="selectCard(this)">
+            <div class="art-viewport" style="background: #F8F3E9;">
+              <span class="art-badge-text">MAKE THE MOST OF DAYS</span>
+              <svg width="120" height="60" viewBox="0 0 120 60" fill="none">
+                <circle cx="85" cy="30" r="22" fill="#F7E1B7" />
+                <rect x="35" y="15" width="45" height="35" rx="5" fill="#FFFCF4" />
+                <rect x="35" y="15" width="45" height="10" rx="3" fill="#DCA363" />
+              </svg>
+            </div>
+            <div>
+              <div class="card-tags">
+                <span class="tag-chip">目的地未定</span>
+                <span class="tag-chip confirmed">时间已定 ✓</span>
+              </div>
+              <h3 class="choice-title">假期有了，去哪好呢</h3>
+              <p class="choice-desc">时间已经留出来，想找一个适合这段假期的地方。</p>
+            </div>
+            <div class="choice-footer">
+              <span>根据假期与预算比较目的地</span>
+              <span>↗</span>
+            </div>
+          </div>
+
+          <!-- 选项 3 -->
+          <div class="choice-card" onclick="selectCard(this)">
+            <div class="art-viewport" style="background: #EFF4EE;">
+              <span class="art-badge-text">A PLACE ON WISHLIST</span>
+              <svg width="120" height="60" viewBox="0 0 120 60" fill="none">
+                <rect x="30" y="12" width="55" height="36" rx="4" fill="#FFF" />
+                <path d="M35 40L50 25L65 40H35Z" fill="#9CB497" />
+                <circle cx="95" cy="22" r="10" fill="#527C60" />
+              </svg>
+            </div>
+            <div>
+              <div class="card-tags">
+                <span class="tag-chip confirmed">目的地已定 ✓</span>
+                <span class="tag-chip">时间未定</span>
+              </div>
+              <h3 class="choice-title">有想去的地方，时间待定</h3>
+              <p class="choice-desc">心里已经有了目的地，想挑一段合适的时间出发。</p>
+            </div>
+            <div class="choice-footer">
+              <span>比较出行窗口</span>
+              <span>↗</span>
+            </div>
+          </div>
+
+          <!-- 选项 4 -->
+          <div class="choice-card" onclick="selectCard(this)">
+            <div class="art-viewport" style="background: #F7EFEA;">
+              <span class="art-badge-text">PUT IT ALL TOGETHER</span>
+              <svg width="120" height="60" viewBox="0 0 120 60" fill="none">
+                <rect x="32" y="15" width="55" height="35" rx="4" fill="#FFFBF3" />
+                <path d="M38 35C45 20 60 40 75 25" stroke="#C7866E" stroke-width="2" stroke-dasharray="3 3"/>
+                <circle cx="75" cy="25" r="4" fill="#B8735B" />
+              </svg>
+            </div>
+            <div>
+              <div class="card-tags">
+                <span class="tag-chip confirmed">目的地已定 ✓</span>
+                <span class="tag-chip confirmed">时间已定 ✓</span>
+              </div>
+              <h3 class="choice-title">都定了，开始规划吧</h3>
+              <p class="choice-desc">知道去哪、什么时候去，就差把每天的安排串起来。</p>
+            </div>
+            <div class="choice-footer">
+              <span>整理交通住宿，生成草案</span>
+              <span>↗</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 操作区 -->
+        <div class="card-actions">
+          <span class="actions-note">这只是起点，不是限制，后面随时可以调整。</span>
+          <button class="btn-next">下一步 · 旅行轮廓 →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右侧：全局画像进度与预估分析看板 -->
+    <aside class="right-sidebar">
+      
+      <!-- 完整度面板 -->
+      <div class="sidebar-card">
+        <div class="sidebar-title-row">
+          <h3>旅行画像进度</h3>
+          <span style="font-family: var(--font-num); font-weight: 700; color: var(--brand-primary);">10%</span>
+        </div>
+        <div class="progress-bar-track">
+          <div class="progress-bar-val"></div>
+        </div>
+        <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 14px;">
+          已完成 1/10 个步骤，选择会自动保存。
+        </p>
+
+        <!-- 需补充提示框 -->
+        <div class="attention-card">
+          <span>还有信息需要你补充</span>
+          <strong>14 个由你补充 · 0 个待核验</strong>
+        </div>
+
+        <!-- 预估核心指标 -->
+        <div class="metrics-grid">
+          <div class="metric-cell">
+            <strong>待估算</strong>
+            <span>目标总预算</span>
+          </div>
+          <div class="metric-cell">
+            <strong>—</strong>
+            <span>行程天数</span>
+          </div>
+          <div class="metric-cell">
+            <strong>—</strong>
+            <span>出行人数</span>
+          </div>
+          <div class="metric-cell">
+            <strong>—</strong>
+            <span>每日步行</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 系统自动研究项目清单 -->
+      <div class="sidebar-card" style="background: #FAFCFA;">
+        <div class="sidebar-title-row">
+          <h3>系统自动研究</h3>
+          <span style="font-size: 0.72rem; color: var(--brand-primary); background: #E2ECE5; padding: 2px 8px; border-radius: 10px;">智能免填</span>
+        </div>
+        <p style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 8px;">
+          以下项目系统将结合目的地自动检索匹配：
+        </p>
+        <div class="research-list">
+          <span class="research-chip">⛅ 天气穿衣</span>
+          <span class="research-chip">🛂 签证过境</span>
+          <span class="research-chip">🛡️ 当地安全</span>
+          <span class="research-chip">🎫 交通票制</span>
+          <span class="research-chip">🏛️ 景点预约</span>
+          <span class="research-chip">🍴 餐厅预约</span>
+          <span class="research-chip">💳 支付方式</span>
+          <span class="research-chip">📶 通信 eSIM</span>
+        </div>
+      </div>
+
+    </aside>
+
+  </main>
+
+  <script>
+    // 简易卡片单选交互
+    function selectCard(element) {
+      document.querySelectorAll('.choice-card').forEach(card => card.classList.remove('selected'));
+      element.classList.add('selected');
+    }
+  </script>
+</body>
+</html>

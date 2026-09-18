@@ -538,8 +538,13 @@
   text-align: left;
 }
 
-.planner-step:hover {
+.planner-step:hover:not(:disabled) {
   background: #f6f8fc;
+}
+
+.planner-step:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .planner-step--active {

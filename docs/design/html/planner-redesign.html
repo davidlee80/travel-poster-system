@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f2eb">
+  <title>自由行规划器 · Soft Journey 设计稿</title>
+  <style>
+    :root {
+      --paper: #f4f2eb;
+      --paper-2: #fbfaf6;
+      --surface: rgba(255, 255, 252, .82);
+      --surface-solid: #fffefa;
+      --ink: #25312d;
+      --muted: #737d77;
+      --line: #dedfd8;
+      --sage: #5f806f;
+      --sage-deep: #3f6754;
+      --sage-soft: #e6eee9;
+      --terracotta: #c98262;
+      --sun: #dfbd72;
+      --lavender: #858298;
+      --shadow: 0 18px 50px rgba(48, 60, 54, .08);
+      --serif: "Noto Serif SC", "Songti SC", STSong, Georgia, serif;
+      --sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: var(--sans);
+      background:
+        radial-gradient(circle at 8% 0%, rgba(185, 207, 190, .42), transparent 29rem),
+        radial-gradient(circle at 92% 10%, rgba(235, 208, 169, .30), transparent 27rem),
+        var(--paper);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button { font: inherit; }
+    button:focus-visible { outline: 3px solid rgba(95, 128, 111, .28); outline-offset: 3px; }
+
+    .route-lines {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      overflow: hidden;
+      opacity: .045;
+      pointer-events: none;
+    }
+    .route-lines svg { width: 100%; height: 100%; }
+
+    .topbar {
+      height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 0 32px;
+      border-bottom: 1px solid rgba(80, 99, 89, .11);
+      background: rgba(250, 249, 244, .78);
+      backdrop-filter: blur(18px);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 205px; }
+    .brand-mark {
+      width: 35px;
+      height: 35px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--sage-deep);
+      color: #fff;
+      box-shadow: 0 7px 18px rgba(63, 103, 84, .20);
+    }
+    .brand strong { display: block; font-size: 15px; letter-spacing: .04em; }
+    .brand small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; letter-spacing: .08em; }
+    .topbar-center { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 8px; }
+    .save-dot { width: 6px; height: 6px; border-radius: 50%; background: #7fa08c; box-shadow: 0 0 0 4px rgba(127, 160, 140, .12); }
+    .top-actions { display: flex; align-items: center; gap: 10px; min-width: 205px; justify-content: flex-end; }
+    .ghost-btn, .icon-btn {
+      border: 1px solid var(--line);
+      color: var(--ink);
+      background: rgba(255,255,252,.62);
+      border-radius: 12px;
+      cursor: pointer;
+    }
+    .ghost-btn { padding: 9px 14px; font-size: 12px; }
+    .icon-btn { width: 38px; height: 38px; display: grid; place-items: center; }
+    .menu-btn { display: none; }
+
+    .workspace {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 210px minmax(560px, 760px) 260px;
+      justify-content: center;
+      gap: clamp(24px, 3.4vw, 54px);
+      padding: 46px 32px 68px;
+    }
+
+    .left-panel, .right-panel { align-self: start; position: sticky; top: 112px; }
+    .left-kicker, .journey-kicker, .eyebrow {
+      margin: 0;
+      color: var(--sage);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    .left-title { margin: 9px 0 24px; font-family: var(--serif); font-size: 19px; font-weight: 600; }
+    .steps { display: grid; gap: 2px; }
+    .step {
+      width: 100%;
+      min-height: 42px;
+      border: 0;
+      padding: 0 9px;
+      display: grid;
+      grid-template-columns: 28px 1fr 15px;
+      align-items: center;
+      gap: 5px;
+      background: transparent;
+      border-radius: 11px;
+      color: #7d847f;
+      cursor: pointer;
+      text-align: left;
+      transition: background .18s ease, color .18s ease, transform .18s ease;
+    }
+    .step:hover { background: rgba(255,255,252,.55); color: var(--ink); }
+    .step.active { background: rgba(255,255,252,.84); color: var(--sage-deep); box-shadow: 0 6px 22px rgba(55,75,64,.055); }
+    .step.completed { color: #52645a; }
+    .step-number { font: 500 11px/1 Inter, var(--sans); letter-spacing: .06em; }
+    .step-name { font-size: 13px; white-space: nowrap; }
+    .step-state { width: 7px; height: 7px; border-radius: 50%; border: 1px solid #b9bdb9; }
+    .step.active .step-state { background: var(--sage); border-color: var(--sage); box-shadow: 0 0 0 4px rgba(95,128,111,.10); }
+    .step.completed .step-state { width: 14px; height: 14px; border: 0; color: var(--sage); }
+    .step.completed .step-state::after { content: "✓"; font-size: 11px; position: relative; top: -2px; }
+    .mini-progress { margin: 26px 8px 0; }
+    .mini-track { height: 3px; background: #ddded8; border-radius: 4px; overflow: hidden; }
+    .mini-fill { display: block; height: 100%; width: 10%; background: var(--sage); border-radius: inherit; transition: width .5s ease; }
+    .mini-copy { display: flex; justify-content: space-between; margin-top: 10px; color: var(--muted); font-size: 11px; }
+
+    .main { min-width: 0; }
+    .page { animation: pageIn .28s ease both; }
+    @keyframes pageIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+    .page-head { margin: 4px 0 38px; max-width: 640px; }
+    .eyebrow { display: flex; align-items: center; gap: 10px; }
+    .eyebrow::after { content: ""; height: 1px; width: 36px; background: rgba(95,128,111,.35); }
+    h1 { margin: 16px 0 14px; font: 500 clamp(30px, 3.1vw, 42px)/1.35 var(--serif); letter-spacing: -.025em; }
+    .lead { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.8; max-width: 560px; }
+
+    .starter-label { margin: 0 0 14px; font-size: 10px; color: #8d938e; letter-spacing: .16em; }
+    .starter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .starter-card {
+      min-height: 278px;
+      padding: 0;
+      overflow: hidden;
+      text-align: left;
+      border: 1px solid rgba(80,98,89,.13);
+      border-radius: 24px;
+      background: rgba(255,255,252,.78);
+      box-shadow: 0 10px 32px rgba(48,60,54,.05);
+      color: var(--ink);
+      cursor: pointer;
+      position: relative;
+      transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+    }
+    .starter-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+    .starter-card.selected { border-color: rgba(95,128,111,.72); box-shadow: 0 0 0 3px rgba(95,128,111,.09), var(--shadow); }
+    .starter-art { height: 126px; position: relative; overflow: hidden; }
+    .starter-art svg { width: 100%; height: 100%; }
+    .art-explore { background: #e8e6ef; }
+    .art-holiday { background: #f3e6ce; }
+    .art-place { background: #e3ebe0; }
+    .art-plan { background: #eee0d8; }
+    .card-check { position: absolute; top: 14px; right: 14px; width: 22px; height: 22px; border-radius: 50%; background: rgba(255,255,252,.8); border: 1px solid rgba(70,88,79,.16); display: grid; place-items: center; font-size: 11px; color: transparent; }
+    .selected .card-check { color: white; background: var(--sage); border-color: var(--sage); }
+    .starter-body { display: block; padding: 19px 20px 20px; }
+    .starter-en { display: block; color: var(--sage); font: 700 9px/1.3 Inter, var(--sans); letter-spacing: .15em; }
+    .starter-title { display: block; margin-top: 8px; font: 500 20px/1.45 var(--serif); }
+    .starter-desc { display: block; margin-top: 7px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+    .starter-go { display: flex; justify-content: space-between; margin-top: 14px; color: var(--sage-deep); font-size: 11px; }
+
+    .question-stack { display: grid; gap: 12px; }
+    .option {
+      width: 100%;
+      min-height: 76px;
+      padding: 16px 18px;
+      border: 1px solid rgba(80,98,89,.15);
+      border-radius: 17px;
+      background: rgba(255,255,252,.66);
+      color: var(--ink);
+      cursor: pointer;
+      text-align: left;
+      display: grid;
+      grid-template-columns: 24px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      transition: background .18s ease, border-color .18s ease, transform .18s ease;
+    }
+    .option:hover { transform: translateY(-1px); border-color: rgba(95,128,111,.38); background: rgba(255,255,252,.9); }
+    .option.selected { background: var(--sage-soft); border-color: #789887; }
+    .radio { width: 19px; height: 19px; border: 1.5px solid #aeb6b0; border-radius: 50%; display: grid; place-items: center; }
+    .option.selected .radio { border-color: var(--sage); }
+    .option.selected .radio::after { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--sage); }
+    .option-title { display: block; font-size: 15px; font-weight: 600; }
+    .option-desc { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .option-note { color: #89908b; font-size: 10px; }
+
+    .text-field { margin-top: 16px; }
+    .text-field label { display: block; margin: 0 0 8px 4px; color: var(--muted); font-size: 12px; }
+    .field-shell { display: flex; align-items: center; gap: 10px; border: 1px solid rgba(80,98,89,.16); border-radius: 16px; background: rgba(255,255,252,.72); padding: 0 17px; }
+    .field-shell:focus-within { border-color: var(--sage); box-shadow: 0 0 0 3px rgba(95,128,111,.09); }
+    .field-shell input { width: 100%; height: 56px; border: 0; outline: 0; background: transparent; color: var(--ink); font: 15px var(--sans); }
+    .field-shell span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+    .page-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 34px; padding-top: 22px; border-top: 1px solid rgba(80,98,89,.10); }
+    .back-btn, .next-btn { border: 0; border-radius: 14px; cursor: pointer; }
+    .back-btn { padding: 12px 4px; background: transparent; color: var(--muted); }
+    .back-btn:disabled { opacity: .25; cursor: default; }
+    .next-btn { padding: 13px 20px; background: var(--sage-deep); color: white; box-shadow: 0 10px 24px rgba(63,103,84,.18); }
+    .next-btn:hover { background: #365d4b; transform: translateY(-1px); }
+    .next-btn:disabled { background: #aeb9b2; box-shadow: none; cursor: not-allowed; }
+
+    .right-card {
+      padding: 24px;
+      border: 1px solid rgba(80,98,89,.12);
+      border-radius: 24px;
+      background: rgba(255,255,252,.63);
+      box-shadow: 0 12px 40px rgba(48,60,54,.045);
+      backdrop-filter: blur(10px);
+    }
+    .journey-place { margin: 10px 0 4px; font: 500 22px/1.4 var(--serif); }
+    .journey-date { margin: 0; color: var(--muted); font: 11px/1.6 Inter, var(--sans); letter-spacing: .04em; }
+    .journey-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 21px 0; margin: 20px 0; border-block: 1px solid rgba(80,98,89,.10); }
+    .stat span { display: block; color: #929893; font-size: 10px; }
+    .stat strong { display: block; margin-top: 5px; font-size: 13px; font-weight: 600; }
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tag { padding: 6px 9px; border-radius: 999px; background: var(--sage-soft); color: var(--sage-deep); font-size: 10px; }
+    .journey-progress { margin-top: 23px; }
+    .journey-progress-head { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+    .journey-progress-head strong { color: var(--ink); }
+    .journey-track { height: 5px; margin-top: 9px; border-radius: 8px; background: #dedfd8; overflow: hidden; }
+    .journey-fill { display: block; height: 100%; width: 10%; border-radius: inherit; background: var(--sage); transition: width .5s ease; }
+    .journey-remaining { margin: 9px 0 0; color: var(--muted); font-size: 10px; }
+    .research { width: 100%; margin-top: 12px; padding: 14px 16px; border: 0; border-radius: 15px; background: rgba(255,255,252,.42); color: var(--muted); font-size: 11px; text-align: left; cursor: pointer; }
+    .research span { float: right; }
+    .research-list { display: none; margin: 8px 0 0; padding: 0 16px 14px 32px; color: var(--muted); font-size: 11px; line-height: 1.8; }
+    .research-list.open { display: block; }
+
+    .breather { min-height: 560px; display: grid; place-items: center; text-align: center; }
+    .breather-inner { max-width: 520px; }
+    .breather-mark { width: 58px; height: 58px; margin: 0 auto 24px; border-radius: 50%; display: grid; place-items: center; color: var(--sage); background: rgba(255,255,252,.7); box-shadow: var(--shadow); font-size: 24px; }
+    .breather h2 { margin: 0; font: 500 34px/1.5 var(--serif); }
+    .breather p { color: var(--muted); line-height: 1.9; }
+    .breather-summary { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 24px 0 34px; }
+    .breather-summary span { padding: 8px 12px; border: 1px solid rgba(80,98,89,.12); border-radius: 999px; background: rgba(255,255,252,.55); font-size: 11px; }
+
+    .mobile-progress { display: none; }
+    .summary-toggle { display: none; }
+    .scrim { display: none; }
+
+    @media (max-width: 1120px) {
+      .workspace { grid-template-columns: 190px minmax(500px, 720px); }
+      .right-panel { display: none; }
+      .summary-toggle { display: block; position: fixed; right: 22px; bottom: 22px; z-index: 25; border: 0; border-radius: 999px; padding: 13px 17px; background: var(--sage-deep); color: white; box-shadow: 0 10px 30px rgba(63,103,84,.26); cursor: pointer; }
+      .right-panel.open { display: block; position: fixed; z-index: 40; top: 96px; right: 22px; width: 290px; }
+      .scrim.open { display: block; position: fixed; inset: 0; z-index: 35; background: rgba(36,48,42,.24); backdrop-filter: blur(2px); }
+    }
+
+    @media (max-width: 760px) {
+      .topbar { height: 64px; padding: 0 18px; }
+      .brand { min-width: 0; }
+      .brand small, .topbar-center, .ghost-btn { display: none; }
+      .top-actions { min-width: 0; }
+      .menu-btn { display: grid; }
+      .mobile-progress { display: block; position: fixed; top: 64px; left: 0; right: 0; z-index: 18; height: 3px; background: rgba(207,210,203,.88); }
+      .mobile-progress span { display: block; width: 10%; height: 100%; background: var(--sage); transition: width .5s ease; }
+      .workspace { display: block; padding: 42px 20px 104px; }
+      .left-panel { display: none; }
+      .left-panel.open { display: block; position: fixed; inset: 64px auto 0 0; z-index: 40; width: min(300px, 84vw); padding: 28px 20px; overflow: auto; background: #f8f7f2; box-shadow: 18px 0 40px rgba(35,49,42,.12); }
+      .starter-grid { grid-template-columns: 1fr; }
+      .starter-card { min-height: 250px; }
+      h1 { font-size: 31px; }
+      .page-head { margin-bottom: 28px; }
+      .option { grid-template-columns: 24px 1fr; }
+      .option-note { display: none; }
+      .page-actions { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 11px 18px; margin: 0; background: rgba(250,249,244,.9); backdrop-filter: blur(16px); box-shadow: 0 -9px 30px rgba(48,60,54,.06); }
+      .back-btn, .next-btn { min-height: 44px; }
+      .summary-toggle { bottom: 72px; }
+      .right-panel.open { top: auto; left: 14px; right: 14px; bottom: 76px; width: auto; max-height: 76vh; overflow: auto; }
+      .right-card { background: #fffefa; }
+    }
+  </style>
+</head>
+<body>
+  <div class="route-lines" aria-hidden="true">
+    <svg viewBox="0 0 1440 960" preserveAspectRatio="none">
+      <path d="M-80 760C250 580 285 870 610 655S1070 320 1510 510" fill="none" stroke="#3f6754" stroke-width="2" stroke-dasharray="7 12"/>
+      <path d="M1030 -60c-170 190-12 270-176 410S573 461 433 610" fill="none" stroke="#c98262" stroke-width="1.5"/>
+      <circle cx="610" cy="655" r="8" fill="#3f6754"/><circle cx="1031" cy="418" r="7" fill="#c98262"/>
+    </svg>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <button class="icon-btn menu-btn" id="menuBtn" aria-label="打开步骤导航">☰</button>
+      <span class="brand-mark">✦</span>
+      <div><strong>自由行规划器</strong><small>YOUR QUIET TRAVEL COMPANION</small></div>
+    </div>
+    <div class="topbar-center"><span class="save-dot"></span><span id="saveState">修改会自动保存</span></div>
+    <div class="top-actions">
+      <button class="ghost-btn" id="resetBtn">重新开始</button>
+      <button class="icon-btn" aria-label="个人账户">人</button>
+    </div>
+  </header>
+  <div class="mobile-progress"><span id="mobileFill"></span></div>
+
+  <div class="workspace">
+    <aside class="left-panel" id="leftPanel">
+      <p class="left-kicker">Your journey</p>
+      <h2 class="left-title">规划你的旅行</h2>
+      <nav class="steps" id="steps" aria-label="问卷步骤"></nav>
+      <div class="mini-progress">
+        <div class="mini-track"><span class="mini-fill" id="miniFill"></span></div>
+        <div class="mini-copy"><span>旅程正在成形</span><span id="stepCount">1 / 10</span></div>
+      </div>
+    </aside>
+
+    <main class="main" id="main" aria-live="polite"></main>
+
+    <aside class="right-panel" id="rightPanel">
+      <div class="right-card">
+        <p class="journey-kicker">Your journey</p>
+        <h2 class="journey-place" id="summaryPlace">一趟待展开的旅行</h2>
+        <p class="journey-date" id="summaryDate">从一个念头开始</p>
+        <div class="journey-stats">
+          <div class="stat"><span>时长</span><strong id="summaryDays">待确定</strong></div>
+          <div class="stat"><span>同行</span><strong>2 人</strong></div>
+          <div class="stat"><span>预算</span><strong id="summaryBudget">待估算</strong></div>
+          <div class="stat"><span>节奏</span><strong id="summaryPace">慢慢发现</strong></div>
+        </div>
+        <div class="tags" id="summaryTags"><span class="tag">城市漫步</span><span class="tag">在地美食</span></div>
+        <div class="journey-progress">
+          <div class="journey-progress-head"><span>信息完成度</span><strong id="progressNumber">10%</strong></div>
+          <div class="journey-track"><span class="journey-fill" id="journeyFill"></span></div>
+          <p class="journey-remaining" id="remaining">还剩 9 个部分</p>
+        </div>
+      </div>
+      <button class="research" id="researchBtn">我们会自动帮你准备 8 项信息 <span>⌄</span></button>
+      <ul class="research-list" id="researchList"><li>天气与穿衣</li><li>签证与入境</li><li>当地交通票制</li><li>景点和餐厅预约</li></ul>
+    </aside>
+  </div>
+
+  <button class="summary-toggle" id="summaryBtn">查看我的旅行</button>
+  <div class="scrim" id="scrim"></div>
+
+  <script>
+    const labels = ['从这里开始','旅行轮廓','旅行人员','预算取舍','旅行节奏','路上怎么走','住得更舒服','吃好也玩好','特别关照','确认旅程'];
+    const pages = [
+      { title:'这趟旅行，\n你想到哪一步了？', desc:'不用全部想清楚。选一个最接近的状态，我们一起往下走。', kind:'starter' },
+      { title:'先说说你想去哪里，\n以及大概什么时候出发。', desc:'不确定也没关系，模糊的想法同样是很好的开始。', options:[['日本 · 京都','已经在愿望清单里很久了'],['海边或小岛','想看看海，也想晒晒太阳'],['还没有目的地','先从季节、预算和兴趣开始推荐']] },
+      { title:'这趟旅行，\n会和谁一起出发？', desc:'同行的人会影响住宿、交通和每天的节奏。', options:[['两个人','伴侣、朋友或家人同行'],['一个人','享受更自由的个人旅程'],['一家人','有孩子或长辈一起出发'],['三人及以上','和一群朋友一起探索']] },
+      { title:'这趟旅行，\n大概想花多少钱？', desc:'不用算得太精确。我们会根据你的偏好，帮你把预算花在更值得的地方。', options:[['舒适优先','更看重位置、体验与便利'],['平衡预算与体验','该省则省，重要体验不将就'],['尽量节省','愿意多做功课，控制整体支出']] },
+      { title:'你的旅行，\n想慢一点还是充实一点？', desc:'选最接近理想状态的就好，真正的行程还会留有弹性。', options:[['慢慢感受','每天 1–2 个主要安排，给偶遇留时间'],['刚刚好','上午、下午各有一个重点'],['尽量多体验','充分利用时间，接受更紧凑的节奏']] },
+      { title:'到了目的地，\n你喜欢怎样移动？', desc:'这会帮助我们平衡公共交通、步行和包车的使用。', options:[['公共交通为主','地铁、公交和铁路都很方便'],['走路探索更多','喜欢用双脚认识一座城市'],['舒适省力优先','愿意为打车或包车多花一点']] },
+      { title:'住在哪里，\n会让你更安心？', desc:'住宿不仅是睡一晚，也决定每天从哪里开始。', options:[['位置最重要','靠近车站或主要街区'],['安静与舒适','愿意住远一点，换更好的休息'],['特色体验','温泉旅馆、民宿或设计酒店']] },
+      { title:'旅行里，\n什么最值得留出时间？', desc:'可以选出你最在意的体验，我们会据此安排轻重。', options:[['在地美食','愿意为一顿饭专程前往'],['文化与历史','博物馆、建筑与老街'],['自然风景','山、海、湖泊与季节景观'],['生活方式','咖啡馆、市场与城市散步']] },
+      { title:'有没有什么，\n需要我们特别照顾？', desc:'把必须满足和明确不要的事情提前告诉我们。', options:[['减少长距离步行','希望每天留有足够休息'],['饮食限制','过敏、素食或其他饮食偏好'],['无障碍与便利','需要电梯、无障碍路线或便捷交通'],['暂时没有','后面想起来还可以随时补充']] },
+      { title:'最后再看一眼，\n这就是你的旅行。', desc:'你的偏好已经足够清晰。确认后，我们会开始研究并生成第一版路线。', options:[['准备好了','根据这些信息生成旅行草案'],['我还想再看看','返回前面的步骤进行调整']] }
+    ];
+
+    const state = { step: 0, completed: new Set(), answers: {}, starter: null, budget: '待估算', breatherShown: false };
+    const el = id => document.getElementById(id);
+
+    function drawSteps() {
+      el('steps').innerHTML = labels.map((label, i) => `<button class="step ${i === state.step ? 'active' : ''} ${state.completed.has(i) ? 'completed' : ''}" data-step="${i}"><span class="step-number">${String(i).padStart(2,'0')}</span><span class="step-name">${label}</span><span class="step-state"></span></button>`).join('');
+      document.querySelectorAll('.step').forEach(btn => btn.addEventListener('click', () => { state.step = +btn.dataset.step; state.breatherShown = false; render(); closeDrawers(); }));
+    }
+
+    function starterMarkup() {
+      const items = [
+        ['explore','JUST EXPLORING','还没想好去哪','有点想出去走走。先看看有哪些可能。'],
+        ['holiday','DATES ARE READY','假期有了，去哪好呢','时间已经留出来，想找适合这段假期的地方。'],
+        ['place','A PLACE IN MIND','有想去的地方','心里已经有目的地，想挑合适的时间出发。'],
+        ['plan','READY TO PLAN','都定了，开始规划吧','知道去哪、什么时候去，就差把每天串起来。']
+      ];
+      const art = {
+        explore:`<svg viewBox="0 0 320 126"><circle cx="230" cy="35" r="58" fill="#d5d2e3"/><ellipse cx="170" cy="72" rx="70" ry="20" fill="none" stroke="#9792b5" stroke-dasharray="4 6"/><circle cx="172" cy="70" r="30" fill="#aba8cf"/><ellipse cx="172" cy="70" rx="48" ry="10" transform="rotate(-18 172 70)" fill="none" stroke="#fffdf7" stroke-width="5"/><path d="M76 45l14-4-6 14-3-7z" fill="#777da8"/></svg>`,
+        holiday:`<svg viewBox="0 0 320 126"><circle cx="225" cy="62" r="55" fill="#efd49f"/><rect x="105" y="24" width="120" height="90" rx="10" fill="#fffaf0"/><path d="M105 35a11 11 0 0111-11h98a11 11 0 0111 11v17H105z" fill="#d89a5d"/><g fill="#e9dfcd"><rect x="121" y="65" width="20" height="15" rx="4"/><rect x="151" y="65" width="20" height="15" rx="4"/><rect x="181" y="65" width="20" height="15" rx="4"/><rect x="121" y="90" width="20" height="15" rx="4"/></g></svg>`,
+        place:`<svg viewBox="0 0 320 126"><circle cx="83" cy="115" r="65" fill="#cbdcc8"/><rect x="105" y="20" width="140" height="92" rx="4" fill="#fffef8"/><rect x="113" y="28" width="124" height="63" fill="#d7e7d3"/><path d="M113 91l37-40 35 40z" fill="#91aa8d"/><path d="M150 91l44-50 43 50z" fill="#688b71"/><path d="M233 24c0-10 8-17 17-17s17 7 17 17c0 11-17 26-17 26s-17-15-17-26z" fill="#4f785d"/><circle cx="250" cy="23" r="5" fill="#eef2e4"/></svg>`,
+        plan:`<svg viewBox="0 0 320 126"><circle cx="239" cy="98" r="54" fill="#e9c8b9"/><path d="M83 35l52-9 51 11 52-9v77l-52 10-51-11-52 10z" fill="#fffaf1"/><path d="M135 26v78m51-67v78" stroke="#ddd4c6"/><path d="M94 95c19-36 42 6 61-22s38 12 68-24" fill="none" stroke="#bf765e" stroke-width="3" stroke-dasharray="5 5"/></svg>`
+      };
+      return `<p class="starter-label">EVERY JOURNEY STARTS SOMEWHERE</p><div class="starter-grid">${items.map(([key,en,title,desc]) => `<button class="starter-card ${state.starter === key ? 'selected' : ''}" data-starter="${key}"><span class="starter-art art-${key}">${art[key]}</span><span class="card-check">✓</span><span class="starter-body"><span class="starter-en">${en}</span><span class="starter-title">${title}</span><span class="starter-desc">${desc}</span><span class="starter-go"><span>从这里开始</span><span>↗</span></span></span></button>`).join('')}</div>`;
+    }
+
+    function questionsMarkup(page) {
+      const selected = state.answers[state.step];
+      return `<div class="question-stack" role="radiogroup">${page.options.map((o, i) => `<button class="option ${selected === i ? 'selected' : ''}" data-option="${i}" role="radio" aria-checked="${selected === i}"><span class="radio"></span><span><span class="option-title">${o[0]}</span><span class="option-desc">${o[1]}</span></span><span class="option-note">选择</span></button>`).join('')}</div>${state.step === 3 ? `<div class="text-field"><label for="budget">如果你愿意，也可以先写一个总预算</label><div class="field-shell"><input id="budget" inputmode="numeric" placeholder="例如 18,000" value="${state.budget === '待估算' ? '' : state.budget.replace(/[^0-9,]/g,'')}"><span>人民币 / 2 人</span></div></div>` : ''}`;
+    }
+
+    function normalPage() {
+      const p = pages[state.step];
+      return `<section class="page"><header class="page-head"><p class="eyebrow">STEP ${String(state.step).padStart(2,'0')} · ${labels[state.step]}</p><h1>${p.title.replace('\n','<br>')}</h1><p class="lead">${p.desc}</p></header>${p.kind === 'starter' ? starterMarkup() : questionsMarkup(p)}<div class="page-actions"><button class="back-btn" id="backBtn" ${state.step === 0 ? 'disabled' : ''}>← 上一步</button><button class="next-btn" id="nextBtn">${state.step === 9 ? '生成我的旅行草案 →' : '继续 →'}</button></div></section>`;
+    }
+
+    function breatherPage() {
+      return `<section class="page breather"><div class="breather-inner"><div class="breather-mark">✦</div><h2>已经有点像一趟<br>真正的旅行了。</h2><p>京都 · 7 天 · 两个人<br>你偏向慢节奏旅行，也愿意把预算留给值得的体验。</p><div class="breather-summary"><span>京都</span><span>7 天</span><span>平衡预算与体验</span></div><button class="next-btn" id="continueBtn">继续完善旅程 →</button></div></section>`;
+    }
+
+    function render() {
+      drawSteps();
+      el('main').innerHTML = state.breatherShown ? breatherPage() : normalPage();
+      if (state.breatherShown) {
+        el('continueBtn').onclick = () => { state.breatherShown = false; state.step = 4; render(); };
+      } else {
+        bindPage();
+      }
+      updateProgress();
+      window.scrollTo({top:0, behavior:'smooth'});
+    }
+
+    function bindPage() {
+      document.querySelectorAll('[data-starter]').forEach(btn => btn.onclick = () => {
+        state.starter = btn.dataset.starter; state.answers[0] = btn.dataset.starter; savePulse(); render();
+      });
+      document.querySelectorAll('[data-option]').forEach(btn => btn.onclick = () => {
+        state.answers[state.step] = +btn.dataset.option;
+        if (state.step === 4) el('summaryPace').textContent = pages[4].options[+btn.dataset.option][0];
+        savePulse(); render();
+      });
+      const budget = el('budget');
+      if (budget) budget.oninput = e => {
+        state.budget = e.target.value ? `约 ¥${e.target.value}` : '待估算';
+        el('summaryBudget').textContent = state.budget; savePulse();
+      };
+      el('backBtn').onclick = () => { if (state.step > 0) { state.step--; state.breatherShown = false; render(); } };
+      el('nextBtn').onclick = () => {
+        state.completed.add(state.step);
+        if (state.step === 0 && state.starter) {
+          el('summaryPlace').textContent = state.starter === 'explore' || state.starter === 'holiday' ? '一趟待发现的旅行' : '日本 · 京都';
+          el('summaryDate').textContent = state.starter === 'place' || state.starter === 'explore' ? '时间待定' : '10 月 12 日 — 10 月 19 日';
+        }
+        if (state.step === 1) { el('summaryPlace').textContent = '日本 · 京都'; el('summaryDate').textContent = '10 月 12 日 — 10 月 19 日'; el('summaryDays').textContent = '7 天'; }
+        if (state.step === 3) { state.breatherShown = true; render(); return; }
+        if (state.step < 9) state.step++;
+        savePulse(); render();
+      };
+    }
+
+    function updateProgress() {
+      const pct = Math.max(10, Math.round((state.completed.size / 10) * 100));
+      ['miniFill','journeyFill','mobileFill'].forEach(id => el(id).style.width = pct + '%');
+      el('progressNumber').textContent = pct + '%';
+      el('stepCount').textContent = `${state.step + 1} / 10`;
+      el('remaining').textContent = state.completed.size >= 9 ? '已经很接近理想旅程了' : `还剩 ${10 - state.completed.size} 个部分`;
+      el('summaryBudget').textContent = state.budget;
+    }
+
+    function savePulse() {
+      el('saveState').textContent = '正在保存…';
+      setTimeout(() => el('saveState').textContent = '刚刚已自动保存', 420);
+      setTimeout(() => el('saveState').textContent = '修改会自动保存', 1800);
+    }
+
+    function closeDrawers() {
+      el('leftPanel').classList.remove('open');
+      el('rightPanel').classList.remove('open');
+      el('scrim').classList.remove('open');
+    }
+
+    el('menuBtn').onclick = () => { closeDrawers(); el('leftPanel').classList.add('open'); el('scrim').classList.add('open'); };
+    el('summaryBtn').onclick = () => { closeDrawers(); el('rightPanel').classList.add('open'); el('scrim').classList.add('open'); };
+    el('scrim').onclick = closeDrawers;
+    el('researchBtn').onclick = () => el('researchList').classList.toggle('open');
+    el('resetBtn').onclick = () => { state.step = 0; state.completed.clear(); state.answers = {}; state.starter = null; state.budget = '待估算'; state.breatherShown = false; render(); };
+    render();
+  </script>
+</body>
+</html>

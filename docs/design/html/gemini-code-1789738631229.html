@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>自由行智能规划器 - 视觉设计改版</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* 大地自然色系 - 护眼且松弛 */
+      --bg-canvas: #F8F7F4;
+      --bg-surface: #FFFFFF;
+      --bg-subtle: #F3EFEA;
+      --border-subtle: #E8E3DC;
+      --border-hover: #D5CFC6;
+      
+      /* 文字阶梯 (严禁纯黑以避免刺眼) */
+      --text-main: #2A332C;
+      --text-muted: #667067;
+      --text-light: #949E95;
+      
+      /* 核心品牌色 (鼠尾草绿) */
+      --brand-primary: #3E6649;
+      --brand-primary-hover: #33553C;
+      --brand-surface: #EEF4F0;
+      
+      /* 三态标签：柔和低饱和度护眼色 */
+      --state-prefer-bg: #EAF2F8;
+      --state-prefer-text: #225C7E;
+      --state-prefer-border: #BCD5E6;
+      
+      --state-require-bg: #EDF6EE;
+      --state-require-text: #245A34;
+      --state-require-border: #C2E2C8;
+      
+      --state-exclude-bg: #FAF0EE;
+      --state-exclude-text: #96423C;
+      --state-exclude-border: #ECCBC7;
+
+      /* 字体规范 */
+      --font-serif: "Noto Serif SC", serif;
+      --font-sans: "Noto Sans SC", -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-num: "Plus Jakarta Sans", sans-serif;
+      
+      /* 阴影 */
+      --shadow-card: 0 4px 24px -2px rgba(60, 65, 60, 0.05), 0 1px 3px 0 rgba(60, 65, 60, 0.03);
+      --shadow-float: 0 12px 32px -4px rgba(45, 55, 45, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-canvas);
+      color: var(--text-main);
+      line-height: 1.6;
+      min-height: 100vh;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* 氛围柔光光晕 (营造度假、宁静的环境感) */
+    .ambient-glow {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(120px);
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.65;
+    }
+    .glow-1 {
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, #E6EFE9 0%, rgba(230, 239, 233, 0) 70%);
+      top: -120px;
+      left: 10%;
+    }
+    .glow-2 {
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, #F7EBDC 0%, rgba(247, 235, 220, 0) 70%);
+      bottom: -150px;
+      right: 5%;
+    }
+
+    /* 顶部毛玻璃导航条 */
+    .header-bar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 40px;
+      background: rgba(248, 247, 244, 0.82);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(232, 227, 220, 0.6);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      background-color: var(--brand-primary);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+    .brand-text h1 {
+      font-family: var(--font-serif);
+      font-size: 1.15rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .brand-text p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .user-pill {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 14px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 30px;
+      font-size: 0.85rem;
+      color: var(--text-main);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .user-pill:hover {
+      border-color: var(--border-hover);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    }
+    .user-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--bg-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+
+    /* 整体容器：经典 3 栏现代排版 */
+    .app-container {
+      position: relative;
+      z-index: 1;
+      max-width: 1400px;
+      margin: 32px auto 80px;
+      padding: 0 32px;
+      display: grid;
+      grid-template-columns: 240px 1fr 340px;
+      gap: 36px;
+      align-items: start;
+    }
+
+    /* 左侧步骤指示 */
+    .left-rail {
+      position: sticky;
+      top: 96px;
+      background: rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      padding: 24px 18px;
+      box-shadow: var(--shadow-card);
+    }
+    .step-list-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-light);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+      padding-left: 10px;
+    }
+    .step-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .step-item:hover {
+      background: var(--bg-subtle);
+      color: var(--text-main);
+    }
+    .step-item.active {
+      background: var(--brand-surface);
+      color: var(--brand-primary);
+      font-weight: 600;
+    }
+    .step-badge {
+      width: 24px;
+      height: 24px;
+      border-radius: 8px;
+      background: #EAE6DF;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-num);
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .step-item.active .step-badge {
+      background: var(--brand-primary);
+      color: #fff;
+    }
+
+    /* 中间主卡片 */
+    .main-stream {
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+    .planner-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 24px;
+      padding: 36px 40px;
+      box-shadow: var(--shadow-card);
+      transition: border-color 0.2s;
+    }
+    .planner-card:focus-within {
+      border-color: #CAD5CD;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 28px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid #F3EFEA;
+    }
+    .card-header h2 {
+      font-family: var(--font-serif);
+      font-size: 1.45rem;
+      color: var(--text-main);
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .card-header p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+    .step-tag {
+      font-family: var(--font-num);
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--brand-primary);
+      background: var(--brand-surface);
+      padding: 4px 12px;
+      border-radius: 20px;
+    }
+
+    /* 表单组件修饰 */
+    .field-label {
+      display: block;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-bottom: 10px;
+    }
+    .route-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .custom-input {
+      width: 100%;
+      height: 48px;
+      padding: 0 16px;
+      font-size: 0.95rem;
+      border-radius: 14px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-canvas);
+      color: var(--text-main);
+      outline: none;
+      transition: all 0.2s;
+    }
+    .custom-input:focus {
+      background: #FFFFFF;
+      border-color: var(--brand-primary);
+      box-shadow: 0 0 0 4px rgba(62, 102, 73, 0.1);
+    }
+
+    /* 档位卡片 (预算) */
+    .tier-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .tier-card {
+      border: 1px solid var(--border-subtle);
+      border-radius: 18px;
+      padding: 20px 16px;
+      background: var(--bg-canvas);
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .tier-card:hover {
+      background: #FFFFFF;
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-card);
+      border-color: var(--border-hover);
+    }
+    .tier-card.selected {
+      background: var(--brand-surface);
+      border-color: var(--brand-primary);
+    }
+    .tier-card .icon {
+      font-size: 24px;
+      margin-bottom: 8px;
+      display: block;
+    }
+    .tier-card .title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+      display: block;
+    }
+    .tier-card .price {
+      font-family: var(--font-num);
+      font-weight: 700;
+      font-size: 1.05rem;
+      color: var(--brand-primary);
+      display: block;
+      margin-bottom: 6px;
+    }
+    .tier-card .desc {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    /* 三态标签组 */
+    .legend-bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 14px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .dot-prefer { background-color: var(--state-prefer-text); }
+    .dot-require { background-color: var(--state-require-text); }
+    .dot-exclude { background-color: var(--state-exclude-text); }
+
+    .tag-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .tri-tag {
+      appearance: none;
+      outline: none;
+      background: var(--bg-subtle);
+      border: 1px solid transparent;
+      padding: 8px 18px;
+      border-radius: 30px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: var(--text-main);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      user-select: none;
+      transition: all 0.2s ease;
+    }
+    .tri-tag:hover {
+      background: #E8E3DB;
+    }
+    /* 偏好 */
+    .tri-tag[data-state="prefer"] {
+      background: var(--state-prefer-bg);
+      color: var(--state-prefer-text);
+      border-color: var(--state-prefer-border);
+    }
+    /* 必须 */
+    .tri-tag[data-state="require"] {
+      background: var(--state-require-bg);
+      color: var(--state-require-text);
+      border-color: var(--state-require-border);
+    }
+    /* 不要 */
+    .tri-tag[data-state="exclude"] {
+      background: var(--state-exclude-bg);
+      color: var(--state-exclude-text);
+      border-color: var(--state-exclude-border);
+      text-decoration: line-through;
+    }
+
+    /* 右侧汇总悬浮板 */
+    .right-summary {
+      position: sticky;
+      top: 96px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 24px;
+      padding: 28px;
+      box-shadow: var(--shadow-card);
+    }
+    .summary-title {
+      font-family: var(--font-serif);
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .summary-chip-counter {
+      font-family: var(--font-num);
+      font-size: 0.8rem;
+      background: var(--bg-subtle);
+      padding: 2px 10px;
+      border-radius: 20px;
+      color: var(--text-muted);
+    }
+    .summary-block {
+      background: var(--bg-canvas);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .summary-metric {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+    .summary-metric:last-child {
+      margin-bottom: 0;
+    }
+    .summary-metric span {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .summary-metric strong {
+      font-family: var(--font-num);
+      font-size: 1.05rem;
+      color: var(--text-main);
+    }
+    .btn-submit {
+      width: 100%;
+      height: 52px;
+      border-radius: 16px;
+      background: var(--brand-primary);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(62, 102, 73, 0.25);
+      transition: all 0.2s ease;
+    }
+    .btn-submit:hover {
+      background: var(--brand-primary-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(62, 102, 73, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <!-- 背景环境柔光 -->
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+
+  <!-- 顶部毛玻璃栏 -->
+  <header class="header-bar">
+    <div class="brand">
+      <div class="brand-icon">✳</div>
+      <div class="brand-text">
+        <h1>自由行智能规划器</h1>
+        <p>结构化采集旅行诉求，生成一张行程信息图</p>
+      </div>
+    </div>
+    <div class="user-pill">
+      <span class="user-avatar">👤</span>
+      <span>我的计划本</span>
+    </div>
+  </header>
+
+  <!-- 主体工作区 -->
+  <main class="app-container">
+    
+    <!-- 左侧导航 -->
+    <aside class="left-rail">
+      <div class="step-list-title">规划步骤 (8)</div>
+      <nav>
+        <div class="step-item active"><span class="step-badge">1</span>基本轮廓</div>
+        <div class="step-item"><span class="step-badge">2</span>同行人员</div>
+        <div class="step-item"><span class="step-badge">3</span>旅行预算</div>
+        <div class="step-item"><span class="step-badge">4</span>节奏路线</div>
+        <div class="step-item"><span class="step-badge">5</span>交通住宿</div>
+        <div class="step-item"><span class="step-badge">6</span>饮食偏好</div>
+        <div class="step-item"><span class="step-badge">7</span>兴趣活动</div>
+        <div class="step-item"><span class="step-badge">8</span>特殊需求</div>
+      </nav>
+    </aside>
+
+    <!-- 中间问答卡片流 -->
+    <div class="main-stream">
+      
+      <!-- 步骤 1：基本信息 -->
+      <section class="planner-card">
+        <header class="card-header">
+          <div>
+            <h2>确定旅行的基本轮廓</h2>
+            <p>出发地、目的地与预计日期，开启一段从容旅程</p>
+          </div>
+          <span class="step-tag">Step 01</span>
+        </header>
+
+        <div>
+          <label class="field-label">行程规划路线</label>
+          <div class="route-group">
+            <input type="text" class="custom-input" placeholder="出发城市 (如：上海)" value="上海" />
+            <span style="color: var(--text-light); font-size: 1.2rem;">➔</span>
+            <input type="text" class="custom-input" placeholder="目的地 (如：京都)" value="京都" />
+          </div>
+        </div>
+      </section>
+
+      <!-- 步骤 3：预算方案 -->
+      <section class="planner-card">
+        <header class="card-header">
+          <div>
+            <h2>设定舒适的预算区间</h2>
+            <p>选择旅行档位，模型将基于此权衡住宿星级与体验密度</p>
+          </div>
+          <span class="step-tag">Step 03</span>
+        </header>
+
+        <div class="tier-grid">
+          <div class="tier-card">
+            <span class="icon">🎒</span>
+            <span class="title">自然穷游</span>
+            <span class="price">¥300~800</span>
+            <span class="desc">青旅、地道小馆、公共交通</span>
+          </div>
+          <div class="tier-card selected">
+            <span class="icon">🌿</span>
+            <span class="title">舒适漫游</span>
+            <span class="price">¥800~1,500</span>
+            <span class="desc">精品酒店、均衡体验与交通</span>
+          </div>
+          <div class="tier-card">
+            <span class="icon">🏡</span>
+            <span class="title">品质度假</span>
+            <span class="price">¥1,500~3k</span>
+            <span class="desc">特色美宿、私人导览与料理</span>
+          </div>
+          <div class="tier-card">
+            <span class="icon">✨</span>
+            <span class="title">奢享私旅</span>
+            <span class="price">¥3k~6k+</span>
+            <span class="desc">高奢专车、私密定制行程</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 步骤 7：兴趣标签 (三态交互示范) -->
+      <section class="planner-card">
+        <header class="card-header">
+          <div>
+            <h2>挑选你向往的旅行体验</h2>
+            <p>点击切换倾向：偏好 (蓝) → 必须 (绿) → 排除 (红) → 重置</p>
+          </div>
+          <span class="step-tag">Step 07</span>
+        </header>
+
+        <div class="legend-bar">
+          <span class="legend-item"><span class="dot dot-prefer"></span>偏好</span>
+          <span class="legend-item"><span class="dot dot-require"></span>必须</span>
+          <span class="legend-item"><span class="dot dot-exclude"></span>排除</span>
+          <span style="margin-left: auto; font-size: 0.75rem; color: var(--text-light);">连按标签即可循环切换</span>
+        </div>
+
+        <div class="tag-container" id="tri-tags-group">
+          <button class="tri-tag" data-state="prefer">🍵 慢调茶室与咖啡馆</button>
+          <button class="tri-tag" data-state="require">⛩️ 历史古迹与神社</button>
+          <button class="tri-tag" data-state="exclude">🛍️ 集中购物与免税店</button>
+          <button class="tri-tag" data-state="none">📷 经典摄影机位</button>
+          <button class="tri-tag" data-state="none">🎨 美术馆与庭园</button>
+          <button class="tri-tag" data-state="none">♨️ 温泉体验</button>
+          <button class="tri-tag" data-state="none">🚶 城市漫步 (Citywalk)</button>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- 右侧方案动态预估与动作 -->
+    <aside class="right-summary">
+      <div class="summary-title">
+        <span>已收录偏好</span>
+        <span class="summary-chip-counter">3 项生效</span>
+      </div>
+
+      <div class="summary-block">
+        <div class="summary-metric">
+          <span>预计总预算</span>
+          <strong>¥2,400 ~ 4,500</strong>
+        </div>
+        <div class="summary-metric">
+          <span>推荐游玩天数</span>
+          <strong>3 ~ 4 天</strong>
+        </div>
+        <div class="summary-metric">
+          <span>日均步行强度</span>
+          <strong>轻度 (≤ 5km)</strong>
+        </div>
+      </div>
+
+      <button class="btn-submit">生成我的旅行信息图</button>
+      <p style="font-size: 0.75rem; color: var(--text-light); text-align: center; margin-top: 14px;">
+        云端将为你组合最适合的动线与每日节奏
+      </p>
+    </aside>
+
+  </main>
+
+  <script>
+    // 演示三态标签点击逻辑：none -> prefer -> require -> exclude -> none
+    const states = ['none', 'prefer', 'require', 'exclude'];
+    document.querySelectorAll('.tri-tag').forEach(tag => {
+      tag.addEventListener('click', () => {
+        const currentState = tag.getAttribute('data-state') || 'none';
+        const nextIndex = (states.indexOf(currentState) + 1) % states.length;
+        tag.setAttribute('data-state', states[nextIndex]);
+      });
+    });
+
+    // 档位选择逻辑
+    document.querySelectorAll('.tier-card').forEach(card => {
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.tier-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+      });
+    });
+  </script>
+</body>
+</html>

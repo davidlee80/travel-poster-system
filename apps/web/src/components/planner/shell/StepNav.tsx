@@ -38,6 +38,7 @@ export interface StepNavProps {
    * 以为必须填完它才能生成。
    */
   readonly planGenerated: boolean;
+  readonly entrySelected: boolean;
 }
 
 export function StepNav({
@@ -46,6 +47,7 @@ export function StepNav({
   onJump,
   open,
   planGenerated,
+  entrySelected,
 }: StepNavProps): React.ReactElement {
   return (
     <aside
@@ -55,17 +57,25 @@ export function StepNav({
     >
       <p className="planner-left__heading">这趟旅行的十个问题</p>
       <p className="planner-left__copy">按顺序回答，条件问题只在相关时出现。</p>
+      {!entrySelected && (
+        <p className="planner-left__copy" id="planner-entry-required">
+          请先在第 0 步选择一张卡片，解锁第 1～9 步。
+        </p>
+      )}
 
       <nav className="planner-steps">
         {NAV_STEPS.map((step) => {
           const state = snapshot.stepStates.get(step.step) ?? 'untouched';
           const label = STEP_STATE_LABEL[state];
+          const locked = step.step !== '00' && !entrySelected;
           return (
             <button
               key={step.step}
               type="button"
               className={`planner-step${step.step === activeStep ? ' planner-step--active' : ''}`}
               onClick={() => onJump(step.step)}
+              disabled={locked}
+              aria-describedby={locked ? 'planner-entry-required' : undefined}
               aria-current={step.step === activeStep ? 'step' : undefined}
             >
               <span className="planner-step__num" aria-hidden="true">

@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>旅行规划器 UI 视觉设计参数手册</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@600;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* 全局设计变量定义 */
+      --bg-canvas: #F8F7F4;
+      --bg-surface: #FFFFFF;
+      --bg-subtle: #F3EFEA;
+      --border-subtle: #E8E3DC;
+      --border-hover: #D5CFC6;
+      --text-main: #2A332C;
+      --text-muted: #667067;
+      --text-light: #949E95;
+      
+      --brand-primary: #3E6649;
+      --brand-primary-hover: #33553C;
+      --brand-surface: #EEF4F0;
+      
+      --state-prefer-bg: #EAF2F8;
+      --state-prefer-text: #225C7E;
+      --state-prefer-border: #BCD5E6;
+      
+      --state-require-bg: #EDF6EE;
+      --state-require-text: #245A34;
+      --state-require-border: #C2E2C8;
+      
+      --state-exclude-bg: #FAF0EE;
+      --state-exclude-text: #96423C;
+      --state-exclude-border: #ECCBC7;
+
+      --font-serif: "Noto Serif SC", serif;
+      --font-sans: "Noto Sans SC", -apple-system, sans-serif;
+      --font-num: "Plus Jakarta Sans", sans-serif;
+      --font-mono: "Fira Code", monospace;
+      
+      --shadow-card: 0 4px 24px -2px rgba(60, 65, 60, 0.05), 0 1px 3px 0 rgba(60, 65, 60, 0.03);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-canvas);
+      color: var(--text-main);
+      padding: 48px 32px 100px;
+      line-height: 1.6;
+    }
+
+    .spec-wrapper {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* 顶部标题栏 */
+    .spec-header {
+      margin-bottom: 40px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .spec-header h1 {
+      font-family: var(--font-serif);
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--brand-primary);
+      margin-bottom: 8px;
+    }
+    .spec-header p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    /* 模块区域划分 */
+    .spec-section {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      box-shadow: var(--shadow-card);
+      padding: 32px;
+      margin-bottom: 32px;
+    }
+    .spec-section-title {
+      font-family: var(--font-serif);
+      font-size: 1.25rem;
+      color: var(--text-main);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .spec-section-title::before {
+      content: "";
+      display: inline-block;
+      width: 4px;
+      height: 18px;
+      border-radius: 2px;
+      background-color: var(--brand-primary);
+    }
+
+    /* 色板网格 */
+    .palette-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .color-block {
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--bg-surface);
+    }
+    .color-swatch {
+      height: 64px;
+      width: 100%;
+    }
+    .color-info {
+      padding: 10px 12px;
+    }
+    .color-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+      display: block;
+      color: var(--text-main);
+    }
+    .color-hex {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* 组件与表格对比布局 */
+    .spec-row {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 32px;
+      padding: 24px 0;
+      border-top: 1px dashed var(--border-subtle);
+      align-items: center;
+    }
+    .spec-row:first-of-type {
+      border-top: none;
+      padding-top: 0;
+    }
+    .preview-box {
+      background: var(--bg-canvas);
+      padding: 24px;
+      border-radius: 16px;
+      border: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      min-height: 120px;
+    }
+
+    /* 参数表格 */
+    .param-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+    .param-table th, .param-table td {
+      padding: 10px 14px;
+      text-align: left;
+      vertical-align: middle;
+    }
+    .param-table th {
+      color: var(--text-muted);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 0.8rem;
+    }
+    .param-table td {
+      border-bottom: 1px solid var(--bg-subtle);
+    }
+    .param-table code {
+      font-family: var(--font-mono);
+      background: var(--bg-subtle);
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      color: var(--brand-primary);
+    }
+
+    /* 示例组件样式复刻 */
+    .demo-step-badge {
+      display: flex;
+      gap: 12px;
+    }
+    .badge-item {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-num);
+      font-weight: 600;
+      font-size: 0.85rem;
+    }
+    .badge-normal {
+      background: #EAE6DF;
+      color: var(--text-muted);
+    }
+    .badge-active {
+      background: var(--brand-primary);
+      color: #fff;
+    }
+
+    .demo-tag {
+      padding: 6px 14px;
+      border-radius: 30px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid transparent;
+    }
+    .tag-prefer {
+      background: var(--state-prefer-bg);
+      color: var(--state-prefer-text);
+      border-color: var(--state-prefer-border);
+    }
+    .tag-require {
+      background: var(--state-require-bg);
+      color: var(--state-require-text);
+      border-color: var(--state-require-border);
+    }
+    .tag-exclude {
+      background: var(--state-exclude-bg);
+      color: var(--state-exclude-text);
+      border-color: var(--state-exclude-border);
+      text-decoration: line-through;
+    }
+
+    .demo-btn-primary {
+      width: 180px;
+      height: 48px;
+      border-radius: 14px;
+      background: var(--brand-primary);
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 600;
+      border: none;
+      box-shadow: 0 4px 14px rgba(62, 102, 73, 0.25);
+      cursor: pointer;
+    }
+    .demo-tier-card {
+      width: 140px;
+      padding: 14px;
+      border-radius: 16px;
+      border: 1.5px solid var(--brand-primary);
+      background: var(--brand-surface);
+      text-align: left;
+    }
+    .demo-tier-price {
+      font-family: var(--font-num);
+      font-weight: 700;
+      color: var(--brand-primary);
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="spec-wrapper">
+    
+    <!-- 标头说明 -->
+    <header class="spec-header">
+      <h1>旅行规划器 · 设计参数直观查询手册</h1>
+      <p>面向舒适、低疲劳感、度假氛围的色彩与交互组件设计规范（Design Tokens）</p>
+    </header>
+
+    <!-- 色板规范 -->
+    <section class="spec-section">
+      <h2 class="spec-section-title">01. 核心调色板 (Color Tokens)</h2>
+      <div class="palette-grid">
+        <div class="color-block">
+          <div class="color-swatch" style="background: #F8F7F4;"></div>
+          <div class="color-info">
+            <span class="color-name">画布底色 Canvas</span>
+            <span class="color-hex">#F8F7F4</span>
+          </div>
+        </div>
+        <div class="color-block">
+          <div class="color-swatch" style="background: #3E6649;"></div>
+          <div class="color-info">
+            <span class="color-name">鼠尾草主绿 Brand</span>
+            <span class="color-hex">#3E6649</span>
+          </div>
+        </div>
+        <div class="color-block">
+          <div class="color-swatch" style="background: #EEF4F0;"></div>
+          <div class="color-info">
+            <span class="color-name">浅绿底色 Brand Soft</span>
+            <span class="color-hex">#EEF4F0</span>
+          </div>
+        </div>
+        <div class="color-block">
+          <div class="color-swatch" style="background: #2A332C;"></div>
+          <div class="color-info">
+            <span class="color-name">主文字 Text Main</span>
+            <span class="color-hex">#2A332C</span>
+          </div>
+        </div>
+        <div class="color-block">
+          <div class="color-swatch" style="background: #667067;"></div>
+          <div class="color-info">
+            <span class="color-name">次级文本 Muted</span>
+            <span class="color-hex">#667067</span>
+          </div>
+        </div>
+        <div class="color-block">
+          <div class="color-swatch" style="background: #E8E3DC;"></div>
+          <div class="color-info">
+            <span class="color-name">边框线条 Border</span>
+            <span class="color-hex">#E8E3DC</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 三态偏好标签 -->
+    <section class="spec-section">
+      <h2 class="spec-section-title">02. 三态偏好标签 (Tri-State Tags)</h2>
+      
+      <!-- 偏好 -->
+      <div class="spec-row">
+        <div class="preview-box">
+          <span class="demo-tag tag-prefer">偏好：包含早餐</span>
+        </div>
+        <table class="param-table">
+          <thead>
+            <tr><th>状态 / 属性</th><th>设计取值</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>背景颜色 (Background)</td><td><code>#EAF2F8</code></td><td>雾霾蓝底，柔和不抢眼</td></tr>
+            <tr><td>文字颜色 (Color)</td><td><code>#225C7E</code></td><td>深灰蓝，保持辨识度</td></tr>
+            <tr><td>边框 (Border)</td><td><code>1px solid #BCD5E6</code></td><td>浅蓝灰描边</td></tr>
+            <tr><td>规格 (Size)</td><td><code>padding: 8px 18px</code> / <code>radius: 30px</code></td><td>圆润胶囊形态</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 必须 -->
+      <div class="spec-row">
+        <div class="preview-box">
+          <span class="demo-tag tag-require">必须：独立卫浴</span>
+        </div>
+        <table class="param-table">
+          <thead>
+            <tr><th>状态 / 属性</th><th>设计取值</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>背景颜色 (Background)</td><td><code>#EDF6EE</code></td><td>淡竹青绿色</td></tr>
+            <tr><td>文字颜色 (Color)</td><td><code>#245A34</code></td><td>深松针绿，硬约束表达</td></tr>
+            <tr><td>边框 (Border)</td><td><code>1px solid #C2E2C8</code></td><td>青草绿描边</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 排除 -->
+      <div class="spec-row">
+        <div class="preview-box">
+          <span class="demo-tag tag-exclude">排除：合住多人间</span>
+        </div>
+        <table class="param-table">
+          <thead>
+            <tr><th>状态 / 属性</th><th>设计取值</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>背景颜色 (Background)</td><td><code>#FAF0EE</code></td><td>低饱和陶土浅粉/红</td></tr>
+            <tr><td>文字颜色 (Color)</td><td><code>#96423C</code></td><td>深豆沙红，去除危险警告感</td></tr>
+            <tr><td>修饰 (Decoration)</td><td><code>text-decoration: line-through</code></td><td>划除线增强语义</td></tr>
+            <tr><td>边框 (Border)</td><td><code>1px solid #ECCBC7</code></td><td>淡豆沙粉描边</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 导航与步骤指示器 -->
+    <section class="spec-section">
+      <h2 class="spec-section-title">03. 导航与步骤指示器 (Step Rail)</h2>
+      
+      <div class="spec-row">
+        <div class="preview-box">
+          <div class="demo-step-badge">
+            <span class="badge-item badge-normal">1</span>
+            <span class="badge-item badge-active">2</span>
+          </div>
+        </div>
+        <table class="param-table">
+          <thead>
+            <tr><th>元素 / 状态</th><th>设计取值</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>左侧面板容器</td><td><code>bg: rgba(255,255,255,0.7)</code> / <code>radius: 20px</code></td><td>半透毛玻璃浮板</td></tr>
+            <tr><td>未激活数字徽章</td><td><code>bg: #EAE6DF</code> / <code>color: #667067</code></td><td>低权重暖灰</td></tr>
+            <tr><td>激活数字徽章 (Active)</td><td><code>bg: #3E6649</code> / <code>color: #FFFFFF</code></td><td>主色高亮显示</td></tr>
+            <tr><td>选中步骤项整行</td><td><code>bg: #EEF4F0</code> / <code>color: #3E6649</code></td><td>极淡鼠尾草绿衬底</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 预算档位卡片与输入组件 -->
+    <section class="spec-section">
+      <h2 class="spec-section-title">04. 选项卡片与表单组件 (Cards & Inputs)</h2>
+      
+      <div class="spec-row">
+        <div class="preview-box">
+          <div class="demo-tier-card">
+            <div style="font-size: 20px; margin-bottom: 4px;">🌿</div>
+            <div style="font-weight: 600; font-size: 0.85rem;">舒适漫游</div>
+            <div class="demo-tier-price">¥800~1,500</div>
+          </div>
+        </div>
+        <table class="param-table">
+          <thead>
+            <tr><th>组件 / 交互状态</th><th>设计取值</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>常规状态卡片</td><td><code>bg: #F8F7F4</code> / <code>border: 1px solid #E8E3DC</code></td><td>微暖灰色内陷感</td></tr>
+            <tr><td>悬停状态 (Hover)</td><td><code>bg: #FFFFFF</code> / <code>translateY(-2px)</code></td><td>微浮起并点亮</td></tr>
+            <tr><td>选中状态 (Selected)</td><td><code>bg: #EEF4F0</code> / <code>border: 1.5px solid #3E6649</code></td><td>品牌绿聚焦边框</td></tr>
+            <tr><td>文本输入框默认</td><td><code>height: 48px</code> / <code>bg: #F8F7F4</code> / <code>radius: 14px</code></td><td>自然融入底色</td></tr>
+            <tr><td>输入框聚焦 (Focus)</td><td><code>bg: #FFF</code> / <code>box-shadow: 0 0 0 4px rgba(62,102,73,0.1)</code></td><td>微弱环状发光</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 核心按钮与投影 -->
+    <section class="spec-section">
+      <h2 class="spec-section-title">05. 核心行动按钮 (CTA Button)</h2>
+      
+      <div class="spec-row">
+        <div class="preview-box">
+          <button class="demo-btn-primary">生成旅行方案</button>
+        </div>
+        <table class="param-table">
+          <thead>
+            <tr><th>状态</th><th>设计取值</th><th>动效与体验细节</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>默认态 (Normal)</td><td><code>bg: #3E6649</code> / <code>color: #FFFFFF</code></td><td>圆角 <code>16px</code>，高度 <code>52px</code></td></tr>
+            <tr><td>默认投影 (Shadow)</td><td><code>0 4px 14px rgba(62, 102, 73, 0.25)</code></td><td>带有绿色调的柔和弥散阴影</td></tr>
+            <tr><td>悬停态 (Hover)</td><td><code>bg: #33553C</code> / <code>translateY(-1px)</code></td><td>颜色微深，微上浮</td></tr>
+            <tr><td>悬停投影 (Hover Shadow)</td><td><code>0 6px 20px rgba(62, 102, 73, 0.3)</code></td><td>阴影范围扩大增加层次</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+
+</body>
+</html>

@@ -237,6 +237,7 @@ export function StepPage({
               type="button"
               className="planner-button planner-button--primary"
               onClick={onNext}
+              disabled={isEntryStep && state.entryRoute === null}
             >
               {nextLabel ?? '下一步'}
             </button>
