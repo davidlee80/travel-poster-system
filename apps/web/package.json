@@ -7,8 +7,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
-    "dev": "node scripts/copy-fonts.mjs && next dev -p 3000",
-    "start": "next start -p 3000",
+    "dev": "node scripts/copy-fonts.mjs && next dev -p 8080",
+    "start": "next start -p 8080",
     "clean": "rimraf .next dist .turbo *.tsbuildinfo",
     "fonts:copy": "node scripts/copy-fonts.mjs"
   },

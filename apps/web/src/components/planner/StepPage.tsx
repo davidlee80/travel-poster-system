@@ -98,7 +98,7 @@ export function StepPage({
        * visibility 隐藏时掩盖问题。
        */
     >
-      <header className="planner-page-head">
+      <header className="planner-page-head" data-step={step}>
         <div className="planner-page-head__content">
           <div className="planner-page-head__eyebrow">
             {step} · {meta?.nav ?? ''}

@@ -795,6 +795,48 @@
   min-width: 0;
 }
 
+/*
+ * 第 0 步激活时：整个中栏用山水背景图。
+ *
+ * 用 `:has()` 而不是给 main 加 data 属性：DOM 不动，只改 CSS。
+ * 兼容性：Chrome/Edge 105+、Firefox 121+、Safari 15.4+，覆盖本项目目标浏览器。
+ *
+ * 参考稿（00-ref.html）的入口页就是整张山水图铺在中栏，进入第 1 步后回到
+ * 默认底色 —— 这正是 `:has()` 擅长的「按子代状态切父级样式」场景。
+ */
+.planner-main:has(> .planner-step-page[data-step='00'].planner-step-page--active) {
+  position: relative;
+  background: url('/images/step0/landscape.png') center 30% / cover no-repeat;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  padding: 24px;
+}
+
+/*
+ * 在第 0 步中栏上铺一层很轻的白遮罩，保证卡片与文字可读，
+ * 又不至于把整张山水图洗没（参考 00-ref.html 的 50% 白感）。
+ */
+.planner-main:has(> .planner-step-page[data-step='00'].planner-step-page--active)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(248,247,243,.55) 0%, rgba(248,247,243,.35) 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/*
+ * 内容（步骤页）必须高于遮罩层。
+ */
+.planner-main:has(> .planner-step-page[data-step='00'].planner-step-page--active)
+  > .planner-step-page[data-step='00'] {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
 .planner-intro {
   margin-bottom: 14px;
   padding: 21px 23px;
@@ -1184,6 +1226,67 @@
  * 卡片四组插画色（探索紫/假期橙/时间绿/计划红）沿用参考稿，
  * 页面大背景仍是 planner 的 --canvas —— 只有卡片这一层是参考稿的视觉。
  */
+
+/*
+ * 第 0 步页头：参考 00-ref.html —— 文字整体**居中**，
+ * 完全不同于第 1-9 步的「左对齐 + 右侧徽章」通用页头。
+ *
+ * 背景图在 `.planner-main` 上（整张中栏），这里只负责文字排版。
+ */
+.planner .planner-page-head[data-step='00'] {
+  position: relative;
+  background: transparent;
+  padding: 48px 32px 32px;
+  margin-bottom: 12px;
+  text-align: center;
+  /* 覆盖基类的 flex 布局（基类是 justify-content: space-between），
+   * 让内容自然堆叠居中。 */
+  display: block;
+}
+
+.planner .planner-page-head[data-step='00'] .planner-page-head__content {
+  /* 基类是 flex: 1，这里不需要 */
+  flex: none;
+}
+
+.planner .planner-page-head[data-step='00'] > * {
+  position: relative;
+  z-index: 1;
+}
+
+.planner .planner-page-head[data-step='00'] .planner-page-head__hero {
+  display: none;
+}
+
+.planner .planner-page-head[data-step='00'] .planner-page-head__eyebrow {
+  color: #3274d6;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.planner .planner-page-head[data-step='00'] .planner-page-head__title {
+  color: #172c47;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+.planner .planner-page-head[data-step='00'] .planner-page-head__desc {
+  color: #72859a;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  margin: 16px auto 0;
+  max-width: 32em;
+}
+
+.planner .planner-page-head[data-step='00'] .planner-page-head__badge {
+  display: none;
+}
 
 /* 本区块的参考稿文字色板（局部变量，不污染 .planner 其它部分） */
 .planner-step0 {
@@ -3023,6 +3126,15 @@
 
   .planner-page-head__title {
     font-size: clamp(22px, 3.2vw, 28px);
+  }
+
+  /* 第 0 步页头在移动端保持居中、收紧上下留白 */
+  .planner .planner-page-head[data-step='00'] {
+    padding: 32px 20px 24px;
+  }
+
+  .planner .planner-page-head[data-step='00'] .planner-page-head__title {
+    font-size: 26px;
   }
 
   .planner-block__title {
