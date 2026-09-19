@@ -9,15 +9,19 @@ import {
   asStringList,
   isToggleOn,
   partValue,
+  partValueByKey,
   partVisible,
+  partVisibleByKey,
   patchApiKey,
   patchPart,
+  patchPartByKey,
   patchToggle,
   staleCodes,
   truncated,
   withoutCodes,
 } from '@/lib/planner/field-io';
 import { FIELD_STATE_LABEL } from '@/lib/planner/field-state';
+import { isRouteFieldId, ROUTE_FIELDS } from '@/lib/planner/route-fields';
 import { readAnswer, type PlannerAction, type PlannerState } from '@/lib/planner/state';
 import type { PlannerSnapshot } from '@/lib/planner/step-state';
 import { isRequirementActive, TRIGGER_REASON } from '@/lib/planner/triggers';
@@ -61,6 +65,25 @@ export function FieldControl({
   registerField,
   slot,
 }: FieldControlProps): React.ReactElement {
+  /*
+   * 路线占位字段的分岔（第 1 步按路线定制，见 route-fields.ts）。
+   *
+   * `RT-*` 不是契约字段，`plannerField(fieldId)` 会 throw —— 因此整条
+   * 契约侧管道（触发原因 / 必填徽标 / 契约校验 / DevBadge）在这里就
+   * 让位给路线容器，而不是一路传下去再各自判空。
+   */
+  if (isRouteFieldId(fieldId)) {
+    const routeSpec = ROUTE_FIELDS[fieldId];
+    return (
+      <RouteFieldControl
+        spec={routeSpec}
+        state={state}
+        dispatch={dispatch}
+        registerField={registerField}
+      />
+    );
+  }
+
   const spec = plannerField(fieldId);
   const descriptor = FIELD_DESCRIPTORS[fieldId];
   const hideQuestion = descriptor.kind === 'parts' && descriptor.hide_question === true;
@@ -140,6 +163,110 @@ export function FieldControl({
       {state.devMode ? (
         <DevBadge fieldId={fieldId} fieldState={fieldState ?? 'hidden'} label={FIELD_STATE_LABEL} />
       ) : null}
+    </div>
+  );
+}
+
+// ── 路线占位字段（第 1 步按路线定制，见 route-fields.ts）──────────
+
+/**
+ * 占位字段的容器。与契约 `FieldControl` 同一张皮（`.planner-section` +
+ * `data-field`），但没有契约侧的四样：触发原因、必填徽标、契约校验、
+ * DevBadge —— 那四样的输入都是契约元数据表，占位字段不在其中。
+ * 选项文案也不走配置中心：路线问题还在迭代期，文案由注册表自带。
+ */
+function RouteFieldControl({
+  spec,
+  state,
+  dispatch,
+  registerField,
+}: {
+  readonly spec: (typeof ROUTE_FIELDS)[keyof typeof ROUTE_FIELDS];
+  readonly state: PlannerState;
+  readonly dispatch: (action: PlannerAction) => void;
+  readonly registerField: (fieldId: PlannerFieldId, node: HTMLElement | null) => void;
+}): React.ReactElement {
+  const labelOf = (value: string): string => spec.labels[value] ?? value;
+  return (
+    <div
+      className="planner-section"
+      data-field={spec.fieldId}
+      ref={(node) => registerField(spec.fieldId as PlannerFieldId, node)}
+      tabIndex={-1}
+    >
+      <div className="planner-section__head">
+        <strong className="planner-section__title" id={`${spec.fieldId}-title`}>
+          {spec.question}
+        </strong>
+      </div>
+      {spec.descriptor.parts
+        .filter((part) => partVisibleByKey(state.answers, spec.apiKey, part))
+        .map((part) => (
+          <RoutePartField
+            key={part.key ?? 'self'}
+            spec={spec}
+            part={part}
+            state={state}
+            dispatch={dispatch}
+            labelOf={labelOf}
+          />
+        ))}
+    </div>
+  );
+}
+
+function RoutePartField({
+  spec,
+  part,
+  state,
+  dispatch,
+  labelOf,
+}: {
+  readonly spec: (typeof ROUTE_FIELDS)[keyof typeof ROUTE_FIELDS];
+  readonly part: FieldPart;
+  readonly state: PlannerState;
+  readonly dispatch: (action: PlannerAction) => void;
+  readonly labelOf: (value: string) => string;
+}): React.ReactElement {
+  const controlId = `${spec.fieldId}-${part.key ?? 'self'}`;
+  const value = partValueByKey(state.answers, spec.apiKey, part);
+  const write = (next: unknown): void => {
+    dispatch({
+      type: 'answer',
+      /* 占位字段不进 touched 的契约类型，cast 与 registerField 同理 */
+      fieldId: spec.fieldId as PlannerFieldId,
+      patch: patchPartByKey(state.answers, spec.apiKey, part, next),
+    });
+  };
+
+  const body = (
+    <PrimitiveControl
+      part={part}
+      apiKey={spec.apiKey}
+      value={value}
+      onChange={write}
+      id={controlId}
+      options={part.options ?? []}
+      labelOf={labelOf}
+    />
+  );
+
+  if (part.key === null && part.label === undefined) {
+    return (
+      <div className="planner-field">
+        {body}
+        {part.hint === undefined ? null : <p className="planner-hint">{part.hint}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="planner-field">
+      <label className="planner-label" htmlFor={controlId}>
+        {part.label ?? ''}
+      </label>
+      {body}
+      {part.hint === undefined ? null : <p className="planner-hint">{part.hint}</p>}
     </div>
   );
 }

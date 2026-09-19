@@ -666,6 +666,17 @@ export function prepareProfile(
    */
   const clone = JSON.parse(JSON.stringify(answers)) as Mutable;
 
+  /*
+   * 剔除路线占位字段的隔离块（`route_explore` / `route_destination` /
+   * `route_time`，见 route-fields.ts）。它们只驱动第 1 步的前端展示，
+   * 不是契约 `planner_profile` 的 19 个块 —— 发出去会被
+   * `TravelRequestUISchema` 以未知键拒绝。
+   * 前缀匹配而不是列三个键：下一条路线加进来时不用回到这里。
+   */
+  for (const block of Object.keys(clone)) {
+    if (block.startsWith('route_')) delete clone[block];
+  }
+
   for (const rule of PRUNE_EMPTY) {
     const parent = at(clone, rule.path.slice(0, -1));
     const leaf = rule.path[rule.path.length - 1];

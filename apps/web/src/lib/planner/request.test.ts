@@ -215,6 +215,22 @@ describe('输出样式套件（R-85 P3）', () => {
 });
 
 describe('提交前的清洗与盖章', () => {
+  it('剔除路线占位字段的隔离块（route_* 不是契约块，发出会被 schema 拒）', () => {
+    const answers = prepareProfile(
+      {
+        trip: { origin: { text: '上海', country: '中国' } },
+        route_explore: { interests: ['relax'], duration: 'd4' },
+        route_time: { window: { mode: 'months', months: ['2026-10'] } },
+      } as never,
+      OPTIONS.today,
+      OPTIONS.now,
+    );
+    expect((answers as Record<string, unknown>)['route_explore']).toBeUndefined();
+    expect((answers as Record<string, unknown>)['route_time']).toBeUndefined();
+    /* 契约块原样保留 —— 剔除只该碰 route_* */
+    expect(answers.trip?.origin?.text).toBe('上海');
+  });
+
   it('剔掉空占位行', () => {
     const answers = prepareProfile(
       {

@@ -3,7 +3,8 @@
 import { PLANNER_STEPS, type PlannerFieldId, type PlannerStepId } from '@tps/schemas';
 
 import { Icon } from '@/components/Icon';
-import { routeAffectsStep, filterStep1Sections } from '@/lib/planner/entry-routes';
+import { routeAffectsStep, step1Head, step1Sections } from '@/lib/planner/entry-routes';
+import { isRouteFieldId } from '@/lib/planner/route-fields';
 import type { PlannerAction, PlannerState } from '@/lib/planner/state';
 import type { PlannerSnapshot } from '@/lib/planner/step-state';
 
@@ -78,14 +79,15 @@ export function StepPage({
   const isEntryStep = step === '00';
 
   /*
-   * 入口路线对第 1 步的区块过滤（见 entry-routes.ts）。
+   * 入口路线决定第 1 步的完整内容（区块表 + 页头文案，见 entry-routes.ts）。
    *
-   * 只在「这一步会被路线影响」且「已选路线」时过滤；未选路线
-   * （比如直接跳到第 1 步）显示全部区块 —— 那是兜底而不是常态。
+   * 只在「这一步会被路线影响」时按路线取内容；未选路线
+   * （比如直接跳到第 1 步）回落到契约区块表 —— 那是兜底而不是常态。
+   * `plan` 路线也由 `undefined` 回落到契约表（全量五区块，即现状）。
    */
-  const filteredSections = routeAffectsStep(step)
-    ? filterStep1Sections(state.entryRoute, sections)
-    : sections;
+  const routeAware = routeAffectsStep(step);
+  const filteredSections = routeAware ? step1Sections(state.entryRoute) : sections;
+  const head = routeAware ? step1Head(state.entryRoute) : null;
 
   return (
     <section
@@ -115,9 +117,9 @@ export function StepPage({
             </div>
           )}
           <h1 className="planner-page-head__title" id={`planner-step-title-${step}`}>
-            {meta?.title ?? ''}
+            {head?.title ?? meta?.title ?? ''}
           </h1>
-          <p className="planner-page-head__desc">{meta?.intro ?? ''}</p>
+          <p className="planner-page-head__desc">{head?.intro ?? meta?.intro ?? ''}</p>
         </div>
         <div className="planner-page-head__hero">
           <img
@@ -145,9 +147,18 @@ export function StepPage({
           </div>
 
           {(() => {
+        /*
+         * 占位字段（`RT-*`）恒显示：它们不是契约字段，进不了 `triggered`
+         * 那张表（触发引擎只遍历契约元数据）。对它们查 `triggered.has`
+         * 永远是 false，不过滤掉它们整组就没了。
+         * `hidden` / `slots` 的键是契约字面量，对占位字段查不到，
+         * `as PlannerFieldId` 只是满足索引类型，行为天然正确。
+         */
         const visibleSections = filteredSections.flatMap((section) => {
           const fields = section.fields.filter(
-            (fieldId) => triggered.has(fieldId) && !hidden.has(fieldId),
+            (fieldId) =>
+              isRouteFieldId(fieldId) ||
+              (triggered.has(fieldId as PlannerFieldId) && !hidden.has(fieldId as PlannerFieldId)),
           );
           return fields.length === 0 ? [] : [{ section, fields }];
         });
@@ -156,6 +167,7 @@ export function StepPage({
           layoutGroup?: PlannerSection['layoutGroup'];
           sections: typeof visibleSections;
         }[] = [];
+
         for (const item of visibleSections) {
           const last = groups[groups.length - 1];
           if (
@@ -201,12 +213,14 @@ export function StepPage({
             {fields.map((fieldId) => (
               <FieldControl
                 key={fieldId}
-                fieldId={fieldId}
+                fieldId={fieldId as PlannerFieldId}
                 state={state}
                 snapshot={snapshot}
                 dispatch={dispatch}
                 registerField={registerField}
-                {...(slots?.[fieldId] === undefined ? {} : { slot: slots[fieldId] })}
+                {...(slots?.[fieldId as PlannerFieldId] === undefined
+                  ? {}
+                  : { slot: slots[fieldId as PlannerFieldId] })}
               />
             ))}
             {step === '04' ? <Step4Decoration section={section} /> : null}
@@ -262,7 +276,7 @@ export function StepPage({
 function Step4Decoration({
   section,
 }: {
-  readonly section: PlannerSection;
+  readonly section: { readonly fields: readonly string[] };
 }): React.ReactElement | null {
   if (section.fields.includes('PV2-04-003')) {
     return (

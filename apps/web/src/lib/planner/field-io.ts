@@ -40,6 +40,17 @@ export function fieldValue(answers: PlannerProfileInput, fieldId: PlannerFieldId
 }
 
 /**
+ * 按 api_key 直接读值。
+ *
+ * 路线占位字段（`RT-*`，见 route-fields.ts）不是契约字段，
+ * 走不了 `plannerField()`，但它们只需要「按路径读」这一件事 ——
+ * 占位字段没有 `user_reported` / `enabled` 包装，直读即可。
+ */
+export function fieldValueByKey(answers: PlannerProfileInput, apiKey: string): unknown {
+  return readAnswer(answers, apiKey);
+}
+
+/**
  * 剥掉 `user_reported` 之后的值。部件的键相对于它。
  *
  * 非 `reported` 字段原样返回 —— 这样调用方不必先问「这个字段包了没包」。
@@ -58,6 +69,20 @@ export function partValue(
   part: FieldPart,
 ): unknown {
   const effective = effectiveValue(answers, fieldId);
+  if (part.key === null) return effective;
+  return asRecord(effective)?.[part.key];
+}
+
+/**
+ * 占位字段的部件读值。占位字段没有包装层，兄弟部件共享
+ * apiKey 指向的那个对象（如 `route_time.window.{mode,months,range}`）。
+ */
+export function partValueByKey(
+  answers: PlannerProfileInput,
+  apiKey: string,
+  part: FieldPart,
+): unknown {
+  const effective = fieldValueByKey(answers, apiKey);
   if (part.key === null) return effective;
   return asRecord(effective)?.[part.key];
 }
@@ -85,6 +110,19 @@ export function partVisible(
   return sibling === requires.value;
 }
 
+/** 占位字段的 `requires` 判定（同一逻辑，只是按 apiKey 读兄弟值） */
+export function partVisibleByKey(
+  answers: PlannerProfileInput,
+  apiKey: string,
+  part: FieldPart,
+): boolean {
+  const requires = part.requires;
+  if (requires === undefined) return true;
+  const sibling = asRecord(fieldValueByKey(answers, apiKey))?.[requires.key];
+  if (Array.isArray(sibling)) return sibling.includes(requires.value);
+  return sibling === requires.value;
+}
+
 // ── 写 ──────────────────────────────────────────────────────
 
 /**
@@ -108,6 +146,26 @@ function patchOf(apiKey: string, value: unknown): PlannerAnswerPatch {
 /** 按 api_key 直接覆写一个字段。计数器的 `truncates` 与投影清理用它 */
 export function patchApiKey(apiKey: string, value: unknown): PlannerAnswerPatch {
   return patchOf(apiKey, value);
+}
+
+/**
+ * 写占位字段的一个部件（按 apiKey，无包装层）。
+ *
+ * 兄弟部件共享 apiKey 指向的对象，与契约字段的多部件同形；
+ * 清空删键而不是写 undefined（见文件头）。
+ */
+export function patchPartByKey(
+  answers: PlannerProfileInput,
+  apiKey: string,
+  part: FieldPart,
+  value: unknown,
+): PlannerAnswerPatch {
+  if (part.key === null) return patchOf(apiKey, value);
+  const current = asRecord(fieldValueByKey(answers, apiKey)) ?? {};
+  const next: Record<string, unknown> = { ...current };
+  if (value === undefined) delete next[part.key];
+  else next[part.key] = value;
+  return patchOf(apiKey, next);
 }
 
 /** 整体覆写一个字段的值（`user_reported` 包装由本函数补上） */

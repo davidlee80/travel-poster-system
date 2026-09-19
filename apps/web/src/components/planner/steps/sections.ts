@@ -27,6 +27,12 @@ export interface PlannerSection {
   readonly title: string;
   /** 这一组为什么问。留空时不显示 —— 不是每组都需要一句解释 */
   readonly intro?: string;
+  /*
+   * 契约字段清单。第 1 步的路线定制内容（entry-routes.ts）会混入
+   * 占位字段（`RT-*`），但那是**另一张表**（`RouteSection`），不污染这里 ——
+   * 本表的元素保持在 76 字段字面量内，`sections.test.tsx` 的顺序断言
+   * 才有「漏一个字段编译就红」的约束力。
+   */
   readonly fields: readonly PlannerFieldId[];
   /** 区块图标（可选）。图标名来自 `@tps/icon-library`，如 'map' / 'calendar' / 'flag' */
   readonly icon?: string;
