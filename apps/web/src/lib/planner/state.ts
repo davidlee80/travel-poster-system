@@ -88,6 +88,15 @@ export interface PlannerState {
    * `null` = 还没进过第 0 步或没选。它不参与答案提交，仅驱动前端展示。
    */
   readonly entryRoute: EntryRoute | null;
+  /**
+   * 第 0 步的「下一步」是否已被点击。
+   *
+   * 与 `entryRoute` 分开记录：`entryRoute` 表达「选了哪张卡片」，
+   * `entryConfirmed` 表达「用户已经确认要进入第 1-9 步」。两者独立
+   * 是因为「改选卡片」**不**应该重置确认位 —— 用户在第 1 步之后回到
+   * 第 0 步改选卡片，左栏不应重新锁定（那样会丢失已填答案的上下文）。
+   */
+  readonly entryConfirmed: boolean;
 }
 
 export const INITIAL_PLANNER_STATE: PlannerState = {
@@ -98,6 +107,7 @@ export const INITIAL_PLANNER_STATE: PlannerState = {
   templateId: null,
   devMode: false,
   entryRoute: null,
+  entryConfirmed: false,
 };
 
 // ── 通用读取 ────────────────────────────────────────────────
@@ -201,6 +211,8 @@ export type PlannerAction =
   | { readonly type: 'goToStep'; readonly step: PlannerStepId }
   /** 第 0 步选中入口路线 */
   | { readonly type: 'setEntryRoute'; readonly route: EntryRoute }
+  /** 第 0 步点击「下一步」，确认进入主问卷 */
+  | { readonly type: 'confirmEntry' }
   /** 选输出样式套件（R-85 P3）。`null` = 改回「用默认」 */
   | { readonly type: 'setTemplate'; readonly templateId: TemplateId | null }
   | { readonly type: 'setDevMode'; readonly on: boolean }
@@ -259,11 +271,16 @@ export function plannerReducer(state: PlannerState, action: PlannerAction): Plan
     }
 
     case 'goToStep':
-      if (action.step !== '00' && state.entryRoute === null) return state;
+      if (action.step !== '00' && !state.entryConfirmed) return state;
       return { ...state, activeStep: action.step };
 
     case 'setEntryRoute':
       return { ...state, entryRoute: action.route };
+
+    case 'confirmEntry':
+      /* 没选卡片时 confirm 无效 —— 防御 UI 层 disabled 失效的情况 */
+      if (state.entryRoute === null) return state;
+      return { ...state, entryConfirmed: true };
 
     case 'setTemplate':
       return { ...state, templateId: action.templateId };
@@ -272,9 +289,14 @@ export function plannerReducer(state: PlannerState, action: PlannerAction): Plan
       return { ...state, devMode: action.on };
 
     case 'restore':
-      return action.state.entryRoute === null
-        ? { ...action.state, activeStep: '00' }
-        : action.state;
+      /*
+       * 未确认的草稿强制回到第 0 步：用户还没走过「选卡片 + 点下一步」，
+       * 直接扔到第 3 步会让他们面对一个不知从何而来的表单。
+       * 已确认的草稿原样还原（包括 activeStep）。
+       */
+      return action.state.entryConfirmed
+        ? action.state
+        : { ...action.state, activeStep: '00' };
 
     case 'reset':
       return INITIAL_PLANNER_STATE;

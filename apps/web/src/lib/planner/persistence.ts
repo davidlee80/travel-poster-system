@@ -65,6 +65,14 @@ interface StoredDraft {
    * 同 `templateId`，缺失时回退 null，不升 DRAFT_VERSION。
    */
   readonly entryRoute?: string | null;
+  /**
+   * 第 0 步「下一步」是否已点击（前端本地状态，不进契约）。
+   * 同 `entryRoute`，缺失时回退 false，不升 DRAFT_VERSION。
+   *
+   * 回退 false 的含义是「刷新后需重新点一次下一步」—— 这是设计意图：
+   * 防止旧草稿被无意沿用。
+   */
+  readonly entryConfirmed?: boolean;
 }
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
@@ -103,6 +111,7 @@ export function saveDraft(state: PlannerState, now: string): boolean {
     activeStep: state.activeStep,
     templateId: state.templateId,
     entryRoute: state.entryRoute,
+    entryConfirmed: state.entryConfirmed,
   };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
@@ -182,6 +191,12 @@ export function loadDraft(): PlannerState | null {
       ? (draft.entryRoute as EntryRoute)
       : null;
 
+  /*
+   * 旧草稿缺这个键时落到 false：刷新后需重新点一次「下一步」，
+   * 防止旧草稿被无意沿用。这是产品决策而不是缺陷。
+   */
+  const entryConfirmed = draft.entryConfirmed === true;
+
   return {
     ...INITIAL_PLANNER_STATE,
     answers: migrateAnswers(draft.answers, draft.version),
@@ -190,6 +205,7 @@ export function loadDraft(): PlannerState | null {
     activeStep,
     templateId,
     entryRoute,
+    entryConfirmed,
   };
 }
 

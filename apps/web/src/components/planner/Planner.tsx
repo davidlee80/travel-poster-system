@@ -225,6 +225,13 @@ export function Planner(): React.ReactElement {
   /** 下一步前只校验当前页；发现问题时留在本页并定位到第一项。 */
   const advanceFromStep = useCallback(
     (step: PlannerStepId, next: PlannerStepId) => {
+      /*
+       * 第 0 步在 blockers 校验前先确认入口 —— 它没有契约字段，blockers
+       * 永远为空，顺序不影响行为；放前面让「confirmEntry」的意图更明显。
+       */
+      if (step === '00') {
+        dispatch({ type: 'confirmEntry' });
+      }
       const firstIssue = snapshot.blockers.find(
         (fieldId) => PLANNER_FIELDS.find((field) => field.field_id === fieldId)?.step === step,
       );
@@ -444,7 +451,7 @@ export function Planner(): React.ReactElement {
           onJump={goToStep}
           open={menuOpen}
           planGenerated={planId !== null}
-          entrySelected={state.entryRoute !== null}
+          entrySelected={state.entryConfirmed}
         />
 
         <main className="planner-main">

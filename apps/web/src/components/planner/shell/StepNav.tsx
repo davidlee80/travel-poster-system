@@ -59,7 +59,7 @@ export function StepNav({
       <p className="planner-left__copy">按顺序回答，条件问题只在相关时出现。</p>
       {!entrySelected && (
         <p className="planner-left__copy" id="planner-entry-required">
-          请先在第 0 步选择一张卡片，解锁第 1～9 步。
+          请先选一张卡片并点击「下一步」，解锁第 1～9 步。
         </p>
       )}
 

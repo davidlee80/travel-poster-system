@@ -100,9 +100,20 @@ export function StepPage({
     >
       <header className="planner-page-head" data-step={step}>
         <div className="planner-page-head__content">
-          <div className="planner-page-head__eyebrow">
-            {step} · {meta?.nav ?? ''}
-          </div>
+          {isEntryStep ? (
+            /*
+             * 第 0 步是入口页，参考 00-ref.html：没有「00 · 你从这里开始」
+             * 这种步骤指示 eyebrow，只有一行英文 eyebrow。其余步骤沿用
+             * 「NN · 导航名」的格式。
+             */
+            <div className="planner-page-head__eyebrow">
+              Every journey starts somewhere
+            </div>
+          ) : (
+            <div className="planner-page-head__eyebrow">
+              {step} · {meta?.nav ?? ''}
+            </div>
+          )}
           <h1 className="planner-page-head__title" id={`planner-step-title-${step}`}>
             {meta?.title ?? ''}
           </h1>

@@ -1232,6 +1232,8 @@
  * 完全不同于第 1-9 步的「左对齐 + 右侧徽章」通用页头。
  *
  * 背景图在 `.planner-main` 上（整张中栏），这里只负责文字排版。
+ * 字体也独立于第 1-9 步的衬线大标 —— 入口页用无衬线黑体，
+ * 传达「轻松开始」而不是「认真填表」的气质。
  */
 .planner .planner-page-head[data-step='00'] {
   position: relative;
@@ -1260,6 +1262,7 @@
 
 .planner .planner-page-head[data-step='00'] .planner-page-head__eyebrow {
   color: #3274d6;
+  font-family: var(--tps-font-sans, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.24em;
@@ -1269,6 +1272,8 @@
 
 .planner .planner-page-head[data-step='00'] .planner-page-head__title {
   color: #172c47;
+  /* 覆盖基类的 var(--tps-font-serif) —— 第 0 步参考稿就是无衬线 */
+  font-family: var(--tps-font-sans, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif);
   font-size: 32px;
   font-weight: 800;
   line-height: 1.4;
@@ -1278,6 +1283,7 @@
 
 .planner .planner-page-head[data-step='00'] .planner-page-head__desc {
   color: #72859a;
+  font-family: var(--tps-font-sans, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif);
   font-size: 14px;
   letter-spacing: 0.08em;
   margin: 16px auto 0;
